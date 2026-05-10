@@ -46,6 +46,7 @@ app.post("/:workspace/mcp", async (c) => {
   const verify = c.env.VERIFIER_URL ? httpVerifyClient(c.env.VERIFIER_URL) : undefined;
   const response = await handleMcp(body, ctx, {
     audience,
+    deps: { databaseUrl: c.env.DATABASE_URL },
     ...(verify ? { verify } : {}),
   });
   return c.json(response);

@@ -1,5 +1,5 @@
 import type { AuthContext } from "./auth.js";
-import { listTools, registry } from "./tools.js";
+import { listTools, registry, type ToolDeps } from "./tools.js";
 import type { VerifyClient } from "./verify-client.js";
 
 type JsonRpcRequest = {
@@ -36,6 +36,7 @@ const err = (
 export type HandleOptions = {
   audience: string;
   verify?: VerifyClient;
+  deps: ToolDeps;
 };
 
 export const handleMcp = async (
@@ -86,7 +87,7 @@ export const handleMcp = async (
       }
 
       try {
-        const result = await tool.handler(args, ctx);
+        const result = await tool.handler(args, ctx, opts.deps);
         return ok(id, result);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "tool failure";
