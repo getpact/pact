@@ -9,7 +9,7 @@ import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.j
 import { exchangeGoogleCode } from "./google.js";
 import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
-import { databaseRateLimiter } from "./rate-limit.js";
+import { databaseRateLimiter, sweepExpiredRateBuckets } from "./rate-limit.js";
 import { createWorkspace } from "./workspace.js";
 
 export const app = new Hono<{ Bindings: Env }>();
@@ -190,6 +190,7 @@ export const rotateAllStale = async (
 ): Promise<{
   jwt: { rotated: number; errors: number };
   audit: { rotated: number; errors: number };
+  rateBucketsSwept: number;
 }> => {
   const rawMek = decodeMek(env);
   const db = createClient(env.DATABASE_URL);
@@ -207,7 +208,8 @@ export const rotateAllStale = async (
     AUDIT_KEY_MAX_AGE_SECONDS,
     VERIFICATION_GRACE_SECONDS,
   );
-  return { jwt, audit };
+  const rateBucketsSwept = await sweepExpiredRateBuckets(db);
+  return { jwt, audit, rateBucketsSwept };
 };
 
 export default app;

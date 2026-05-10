@@ -1,8 +1,15 @@
-import { createClient } from "@getpact/db";
+import { createClient, type DbClient } from "@getpact/db";
 import type { RateLimiter, RateLimitResult } from "@getpact/ratelimit";
 import { sql } from "drizzle-orm";
 
 const dbLimiters = new Map<string, RateLimiter>();
+
+export const sweepExpiredRateBuckets = async (db: DbClient): Promise<number> => {
+  const rows = (await db.execute(
+    sql`DELETE FROM rate_limit_buckets WHERE reset_at < NOW() - INTERVAL '1 hour' RETURNING key`,
+  )) as Array<{ key: string }>;
+  return rows.length;
+};
 
 export const databaseRateLimiter = (databaseUrl: string): RateLimiter => {
   const cached = dbLimiters.get(databaseUrl);
