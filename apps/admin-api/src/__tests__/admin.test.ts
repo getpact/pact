@@ -1,9 +1,10 @@
 import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
-import { createClient } from "@getpact/db";
-import { workspaces } from "@getpact/db/schema";
-import { eq } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { createClient, withWorkspace } from "@getpact/db";
+import { auditEvents, workspaces } from "@getpact/db/schema";
+import { and, eq } from "drizzle-orm";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
+import type { KVNamespace } from "../cache.js";
 import app from "../index.js";
 
 const url = process.env.DATABASE_URL;
@@ -75,7 +76,7 @@ run("admin api", () => {
     token: string,
     method: "GET" | "POST",
     body: unknown,
-    env: { DATABASE_URL: string },
+    env: Record<string, unknown>,
   ) => {
     const init: RequestInit = {
       method,
@@ -90,7 +91,7 @@ run("admin api", () => {
     const res = await app.request(
       `/v1/workspaces/${"00000000-0000-0000-0000-000000000000"}/users`,
       { method: "GET" },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     expect(res.status).toBe(401);
   });
@@ -102,7 +103,7 @@ run("admin api", () => {
       token,
       "POST",
       { email: "BOB@example.com", name: "Bob" },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     expect(create.status).toBe(201);
     const createdUser = (await create.json()) as { user: { id: string; email: string } };
@@ -113,7 +114,7 @@ run("admin api", () => {
       token,
       "GET",
       undefined,
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     const body = (await list.json()) as { users: Array<{ email: string }> };
     const emails = body.users.map((u) => u.email);
@@ -128,7 +129,7 @@ run("admin api", () => {
       token,
       "POST",
       { email: "carol@example.com" },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     const user = ((await userRes.json()) as { user: { id: string } }).user;
 
@@ -137,7 +138,7 @@ run("admin api", () => {
       token,
       "POST",
       { name: "eng" },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     const group = ((await groupRes.json()) as { group: { id: string } }).group;
 
@@ -146,7 +147,7 @@ run("admin api", () => {
       token,
       "POST",
       { userId: user.id },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     expect(memberRes.status).toBe(201);
   });
@@ -161,7 +162,7 @@ run("admin api", () => {
       {
         body: { rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }] },
       },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     expect(v1.status).toBe(201);
     const a = (await v1.json()) as { policy: { version: number } };
@@ -176,7 +177,7 @@ run("admin api", () => {
           rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow", action: "read" }],
         },
       },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     const b = (await v2.json()) as { policy: { version: number } };
     expect(b.policy.version).toBe(2);
@@ -186,7 +187,7 @@ run("admin api", () => {
       token,
       "GET",
       undefined,
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     const listed = (await list.json()) as {
       policies: Array<{ version: number; replacedAt: string | null }>;
@@ -203,9 +204,57 @@ run("admin api", () => {
       token,
       "POST",
       { jti: "test-jti-123", reason: "incident" },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     expect(res.status).toBe(201);
+  });
+
+  it("emits an audit event when a user is created", async () => {
+    const { env, created, token } = await setup();
+    await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/users`,
+      token,
+      "POST",
+      { email: "audit-target@example.com" },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+    );
+    const events = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.workspaceId, created.workspaceId),
+            eq(auditEvents.action, "admin.user.created"),
+          ),
+        ),
+    );
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[0]?.actorKind).toBe("admin");
+    expect(events[0]?.decision).toBe("allow");
+  });
+
+  it("busts the kv revocation cache when a jti is revoked", async () => {
+    const { env, created, token } = await setup();
+    const putMock = vi.fn(async () => {});
+    const kv: KVNamespace = { put: putMock };
+
+    const res = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/revocations`,
+      token,
+      "POST",
+      { jti: "kv-bust-jti-1", reason: "key leak" },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: env.MEK,
+        ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+        REVOCATION_CACHE: kv,
+      },
+    );
+    expect(res.status).toBe(201);
+    expect(putMock).toHaveBeenCalledWith(`rev:${created.workspaceId}:kv-bust-jti-1`, "revoked", {
+      expirationTtl: 60,
+    });
   });
 
   it("rejects invalid policy bodies", async () => {
@@ -215,7 +264,7 @@ run("admin api", () => {
       token,
       "POST",
       { body: { rules: "not-an-array" } },
-      { DATABASE_URL: env.DATABASE_URL, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     expect(res.status).toBe(400);
   });
