@@ -174,3 +174,62 @@ export type RevokedJti = typeof revokedJtis.$inferSelect;
 export type NewRevokedJti = typeof revokedJtis.$inferInsert;
 export type Invite = typeof invites.$inferSelect;
 export type NewInvite = typeof invites.$inferInsert;
+
+export const vaultSecrets = pgTable(
+  "vault_secrets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    target: text("target").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    dekCiphertext: text("dek_ciphertext").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("vault_secrets_workspace_kind_target_idx").on(t.workspaceId, t.kind, t.target),
+  ],
+);
+
+export const adapterConfigs = pgTable(
+  "adapter_configs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    config: jsonb("config").notNull(),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("adapter_configs_workspace_kind_idx").on(t.workspaceId, t.kind)],
+);
+
+export const brains = pgTable(
+  "brains",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    baseUrl: text("base_url").notNull(),
+    authScheme: text("auth_scheme").notNull(),
+    scopeInjectionTemplate: jsonb("scope_injection_template").notNull(),
+    responseFilter: jsonb("response_filter"),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("brains_workspace_idx").on(t.workspaceId)],
+);
+
+export type VaultSecret = typeof vaultSecrets.$inferSelect;
+export type NewVaultSecret = typeof vaultSecrets.$inferInsert;
+export type AdapterConfig = typeof adapterConfigs.$inferSelect;
+export type NewAdapterConfig = typeof adapterConfigs.$inferInsert;
+export type Brain = typeof brains.$inferSelect;
+export type NewBrain = typeof brains.$inferInsert;
