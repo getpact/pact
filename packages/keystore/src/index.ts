@@ -13,7 +13,7 @@ import {
 } from "@getpact/crypto";
 import type { DbClient, Tx } from "@getpact/db";
 import { schema, withWorkspace } from "@getpact/db";
-import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 
 export type SigningKeyKind = "jwt" | "audit";
 
@@ -187,24 +187,37 @@ export const findStaleSigningKeys = async (
   kind: SigningKeyKind,
   maxAgeSeconds: number,
 ): Promise<StaleSigningKey[]> => {
-  const rows = (await db.execute(
-    sql`SELECT id, workspace_id, kind, created_at
-        FROM workspace_signing_keys
-        WHERE kind = ${kind}
-          AND valid_for_signing_until IS NULL
-          AND created_at < NOW() - (${maxAgeSeconds} || ' seconds')::interval`,
-  )) as unknown as Array<{
-    id: string;
-    workspace_id: string;
-    kind: SigningKeyKind;
-    created_at: Date;
-  }>;
-  return rows.map((r) => ({
-    workspaceId: r.workspace_id,
-    keyId: r.id,
-    kind: r.kind,
-    createdAt: r.created_at,
-  }));
+  const workspaceRows = await db.select({ id: schema.workspaces.id }).from(schema.workspaces);
+  const stale: StaleSigningKey[] = [];
+
+  for (const workspace of workspaceRows) {
+    const rows = (await withWorkspace(db, workspace.id, (tx) =>
+      tx.execute(
+        sql`SELECT id, workspace_id, kind, created_at
+            FROM workspace_signing_keys
+            WHERE workspace_id = ${workspace.id}
+              AND kind = ${kind}
+              AND valid_for_signing_until IS NULL
+              AND created_at < NOW() - (${maxAgeSeconds} || ' seconds')::interval`,
+      ),
+    )) as unknown as Array<{
+      id: string;
+      workspace_id: string;
+      kind: SigningKeyKind;
+      created_at: Date;
+    }>;
+
+    stale.push(
+      ...rows.map((r) => ({
+        workspaceId: r.workspace_id,
+        keyId: r.id,
+        kind: r.kind,
+        createdAt: r.created_at,
+      })),
+    );
+  }
+
+  return stale;
 };
 
 export type RotateStaleResult = {
@@ -219,7 +232,6 @@ export const rotateStaleKeys = async (
   maxAgeSeconds: number,
   graceSeconds?: number,
 ): Promise<RotateStaleResult> => {
-  void lt;
   const stale = await findStaleSigningKeys(db, kind, maxAgeSeconds);
   let rotated = 0;
   let errors = 0;
