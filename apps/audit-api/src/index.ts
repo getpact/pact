@@ -1,8 +1,8 @@
 import { PactError, securityHeaders } from "@getpact/core";
 import { createClient, withWorkspace } from "@getpact/db";
-import { auditChainState, workspaceSigningKeys, workspaces } from "@getpact/db/schema";
+import { auditChainState, workspaces } from "@getpact/db/schema";
 import { createLogger, requestLogger } from "@getpact/logger";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -92,38 +92,6 @@ app.get("/v1/workspaces/:id/audit/events", async (c) => {
     }),
   );
   return c.json(out);
-});
-
-app.get("/v1/workspaces/:id/audit/keys", async (c) => {
-  const workspaceId = c.req.param("id");
-  const ctx = await auth(c, workspaceId);
-  if (!isAuth(ctx)) return ctx;
-
-  const db = createClient(c.env.DATABASE_URL);
-  const rows = await withWorkspace(db, workspaceId, (tx) =>
-    tx
-      .select({
-        id: workspaceSigningKeys.id,
-        publicKeySpki: workspaceSigningKeys.publicKeySpki,
-        createdAt: workspaceSigningKeys.createdAt,
-        validForVerificationUntil: workspaceSigningKeys.validForVerificationUntil,
-      })
-      .from(workspaceSigningKeys)
-      .where(
-        and(
-          eq(workspaceSigningKeys.workspaceId, workspaceId),
-          eq(workspaceSigningKeys.kind, "audit"),
-        ),
-      ),
-  );
-  return c.json({
-    keys: rows.map((r) => ({
-      id: r.id,
-      publicKeySpki: r.publicKeySpki,
-      createdAt: r.createdAt.toISOString(),
-      validForVerificationUntil: r.validForVerificationUntil?.toISOString() ?? null,
-    })),
-  });
 });
 
 app.get("/v1/workspaces/:id/audit/workspace", async (c) => {
