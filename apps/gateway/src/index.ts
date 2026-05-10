@@ -4,8 +4,10 @@ import {
   isUuid,
   securityHeaders,
 } from "@getpact/core";
+import { fromBase64 } from "@getpact/crypto";
 import { createClient, schema, withWorkspace } from "@getpact/db";
 import { createLogger, requestLogger } from "@getpact/logger";
+import { loadSecretString } from "@getpact/vault";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -294,13 +296,45 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     if (failed) return failed;
     return c.json({ error: "not_found", message: "brain not found" }, 404);
   }
-  if (brain.authScheme !== "none") {
+  let brainBearerToken: string | null = null;
+  if (brain.authScheme === "bearer") {
+    if (!c.env.MEK) {
+      const failed = auditFailure(await audit({ decision: "deny", outcome: "mek_not_configured" }));
+      if (failed) return failed;
+      return c.json({ error: "misconfigured", message: "gateway MEK not configured" }, 500);
+    }
+    const rawMek = fromBase64(c.env.MEK);
+    brainBearerToken = await withWorkspace(db, workspaceId, (tx) =>
+      loadSecretString(tx, rawMek, {
+        workspaceId,
+        kind: "brain_credential",
+        target: brainKind,
+      }),
+    );
+    if (!brainBearerToken) {
+      const failed = auditFailure(
+        await audit({ decision: "deny", outcome: "brain_credential_missing" }),
+      );
+      if (failed) return failed;
+      return c.json({ error: "credential_missing", message: "brain credential not in vault" }, 500);
+    }
+    if (/[\r\n\t]/.test(brainBearerToken)) {
+      const failed = auditFailure(
+        await audit({ decision: "deny", outcome: "brain_credential_invalid" }),
+      );
+      if (failed) return failed;
+      return c.json(
+        { error: "credential_invalid", message: "brain credential is not safe to forward" },
+        500,
+      );
+    }
+  } else if (brain.authScheme !== "none") {
     const failed = auditFailure(
       await audit({ decision: "deny", outcome: "unsupported_auth_scheme" }),
     );
     if (failed) return failed;
     return c.json(
-      { error: "not_implemented", message: "gateway brain auth is not implemented" },
+      { error: "not_implemented", message: "gateway brain auth scheme not implemented" },
       501,
     );
   }
@@ -352,9 +386,11 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   const controller = new AbortController();
   const timeoutMs = upstreamTimeout(c.env);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const outboundHeaders = forwardedRequestHeaders(c.req.raw.headers);
+  if (brainBearerToken) outboundHeaders.set("authorization", `Bearer ${brainBearerToken}`);
   const init: RequestInit = {
     method: c.req.method,
-    headers: forwardedRequestHeaders(c.req.raw.headers),
+    headers: outboundHeaders,
     redirect: "manual",
     signal: controller.signal,
   };

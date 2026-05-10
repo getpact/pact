@@ -8,6 +8,7 @@ import {
   securityHeaders,
   ValidationError,
 } from "@getpact/core";
+import { fromBase64 } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import {
   brains,
@@ -20,6 +21,7 @@ import {
 } from "@getpact/db/schema";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { tryParsePolicy } from "@getpact/policy";
+import { storeSecret } from "@getpact/vault";
 import { and, desc, eq, max, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -417,6 +419,55 @@ app.delete("/v1/workspaces/:id/brains/:brainId", async (c) => {
   }
   await audit(c, ctx, "admin.brain.deleted", { brainId, kind: removed[0]?.kind });
   return c.json({ ok: true });
+});
+
+app.put("/v1/workspaces/:id/brains/:brainId/credential", async (c) => {
+  const workspaceId = c.req.param("id");
+  const brainId = c.req.param("brainId");
+  const ctx = await auth(c, workspaceId);
+  if (!isContext(ctx)) return ctx;
+
+  try {
+    const body = await c.req.json<{ token: string }>();
+    if (!body || typeof body.token !== "string" || body.token.length === 0) {
+      throw new ValidationError("token required");
+    }
+    if (/[\r\n\t]/.test(body.token)) {
+      throw new ValidationError("token contains illegal whitespace");
+    }
+    if (body.token.length > 4096) {
+      throw new ValidationError("token too long");
+    }
+
+    const db = createClient(c.env.DATABASE_URL);
+    const rawMek = fromBase64(c.env.MEK);
+    const [brainRow] = await withWorkspace(db, workspaceId, (tx) =>
+      tx
+        .select({ kind: brains.kind, authScheme: brains.authScheme })
+        .from(brains)
+        .where(and(eq(brains.workspaceId, workspaceId), eq(brains.id, brainId)))
+        .limit(1),
+    );
+    if (!brainRow) return c.json({ error: "not_found", message: "brain not found" }, 404);
+    if (brainRow.authScheme !== "bearer") {
+      throw new ValidationError("brain authScheme must be bearer to store credential");
+    }
+    await withWorkspace(db, workspaceId, (tx) =>
+      storeSecret(tx, rawMek, {
+        workspaceId,
+        kind: "brain_credential",
+        target: brainRow.kind,
+        plaintext: body.token,
+      }),
+    );
+    await audit(c, ctx, "admin.brain.credential.set", { brainId, kind: brainRow.kind });
+    return c.json({ ok: true });
+  } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400 | 404);
+    }
+    throw e;
+  }
 });
 
 export default app;

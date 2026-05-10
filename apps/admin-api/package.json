@@ -17,6 +17,7 @@
     "@getpact/db": "workspace:*",
     "@getpact/keystore": "workspace:*",
     "@getpact/logger": "workspace:*",
+    "@getpact/vault": "workspace:*",
     "@getpact/policy": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",

@@ -50,6 +50,9 @@ importers:
       '@getpact/policy':
         specifier: workspace:*
         version: link:../../packages/policy
+      '@getpact/vault':
+        specifier: workspace:*
+        version: link:../../packages/vault
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@cloudflare/workers-types@4.20260509.1)(postgres@3.4.9)
@@ -139,6 +142,9 @@ importers:
       '@getpact/ratelimit':
         specifier: workspace:*
         version: link:../../packages/ratelimit
+      '@getpact/vault':
+        specifier: workspace:*
+        version: link:../../packages/vault
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@cloudflare/workers-types@4.20260509.1)(postgres@3.4.9)
