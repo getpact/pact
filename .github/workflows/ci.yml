@@ -25,7 +25,7 @@ jobs:
     env:
       DATABASE_URL: postgres://pact:pact@localhost:5432/pact
       RLS_TEST_DB: postgres://pact_app:pact_app@localhost:5432/pact
-      PG_POOL_MAX: "2"
+      PG_POOL_MAX: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
