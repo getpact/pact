@@ -4,7 +4,7 @@ import { policies, revokedJtis } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
 import { evaluate, type Policy, type TokenClaims } from "@getpact/policy";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { decodeJwt } from "jose";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 
 export type VerifyInput = {
   token: string;
@@ -38,25 +38,30 @@ export const verifyAction = async (
 
   const db = createClient(databaseUrl);
 
+  let kid: string | undefined;
+  try {
+    kid = decodeProtectedHeader(input.token).kid;
+  } catch {
+    return { allow: false, reasons: ["malformed token header"] };
+  }
+  if (!kid) {
+    return { allow: false, reasons: ["missing kid"] };
+  }
+
   const keys = await withWorkspace(db, workspaceId, (tx) =>
     listVerifyingKeys(tx, workspaceId, "jwt"),
   );
-
-  let verified = false;
-  for (const k of keys) {
-    try {
-      await verifyJwt(input.token, {
-        publicKey: k.publicKey,
-        issuer,
-        audience: input.audience,
-      });
-      verified = true;
-      break;
-    } catch {
-      // try next key
-    }
+  const matched = keys.find((k) => k.id === kid);
+  if (!matched) {
+    return { allow: false, reasons: ["unknown kid"] };
   }
-  if (!verified) {
+  try {
+    await verifyJwt(input.token, {
+      publicKey: matched.publicKey,
+      issuer,
+      audience: input.audience,
+    });
+  } catch {
     return { allow: false, reasons: ["signature invalid"] };
   }
 
