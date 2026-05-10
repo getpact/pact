@@ -6,7 +6,18 @@
       "outputs": ["dist/**"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": [
+        "DATABASE_URL",
+        "RLS_TEST_DB",
+        "MEK",
+        "ENVIRONMENT",
+        "ISSUER_BASE_URL",
+        "ADMIN_AUDIENCE",
+        "AUDIT_AUDIENCE",
+        "MCP_AUDIENCE",
+        "GATEWAY_AUDIENCE"
+      ]
     },
     "typecheck": {
       "dependsOn": ["^build"]
