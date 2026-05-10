@@ -105,6 +105,12 @@ app.post("/v1/dev/issue", async (c) => {
   if (!isDevIssueEnabled(c.env)) {
     return c.json({ error: "not_found" }, 404);
   }
+  if (c.env.ENVIRONMENT !== "test") {
+    if (!c.env.DEV_ISSUE_SECRET) return c.json({ error: "not_found" }, 404);
+    if (c.req.header("x-pact-dev-issue-secret") !== c.env.DEV_ISSUE_SECRET) {
+      return c.json({ error: "unauthorized", message: "invalid dev issue secret" }, 401);
+    }
+  }
   const body = await c.req.json<{ workspaceId: string; email: string; audience: string }>();
   try {
     const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {

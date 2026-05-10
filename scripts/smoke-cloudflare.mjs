@@ -37,6 +37,13 @@ const parseJson = async (name, res) => {
   return body;
 };
 
+const devIssueHeaders = () => ({
+  "content-type": "application/json",
+  ...(process.env.PACT_DEV_ISSUE_SECRET
+    ? { "x-pact-dev-issue-secret": process.env.PACT_DEV_ISSUE_SECRET }
+    : {}),
+});
+
 const health = [
   ["issuer", optional("PACT_ISSUER_URL")],
   ["verifier", optional("PACT_VERIFIER_URL")],
@@ -65,7 +72,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
 
   const issue = await check(`${issuerUrl} dev issue`, `${issuerUrl}/v1/dev/issue`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: devIssueHeaders(),
     body: JSON.stringify({ workspaceId, email, audience }),
   });
   const issued = await issue.json();
@@ -85,7 +92,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
     throw new Error(`verifier denied smoke path: ${JSON.stringify(verifierBody.reasons ?? [])}`);
   }
 
-  await check("mcp initialize", `${mcpUrl}/${workspaceSlug}/mcp`, {
+  const initialize = await check("mcp initialize", `${mcpUrl}/${workspaceSlug}/mcp`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${issued.token}`,
@@ -93,6 +100,10 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
   });
+  const initializeBody = await parseJson("mcp initialize", initialize);
+  if (initializeBody.result?.serverInfo?.name !== "pact-mcp") {
+    throw new Error("mcp initialize did not return pact-mcp");
+  }
 
   const toolCall = await check("mcp pact.whoami", `${mcpUrl}/${workspaceSlug}/mcp`, {
     method: "POST",
@@ -120,7 +131,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
       `${issuerUrl}/v1/dev/issue`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: devIssueHeaders(),
         body: JSON.stringify({ workspaceId, email, audience: "pact-audit" }),
       },
     );
@@ -153,7 +164,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
         `${issuerUrl}/v1/dev/issue`,
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: devIssueHeaders(),
           body: JSON.stringify({ workspaceId, email, audience: "pact-admin" }),
         },
       );
@@ -183,7 +194,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
       `${issuerUrl}/v1/dev/issue`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: devIssueHeaders(),
         body: JSON.stringify({ workspaceId, email, audience: "pact-gateway" }),
       },
     );
@@ -202,7 +213,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
         `${issuerUrl}/v1/dev/issue`,
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: devIssueHeaders(),
           body: JSON.stringify({ workspaceId, email, audience: "pact-audit" }),
         },
       );

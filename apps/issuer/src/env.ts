@@ -11,6 +11,7 @@ export type Env = {
   ISSUER_BASE_URL: string;
   ENVIRONMENT?: string;
   ENABLE_DEV_ISSUE?: string;
+  DEV_ISSUE_SECRET?: string;
   TOKEN_TTL_SECONDS?: string;
 };
 

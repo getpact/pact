@@ -43,7 +43,9 @@ pnpm smoke:cloudflare
 
 Set `PACT_SMOKE_DEV_FLOW=true` plus `PACT_SMOKE_WORKSPACE_ID` and
 `PACT_SMOKE_WORKSPACE_SLUG` to exercise dev issue, verifier, and MCP initialize
-against a non-production environment.
+against a non-production environment. Deployed non-production issuers must set
+`DEV_ISSUE_SECRET`; pass the same value to smoke tests as
+`PACT_DEV_ISSUE_SECRET`.
 
 Set `PACT_SMOKE_GATEWAY_FLOW=true` to also exercise Mode B gateway traffic. The
 workspace must already have an active policy that allows `gateway.get` on the

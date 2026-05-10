@@ -25,6 +25,41 @@ const buildEnv = async () => {
   };
 };
 
+describe("issuer dev issue access", () => {
+  const body = JSON.stringify({
+    workspaceId: "00000000-0000-0000-0000-000000000000",
+    email: "alice@example.com",
+    audience: "pact-mcp",
+  });
+  const env = {
+    DATABASE_URL: "postgres://unused",
+    MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    GOOGLE_OAUTH_CLIENT_ID: "test",
+    GOOGLE_OAUTH_CLIENT_SECRET: "test",
+    ISSUER_BASE_URL: "https://issuer.test/acme",
+    ENVIRONMENT: "staging",
+    ENABLE_DEV_ISSUE: "true",
+  };
+
+  it("hides deployed dev issue unless a secret is configured", async () => {
+    const res = await app.request(
+      "/v1/dev/issue",
+      { method: "POST", headers: { "content-type": "application/json" }, body },
+      env,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects deployed dev issue without the matching secret header", async () => {
+    const res = await app.request(
+      "/v1/dev/issue",
+      { method: "POST", headers: { "content-type": "application/json" }, body },
+      { ...env, DEV_ISSUE_SECRET: "secret" },
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
 run("issuer end-to-end", () => {
   const cleanup: string[] = [];
   const adminDb = createClient(adminUrl as string);
