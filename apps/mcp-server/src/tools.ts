@@ -188,12 +188,53 @@ const slackAuthTest: Tool = {
   },
 };
 
+const slackChannelsList: Tool = {
+  descriptor: {
+    name: "pact.slack.channels.list",
+    description: "List Slack channels visible to the workspace bot token (paginated).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number" },
+        cursor: { type: "string" },
+        types: { type: "string" },
+      },
+    },
+  },
+  handler: async (args, ctx, deps) => {
+    if (!deps.rawMek) {
+      return { content: [{ type: "text", text: "MEK is not configured" }], isError: true };
+    }
+    const db = createClient(deps.databaseUrl);
+    const token = await withWorkspace(db, ctx.workspaceId, (tx) =>
+      loadSecretString(tx, deps.rawMek as Uint8Array, {
+        workspaceId: ctx.workspaceId,
+        kind: "slack",
+        target: "bot-token",
+      }),
+    );
+    if (!token) {
+      return { content: [{ type: "text", text: "Slack bot token not found" }], isError: true };
+    }
+    const limit = typeof args.limit === "number" ? args.limit : undefined;
+    const cursor = typeof args.cursor === "string" ? args.cursor : undefined;
+    const types = typeof args.types === "string" ? args.types : undefined;
+    const result = await createSlackClient({ token }).conversationsList({
+      ...(limit !== undefined ? { limit } : {}),
+      ...(cursor ? { cursor } : {}),
+      ...(types ? { types } : {}),
+    });
+    return json(result);
+  },
+};
+
 export const registry: Map<string, Tool> = new Map([
   [whoami.descriptor.name, whoami],
   [workspaceInfo.descriptor.name, workspaceInfo],
   [auditRecent.descriptor.name, auditRecent],
   [policyActive.descriptor.name, policyActive],
   [slackAuthTest.descriptor.name, slackAuthTest],
+  [slackChannelsList.descriptor.name, slackChannelsList],
 ]);
 
 export const listTools = (): ToolDescriptor[] => [...registry.values()].map((t) => t.descriptor);

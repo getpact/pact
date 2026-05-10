@@ -23,8 +23,30 @@ export type SlackErrorResult = {
 
 export type SlackResult<T> = T | SlackErrorResult;
 
+export type SlackChannel = {
+  id: string;
+  name?: string;
+  isPrivate?: boolean;
+  isMember?: boolean;
+};
+
+export type SlackConversationsListResult = {
+  ok: true;
+  channels: SlackChannel[];
+  nextCursor: string | null;
+};
+
+export type SlackConversationsListInput = {
+  limit?: number;
+  cursor?: string;
+  types?: string;
+};
+
 export type SlackClient = {
   authTest: () => Promise<SlackResult<SlackAuthTestResult>>;
+  conversationsList: (
+    input?: SlackConversationsListInput,
+  ) => Promise<SlackResult<SlackConversationsListResult>>;
 };
 
 const defaultApiBaseUrl = "https://slack.com/api";
@@ -61,22 +83,65 @@ const parseAuthTest = (value: unknown): SlackResult<SlackAuthTestResult> => {
   };
 };
 
+const parseConversationsList = (value: unknown): SlackResult<SlackConversationsListResult> => {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid Slack response");
+  }
+  const body = value as Record<string, unknown>;
+  if (body.ok === false) {
+    return { ok: false, error: requireString(body.error, "error") ?? "unknown_error" };
+  }
+  if (body.ok !== true) throw new Error("invalid Slack response");
+  const channelsRaw = Array.isArray(body.channels) ? body.channels : [];
+  const channels: SlackChannel[] = [];
+  for (const c of channelsRaw) {
+    if (!c || typeof c !== "object") continue;
+    const item = c as Record<string, unknown>;
+    const id = requireString(item.id, "channel.id");
+    if (!id) continue;
+    const channel: SlackChannel = { id };
+    const name = requireString(item.name, "channel.name");
+    if (name) channel.name = name;
+    if (typeof item.is_private === "boolean") channel.isPrivate = item.is_private;
+    if (typeof item.is_member === "boolean") channel.isMember = item.is_member;
+    channels.push(channel);
+  }
+  const meta = body.response_metadata as Record<string, unknown> | undefined;
+  const cursorVal = meta?.next_cursor;
+  const nextCursor = typeof cursorVal === "string" && cursorVal.length > 0 ? cursorVal : null;
+  return { ok: true, channels, nextCursor };
+};
+
 export const createSlackClient = (opts: SlackClientOptions): SlackClient => {
   if (!opts.token) throw new Error("Slack token is required");
   const fetchImpl = opts.fetch ?? fetch;
   const apiBaseUrl = opts.apiBaseUrl ?? defaultApiBaseUrl;
 
+  const post = async (method: string, params: Record<string, string>): Promise<unknown> => {
+    const res = await fetchImpl(`${apiBaseUrl}/${method}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${opts.token}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(params).toString(),
+    });
+    return res.json();
+  };
+
   return {
     async authTest() {
-      const res = await fetchImpl(`${apiBaseUrl}/auth.test`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${opts.token}`,
-          "content-type": "application/x-www-form-urlencoded",
-        },
-      });
-      const body = await res.json();
-      return parseAuthTest(body);
+      return parseAuthTest(await post("auth.test", {}));
+    },
+    async conversationsList(input = {}) {
+      const params: Record<string, string> = {};
+      if (input.limit !== undefined) {
+        const n = Math.max(1, Math.min(1000, Math.floor(input.limit)));
+        params.limit = String(n);
+      }
+      if (input.cursor) params.cursor = input.cursor;
+      if (input.types) params.types = input.types;
+      return parseConversationsList(await post("conversations.list", params));
     },
   };
 };
