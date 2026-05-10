@@ -1,7 +1,10 @@
 #!/bin/sh
 set -eu
 
-apps="issuer verifier mcp-server admin-api audit-api proxy"
+apps="issuer verifier mcp-server admin-api audit-api"
+if [ "${PACT_DEPLOY_PROXY:-}" = "true" ]; then
+  apps="$apps proxy"
+fi
 
 require_file() {
   if [ ! -f "$1" ]; then

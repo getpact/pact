@@ -17,7 +17,10 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 
 Run `pnpm deploy:cloudflare` from the repository root after bootstrap. The script
 validates Worker manifests, runs `pnpm typecheck`, runs `pnpm build`, then deploys
-issuer, verifier, MCP server, admin API, audit API, and proxy in order.
+issuer, verifier, MCP server, admin API, and audit API in order.
+
+The proxy Worker is still a stub that returns 501. Deploy it only for explicit
+stub testing with `PACT_DEPLOY_PROXY=true pnpm deploy:cloudflare`.
 
 After deploy, run a health smoke test:
 
