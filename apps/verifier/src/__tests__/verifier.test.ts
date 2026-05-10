@@ -1,5 +1,7 @@
+import { fromBase64, issueJwt } from "@getpact/crypto";
 import { createClient, type DbClient, withWorkspace } from "@getpact/db";
 import { auditEvents, policies, revokedJtis, workspaces } from "@getpact/db/schema";
+import { loadActiveSigningKey } from "@getpact/keystore";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -163,6 +165,94 @@ run("verifier", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { allow: boolean };
     expect(body.allow).toBe(true);
+  });
+
+  it("allows Mode B gateway tokens on the gateway audience", async () => {
+    const { env, created } = await setupWorkspace();
+    await insertPolicy(created.workspaceId, created.adminUserId, {
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+    const issued = await issueTestToken(issuer, env, {
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: "pact-gateway",
+    });
+
+    const res = await app.request(
+      "/v1/verify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: issued.token,
+          action: "gateway.get",
+          resource: "gateway:notion:/v1/pages",
+          audience: "pact-gateway",
+        }),
+      },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: env.MEK,
+        ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+        VERIFIER_AUDIENCES: "pact-mcp,pact-gateway",
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { allow: boolean };
+    expect(body.allow).toBe(true);
+  });
+
+  it("rejects a gateway-audience token with the wrong mode", async () => {
+    const { env, created } = await setupWorkspace();
+    await insertPolicy(created.workspaceId, created.adminUserId, {
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+    const rawMek = fromBase64(env.MEK);
+    const key = await withWorkspace(db, created.workspaceId, (tx) =>
+      loadActiveSigningKey(tx, created.workspaceId, "jwt", rawMek),
+    );
+    const token = await issueJwt(
+      {
+        sub: created.adminUserId,
+        email: "alice@example.com",
+        org: created.workspaceId,
+        roles: ["admin"],
+        groups: [],
+        mode: "A",
+      },
+      {
+        privateKey: key.privateKey,
+        kid: key.id,
+        issuer: env.ISSUER_BASE_URL,
+        audience: "pact-gateway",
+        ttlSeconds: 900,
+        jti: crypto.randomUUID(),
+      },
+    );
+
+    const res = await app.request(
+      "/v1/verify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token,
+          action: "gateway.get",
+          resource: "gateway:notion:/v1/pages",
+          audience: "pact-gateway",
+        }),
+      },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: env.MEK,
+        ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+        VERIFIER_AUDIENCES: "pact-mcp,pact-gateway",
+      },
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { allow: boolean; reasons: string[] };
+    expect(body.allow).toBe(false);
+    expect(body.reasons).toContain("token mode mismatch");
   });
 
   it("denies revoked tokens", async () => {
