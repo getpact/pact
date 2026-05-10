@@ -1,7 +1,8 @@
 import { canonicalizeEmail, type Email } from "@getpact/core";
-import { createClient, withWorkspace } from "@getpact/db";
+import { createClient } from "@getpact/db";
 import { roles, userRoles, users, workspaces } from "@getpact/db/schema";
 import { createSigningKey } from "@getpact/keystore";
+import { sql } from "drizzle-orm";
 
 export type CreateWorkspaceInput = {
   slug: string;
@@ -25,13 +26,15 @@ export const createWorkspace = async (
 ): Promise<CreateWorkspaceResult> => {
   const db = createClient(databaseUrl);
 
-  const [ws] = await db
-    .insert(workspaces)
-    .values({ slug: input.slug, name: input.name, region: input.region ?? "us-east-1" })
-    .returning();
-  if (!ws) throw new Error("workspace insert failed");
+  return db.transaction(async (tx) => {
+    const [ws] = await tx
+      .insert(workspaces)
+      .values({ slug: input.slug, name: input.name, region: input.region ?? "us-east-1" })
+      .returning();
+    if (!ws) throw new Error("workspace insert failed");
 
-  return withWorkspace(db, ws.id, async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.current_workspace_id', ${ws.id}, true)`);
+
     const email = canonicalizeEmail(input.adminEmail) as Email;
     const [user] = await tx
       .insert(users)
