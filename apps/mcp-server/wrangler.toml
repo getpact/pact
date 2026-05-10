@@ -2,6 +2,13 @@ name = "pact-mcp-server"
 main = "src/index.ts"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = false
 
 [vars]
 ENVIRONMENT = "production"
+ISSUER_BASE_URL = "https://issuer.getpact.dev"
+MCP_AUDIENCE = "pact-mcp"
+VERIFIER_URL = "https://verifier.getpact.dev"
+
+[observability]
+enabled = true

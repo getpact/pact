@@ -2,7 +2,15 @@ name = "pact-gateway"
 main = "src/index.ts"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = false
 
 [vars]
 ENVIRONMENT = "production"
 GATEWAY_AUDIENCE = "pact-gateway"
+GATEWAY_AUDIT_MODE = "required"
+GATEWAY_FORWARD_HEADER_ALLOWLIST = "accept,accept-encoding,accept-language,content-type,user-agent"
+UPSTREAM_HOST_ALLOWLIST = "replace-with-approved-upstream-hosts"
+VERIFIER_URL = "https://verifier.getpact.dev"
+
+[observability]
+enabled = true

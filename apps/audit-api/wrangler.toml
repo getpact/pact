@@ -2,6 +2,12 @@ name = "pact-audit-api"
 main = "src/index.ts"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = false
 
 [vars]
 ENVIRONMENT = "production"
+ISSUER_BASE_URL = "https://issuer.getpact.dev"
+AUDIT_AUDIENCE = "pact-audit"
+
+[observability]
+enabled = true
