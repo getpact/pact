@@ -65,7 +65,7 @@ export const exchangeGoogleCode = async (
   }
   return {
     email: canonicalizeEmail(email),
-    emailVerified: Boolean(payload.email_verified),
+    emailVerified: payload.email_verified === true,
     sub,
   };
 };
