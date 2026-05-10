@@ -1,4 +1,5 @@
 import { writeEvent } from "@getpact/audit";
+import { isUuid } from "@getpact/core";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { policies, revokedJtis, workspaces } from "@getpact/db/schema";
@@ -25,8 +26,6 @@ export type VerifyOutput = {
 
 const result = (allow: boolean, reasons: string[], sub: string | undefined): VerifyOutput =>
   sub ? { allow, reasons, sub } : { allow, reasons };
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const stringArrayClaim = (value: unknown): string[] | null => {
   if (value === undefined) return [];
@@ -95,7 +94,7 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
   if (!workspaceId || !jti) {
     return result(false, ["malformed token"], sub);
   }
-  if (!UUID_RE.test(workspaceId)) {
+  if (!isUuid(workspaceId)) {
     return result(false, ["malformed token"], sub);
   }
 

@@ -1,8 +1,9 @@
+import { isUuid } from "@getpact/core";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { workspaces } from "@getpact/db/schema";
+import { revokedJtis, workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 
 export type AuthContext = {
@@ -20,8 +21,6 @@ const stringArrayClaim = (value: unknown, name: string): string[] => {
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;
   throw new Error(`invalid ${name} claim`);
 };
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export const authenticate = async (
   databaseUrl: string,
@@ -47,7 +46,7 @@ export const authenticate = async (
   if (!workspaceId || !sub || !jti) {
     throw new Error("missing required claims");
   }
-  if (!UUID_RE.test(workspaceId)) {
+  if (!isUuid(workspaceId)) {
     throw new Error("malformed workspace id");
   }
 
@@ -81,6 +80,17 @@ export const authenticate = async (
     issuer,
     audience,
   });
+
+  const revoked = await withWorkspace(db, workspaceId, (tx) =>
+    tx
+      .select({ jti: revokedJtis.jti })
+      .from(revokedJtis)
+      .where(and(eq(revokedJtis.workspaceId, workspaceId), eq(revokedJtis.jti, jti)))
+      .limit(1),
+  );
+  if (revoked.length > 0) {
+    throw new Error("token revoked");
+  }
 
   return {
     workspaceId,

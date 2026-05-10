@@ -1,3 +1,4 @@
+import { isUuid } from "@getpact/core";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { revokedJtis } from "@getpact/db/schema";
@@ -17,8 +18,6 @@ const stringArrayClaim = (value: unknown, name: string): string[] => {
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;
   throw new Error(`invalid ${name} claim`);
 };
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export const authenticateAuditReader = async (
   databaseUrl: string,
@@ -47,7 +46,7 @@ export const authenticateAuditReader = async (
   if (tokenWorkspace !== workspaceId) {
     throw new Error("token workspace mismatch");
   }
-  if (!UUID_RE.test(workspaceId)) {
+  if (!isUuid(workspaceId)) {
     throw new Error("malformed workspace id");
   }
 
