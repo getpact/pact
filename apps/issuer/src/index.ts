@@ -3,7 +3,7 @@ import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { kvRateLimiter, memoryRateLimiter, type RateLimiter, rateLimit } from "@getpact/ratelimit";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
 import { exchangeGoogleCode } from "./google.js";
@@ -20,18 +20,47 @@ app.use("/v1/*", bodyLimit({ maxSize: 32 * 1024 }));
 const memLimiter = memoryRateLimiter();
 const limiter = (env: Env): RateLimiter =>
   env.RATE_LIMIT_KV ? kvRateLimiter(env.RATE_LIMIT_KV) : memLimiter;
+const rateLimitKey =
+  (route: string) =>
+  (c: Context): string => {
+    const client =
+      c.req.header("cf-connecting-ip") ??
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+      "anonymous";
+    return `${route}:${client}`;
+  };
 
 app.use("/v1/refresh", (c, next) =>
-  rateLimit({ limiter: limiter(c.env), limit: 30, windowSeconds: 60 })(c, next),
+  rateLimit({
+    limiter: limiter(c.env),
+    limit: 30,
+    windowSeconds: 60,
+    keyFn: rateLimitKey("refresh"),
+  })(c, next),
 );
 app.use("/v1/oauth/google/exchange", (c, next) =>
-  rateLimit({ limiter: limiter(c.env), limit: 10, windowSeconds: 60 })(c, next),
+  rateLimit({
+    limiter: limiter(c.env),
+    limit: 10,
+    windowSeconds: 60,
+    keyFn: rateLimitKey("oauth-google-exchange"),
+  })(c, next),
 );
 app.use("/v1/workspaces", (c, next) =>
-  rateLimit({ limiter: limiter(c.env), limit: 5, windowSeconds: 60 })(c, next),
+  rateLimit({
+    limiter: limiter(c.env),
+    limit: 5,
+    windowSeconds: 60,
+    keyFn: rateLimitKey("workspaces"),
+  })(c, next),
 );
 app.use("/v1/dev/issue", (c, next) =>
-  rateLimit({ limiter: limiter(c.env), limit: 30, windowSeconds: 60 })(c, next),
+  rateLimit({
+    limiter: limiter(c.env),
+    limit: 30,
+    windowSeconds: 60,
+    keyFn: rateLimitKey("dev-issue"),
+  })(c, next),
 );
 
 app.get("/health", (c) => c.json({ ok: true }));
