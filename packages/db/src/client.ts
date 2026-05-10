@@ -9,7 +9,7 @@ export const createClient = (url: string, options?: Partial<Options<Record<strin
   return drizzle(client);
 };
 
-type Tx = Parameters<Parameters<DbClient["transaction"]>[0]>[0];
+export type Tx = Parameters<Parameters<DbClient["transaction"]>[0]>[0];
 
 export const withWorkspace = async <T>(
   db: DbClient,

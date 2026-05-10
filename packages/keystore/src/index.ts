@@ -11,6 +11,7 @@ import {
   importPublicSpki,
   toBase64,
 } from "@getpact/crypto";
+import type { Tx } from "@getpact/db";
 import { schema } from "@getpact/db";
 import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 
@@ -45,21 +46,16 @@ export type StoredSigningKey = {
 };
 
 export const createSigningKey = async (
-  tx: unknown,
+  tx: Tx,
   opts: CreateSigningKeyOptions,
 ): Promise<StoredSigningKey> => {
-  const t = tx as {
-    insert: typeof import("drizzle-orm/postgres-js").drizzle extends infer _ ? unknown : never;
-    execute: (q: ReturnType<typeof sql>) => Promise<unknown[]>;
-  };
-
   const pair = await generateEd25519Keypair();
   const privBytes = await exportPrivatePkcs8(pair.privateKey);
   const pubBytes = await exportPublicSpki(pair.publicKey);
   const mek = await importMek(opts.rawMek);
   const wrapped = await encryptAesGcm(mek, privBytes);
 
-  const inserted = (await t.execute(
+  const inserted = (await tx.execute(
     sql`INSERT INTO workspace_signing_keys (workspace_id, kind, public_key_spki, private_key_wrapped)
         VALUES (${opts.workspaceId}, ${opts.kind}, ${toBase64(pubBytes)}, ${serialize(wrapped)})
         RETURNING id`,
@@ -77,24 +73,12 @@ export type ActiveSigningKey = {
 };
 
 export const loadActiveSigningKey = async (
-  db: unknown,
+  tx: Tx,
   workspaceId: string,
   kind: SigningKeyKind,
   rawMek: Uint8Array,
 ): Promise<ActiveSigningKey> => {
-  const drizzle = db as {
-    select: () => {
-      from: (t: typeof schema.workspaceSigningKeys) => {
-        where: (cond: unknown) => {
-          orderBy: (...c: unknown[]) => {
-            limit: (n: number) => Promise<Array<schema.WorkspaceSigningKey>>;
-          };
-        };
-      };
-    };
-  };
-
-  const rows = await drizzle
+  const rows = await tx
     .select()
     .from(schema.workspaceSigningKeys)
     .where(
@@ -127,21 +111,11 @@ export type VerifyingKey = {
 };
 
 export const listVerifyingKeys = async (
-  db: unknown,
+  tx: Tx,
   workspaceId: string,
   kind: SigningKeyKind,
 ): Promise<VerifyingKey[]> => {
-  const drizzle = db as {
-    select: () => {
-      from: (t: typeof schema.workspaceSigningKeys) => {
-        where: (cond: unknown) => {
-          orderBy: (...c: unknown[]) => Promise<Array<schema.WorkspaceSigningKey>>;
-        };
-      };
-    };
-  };
-
-  const rows = await drizzle
+  const rows = await tx
     .select()
     .from(schema.workspaceSigningKeys)
     .where(
