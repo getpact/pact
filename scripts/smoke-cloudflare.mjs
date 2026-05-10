@@ -19,6 +19,16 @@ const check = async (name, url, init) => {
   return res;
 };
 
+const checkAny = async (name, url, init, statuses) => {
+  const res = await fetch(url, init);
+  if (!statuses.includes(res.status)) {
+    const text = await res.text();
+    throw new Error(`${name} failed (${res.status}): ${text.slice(0, 500)}`);
+  }
+  console.log(`${name}: ${res.status}`);
+  return res;
+};
+
 const parseJson = async (name, res) => {
   const body = await res.json();
   if (body?.error) {
@@ -61,7 +71,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
   const issued = await issue.json();
   if (!issued.token) throw new Error("dev issue response did not include token");
 
-  await check("verifier allow path", `${verifierUrl}/v1/verify`, {
+  const verifierAllow = await check("verifier allow path", `${verifierUrl}/v1/verify`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -70,6 +80,10 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
       resource: "smoke:health",
     }),
   });
+  const verifierBody = await parseJson("verifier allow path", verifierAllow);
+  if (verifierBody.allow !== true) {
+    throw new Error(`verifier denied smoke path: ${JSON.stringify(verifierBody.reasons ?? [])}`);
+  }
 
   await check("mcp initialize", `${mcpUrl}/${workspaceSlug}/mcp`, {
     method: "POST",
@@ -118,8 +132,97 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
       { headers: { authorization: `Bearer ${auditIssued.token}` } },
     );
     const auditBody = await auditEvents.json();
-    if (!Array.isArray(auditBody.events) || auditBody.events.length === 0) {
+    const foundMcpAudit = auditBody.events?.some(
+      (event) => event.action === "verify.tool:pact.whoami" && event.decision === "allow",
+    );
+    if (!foundMcpAudit) {
       throw new Error("audit chain did not include verify.tool:pact.whoami");
+    }
+  }
+
+  if (process.env.PACT_SMOKE_GATEWAY_FLOW === "true") {
+    const gatewayUrl = required("PACT_GATEWAY_URL");
+    const brainKind = process.env.PACT_SMOKE_GATEWAY_BRAIN ?? "smoke-http";
+    const gatewayPath = (process.env.PACT_SMOKE_GATEWAY_PATH ?? "get").replace(/^\/+/, "");
+    const gatewayResource = `gateway:${brainKind}:/${gatewayPath}`;
+
+    if (process.env.PACT_SMOKE_GATEWAY_BASE_URL) {
+      const adminUrl = required("PACT_ADMIN_API_URL");
+      const adminIssue = await check(
+        `${issuerUrl} dev issue admin token`,
+        `${issuerUrl}/v1/dev/issue`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ workspaceId, email, audience: "pact-admin" }),
+        },
+      );
+      const adminIssued = await adminIssue.json();
+      if (!adminIssued.token) throw new Error("admin token issue response did not include token");
+      await checkAny(
+        "admin seed gateway brain",
+        `${adminUrl}/v1/workspaces/${workspaceId}/brains`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${adminIssued.token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            kind: brainKind,
+            baseUrl: process.env.PACT_SMOKE_GATEWAY_BASE_URL,
+            authScheme: "none",
+          }),
+        },
+        [201, 409],
+      );
+    }
+
+    const gatewayIssue = await check(
+      `${issuerUrl} dev issue gateway token`,
+      `${issuerUrl}/v1/dev/issue`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId, email, audience: "pact-gateway" }),
+      },
+    );
+    const gatewayIssued = await gatewayIssue.json();
+    if (!gatewayIssued.token) throw new Error("gateway token issue response did not include token");
+
+    await check(
+      `gateway ${gatewayResource}`,
+      `${gatewayUrl}/${workspaceSlug}/gateway/${brainKind}/${gatewayPath}`,
+      { headers: { authorization: `Bearer ${gatewayIssued.token}` } },
+    );
+
+    if (auditUrl) {
+      const auditIssue = await check(
+        `${issuerUrl} dev issue gateway audit token`,
+        `${issuerUrl}/v1/dev/issue`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ workspaceId, email, audience: "pact-audit" }),
+        },
+      );
+      const auditIssued = await auditIssue.json();
+      if (!auditIssued.token) throw new Error("audit token issue response did not include token");
+      const auditEvents = await check(
+        "audit contains gateway event",
+        `${auditUrl}/v1/workspaces/${workspaceId}/audit/events?action=gateway.get&limit=5`,
+        { headers: { authorization: `Bearer ${auditIssued.token}` } },
+      );
+      const auditBody = await auditEvents.json();
+      const foundGatewayAudit = auditBody.events?.some(
+        (event) =>
+          event.action === "gateway.get" &&
+          event.decision === "allow" &&
+          event.target?.resource === gatewayResource,
+      );
+      if (!foundGatewayAudit) {
+        throw new Error("audit chain did not include gateway.get");
+      }
     }
   }
 }

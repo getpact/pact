@@ -35,6 +35,25 @@ Set `PACT_SMOKE_DEV_FLOW=true` plus `PACT_SMOKE_WORKSPACE_ID` and
 `PACT_SMOKE_WORKSPACE_SLUG` to exercise dev issue, verifier, and MCP initialize
 against a non-production environment.
 
+Set `PACT_SMOKE_GATEWAY_FLOW=true` to also exercise Mode B gateway traffic. The
+workspace must already have an active policy that allows `gateway.get` on the
+configured gateway resource. To seed the brain during smoke, also set
+`PACT_ADMIN_API_URL` and `PACT_SMOKE_GATEWAY_BASE_URL`, for example:
+
+```sh
+PACT_SMOKE_DEV_FLOW=true \
+PACT_SMOKE_GATEWAY_FLOW=true \
+PACT_SMOKE_WORKSPACE_ID=<workspace-id> \
+PACT_SMOKE_WORKSPACE_SLUG=<workspace-slug> \
+PACT_GATEWAY_URL=https://pact-gateway.<subdomain>.workers.dev \
+PACT_ADMIN_API_URL=https://pact-admin-api.<subdomain>.workers.dev \
+PACT_AUDIT_API_URL=https://pact-audit-api.<subdomain>.workers.dev \
+PACT_SMOKE_GATEWAY_BRAIN=smoke-http \
+PACT_SMOKE_GATEWAY_PATH=get \
+PACT_SMOKE_GATEWAY_BASE_URL=https://httpbin.org \
+pnpm smoke:cloudflare
+```
+
 ## Bootstrap
 
 The bootstrap is manual until we move to Terraform. Steps:

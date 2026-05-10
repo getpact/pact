@@ -267,6 +267,46 @@ run("gateway integration", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("rate limits gateway calls before forwarding upstream", async () => {
+    const { testEnv, created, issued } = await setup();
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const target = input.toString();
+      if (target === "https://verifier.test/v1/verify") {
+        return Response.json({ allow: true, reasons: ["ok"] });
+      }
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const call = () =>
+      app.request(
+        `/${created.workspaceId}/gateway/notion/v1/pages`,
+        { headers: { authorization: `Bearer ${issued.token}` } },
+        {
+          DATABASE_URL: testEnv.DATABASE_URL,
+          VERIFIER_URL: "https://verifier.test",
+          GATEWAY_AUDIENCE: "pact-gateway",
+          GATEWAY_RATE_LIMIT: "1",
+          GATEWAY_RATE_WINDOW_SECONDS: "60",
+          MEK: testEnv.MEK,
+        },
+      );
+
+    const first = await call();
+    expect(first.status).toBe(200);
+    const second = await call();
+    expect(second.status).toBe(429);
+    expect(second.headers.get("retry-after")).toBeTruthy();
+    expect(await second.json()).toEqual({
+      error: "rate_limited",
+      message: "too many requests",
+    });
+    const upstreamCalls = fetchMock.mock.calls.filter(
+      ([input]) => input.toString() === "https://api.example.com/base/v1/pages",
+    );
+    expect(upstreamCalls).toHaveLength(1);
+  });
+
   it("rejects a token routed through another workspace", async () => {
     const first = await setup();
     const second = await createTestWorkspace(issuer, first.testEnv, {
