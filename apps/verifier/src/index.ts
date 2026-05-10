@@ -12,6 +12,7 @@ type Env = {
   ISSUER_BASE_URL: string;
   ENVIRONMENT?: string;
   VERIFIER_AUDIENCE?: string;
+  VERIFIER_AUDIENCES?: string;
   REVOCATION_CACHE?: KVNamespace;
 };
 
@@ -28,12 +29,23 @@ app.use("/v1/*", bodyLimit({ maxSize: 16 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
 
+export const allowedAudiences = (env: Pick<Env, "VERIFIER_AUDIENCE" | "VERIFIER_AUDIENCES">) =>
+  (env.VERIFIER_AUDIENCES ?? env.VERIFIER_AUDIENCE ?? "pact-mcp")
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+
 app.post("/v1/verify", async (c) => {
   const body = await c.req.json<{
     token: string;
     action: string;
     resource: string;
+    audience?: string;
   }>();
+  const audience = body.audience ?? c.env.VERIFIER_AUDIENCE ?? "pact-mcp";
+  if (!allowedAudiences(c.env).includes(audience)) {
+    return c.json({ error: "invalid_audience", message: "audience is not allowed" }, 400);
+  }
   const rawMek = fromBase64(c.env.MEK);
   const cache = c.env.REVOCATION_CACHE ? kvRevocationCache(c.env.REVOCATION_CACHE) : undefined;
   const result = await verifyAction(
@@ -47,7 +59,7 @@ app.post("/v1/verify", async (c) => {
       token: body.token,
       action: body.action,
       resource: body.resource,
-      audience: c.env.VERIFIER_AUDIENCE ?? "pact-mcp",
+      audience,
     },
   );
   return c.json(result, result.allow ? 200 : 403);

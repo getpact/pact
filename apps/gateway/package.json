@@ -1,5 +1,5 @@
 {
-  "name": "@getpact/proxy",
+  "name": "@getpact/gateway",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,12 @@
   },
   "dependencies": {
     "@getpact/core": "workspace:*",
-    "hono": "^4.6.0"
+    "@getpact/db": "workspace:*",
+    "@getpact/logger": "workspace:*",
+    "drizzle-orm": "^0.36.0",
+    "hono": "^4.6.0",
+    "jose": "^5.9.0",
+    "postgres": "^3.4.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",

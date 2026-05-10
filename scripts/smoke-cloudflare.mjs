@@ -33,7 +33,7 @@ const health = [
   ["mcp-server", optional("PACT_MCP_URL")],
   ["admin-api", optional("PACT_ADMIN_API_URL")],
   ["audit-api", optional("PACT_AUDIT_API_URL")],
-  ["proxy", optional("PACT_PROXY_URL")],
+  ["gateway", optional("PACT_GATEWAY_URL")],
 ].filter(([, url]) => url);
 
 if (health.length === 0) {

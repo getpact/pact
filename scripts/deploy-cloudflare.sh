@@ -2,8 +2,8 @@
 set -eu
 
 apps="issuer verifier mcp-server admin-api audit-api"
-if [ "${PACT_DEPLOY_PROXY:-}" = "true" ]; then
-  apps="$apps proxy"
+if [ "${PACT_DEPLOY_GATEWAY:-}" = "true" ]; then
+  apps="$apps gateway"
 fi
 
 require_file() {

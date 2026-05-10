@@ -10,7 +10,7 @@ import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
 import type { KVNamespace } from "../cache.js";
-import app from "../index.js";
+import app, { allowedAudiences } from "../index.js";
 
 type KvSpy = {
   binding: KVNamespace;
@@ -35,6 +35,43 @@ const buildKvMock = (): KvSpy => {
 
 const url = process.env.DATABASE_URL;
 const run = url ? describe : describe.skip;
+
+describe("verifier audience config", () => {
+  it("parses the allowed audience list", () => {
+    expect(allowedAudiences({ VERIFIER_AUDIENCES: "pact-mcp, pact-gateway" })).toEqual([
+      "pact-mcp",
+      "pact-gateway",
+    ]);
+  });
+
+  it("rejects disallowed requested audiences before verification work", async () => {
+    const res = await app.request(
+      "/v1/verify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: "unused",
+          action: "gateway.get",
+          resource: "gateway:notion:/v1/pages",
+          audience: "pact-gateway",
+        }),
+      },
+      {
+        DATABASE_URL: "postgres://unused",
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ISSUER_BASE_URL: "https://issuer.test",
+        VERIFIER_AUDIENCES: "pact-mcp",
+      },
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "invalid_audience",
+      message: "audience is not allowed",
+    });
+  });
+});
 
 run("verifier", () => {
   const cleanup: string[] = [];

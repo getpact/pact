@@ -8,7 +8,7 @@ Pre-v1.0.
 
 ## Layout
 
-- `apps/` - Cloudflare Workers (issuer, verifier, mcp-server, proxy, admin-api, audit-api)
+- `apps/` - Cloudflare Workers (issuer, verifier, mcp-server, gateway, admin-api, audit-api)
 - `packages/` - shared libraries and OSS packages
 - `infra/cloudflare/` - Wrangler config and Cloudflare resource definitions
 - `infra/compose/` - local Postgres + Miniflare
