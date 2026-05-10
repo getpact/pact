@@ -34,4 +34,15 @@ describe("vault envelope", () => {
     const wrapped = await wrapSecret(mekA, new TextEncoder().encode("data"));
     await expect(unwrapSecret(mekB, wrapped)).rejects.toThrow();
   });
+
+  it("rejects unwrapping with mismatched row context", async () => {
+    const mek = await generateAesKey();
+    const plaintext = new TextEncoder().encode("row-bound-secret");
+    const aad = new TextEncoder().encode("vault:v1:ws1:slack:bot-token");
+    const wrapped = await wrapSecret(mek, plaintext, aad);
+    await expect(unwrapSecret(mek, wrapped, aad)).resolves.toEqual(plaintext);
+    await expect(
+      unwrapSecret(mek, wrapped, new TextEncoder().encode("vault:v1:ws1:slack:other-token")),
+    ).rejects.toThrow();
+  });
 });

@@ -32,19 +32,27 @@ export type WrappedSecret = {
   dekCiphertext: string;
 };
 
-export const wrapSecret = async (mek: CryptoKey, plaintext: Uint8Array): Promise<WrappedSecret> => {
+export const wrapSecret = async (
+  mek: CryptoKey,
+  plaintext: Uint8Array,
+  aad?: Uint8Array,
+): Promise<WrappedSecret> => {
   const dek = await generateAesKey();
-  const secretEnv = await encryptAesGcm(dek, plaintext);
+  const secretEnv = await encryptAesGcm(dek, plaintext, aad);
   const dekRaw = await exportAesKey(dek);
-  const dekEnv = await encryptAesGcm(mek, dekRaw);
+  const dekEnv = await encryptAesGcm(mek, dekRaw, aad);
   return {
     ciphertext: serialize(secretEnv),
     dekCiphertext: serialize(dekEnv),
   };
 };
 
-export const unwrapSecret = async (mek: CryptoKey, wrapped: WrappedSecret): Promise<Uint8Array> => {
-  const dekRaw = await decryptAesGcm(mek, parse(wrapped.dekCiphertext));
+export const unwrapSecret = async (
+  mek: CryptoKey,
+  wrapped: WrappedSecret,
+  aad?: Uint8Array,
+): Promise<Uint8Array> => {
+  const dekRaw = await decryptAesGcm(mek, parse(wrapped.dekCiphertext), aad);
   const dek = await importAesKey(dekRaw);
-  return decryptAesGcm(dek, parse(wrapped.ciphertext));
+  return decryptAesGcm(dek, parse(wrapped.ciphertext), aad);
 };

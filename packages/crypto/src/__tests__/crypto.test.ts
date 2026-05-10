@@ -103,6 +103,17 @@ describe("aes-gcm envelope", () => {
     env.ciphertext[0] = (env.ciphertext[0] ?? 0) ^ 0xff;
     await expect(decryptAesGcm(key, env)).rejects.toThrow();
   });
+
+  it("binds additional authenticated data", async () => {
+    const key = await generateAesKey();
+    const plaintext = new TextEncoder().encode("secret value");
+    const aad = new TextEncoder().encode("vault:v1:workspace:slack:bot-token");
+    const env = await encryptAesGcm(key, plaintext, aad);
+    await expect(decryptAesGcm(key, env, aad)).resolves.toEqual(plaintext);
+    await expect(
+      decryptAesGcm(key, env, new TextEncoder().encode("vault:v1:workspace:slack:other")),
+    ).rejects.toThrow();
+  });
 });
 
 describe("envelope encryption (mek wraps dek wraps secret)", () => {

@@ -22,19 +22,32 @@ export const exportAesKey = async (key: CryptoKey): Promise<Uint8Array> => {
 export const encryptAesGcm = async (
   key: CryptoKey,
   plaintext: Uint8Array,
+  additionalData?: Uint8Array,
 ): Promise<AesEnvelope> => {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const ct = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: iv as BufferSource },
+    {
+      name: "AES-GCM",
+      iv: iv as BufferSource,
+      ...(additionalData ? { additionalData: additionalData as BufferSource } : {}),
+    },
     key,
     plaintext as BufferSource,
   );
   return { ciphertext: new Uint8Array(ct), iv };
 };
 
-export const decryptAesGcm = async (key: CryptoKey, envelope: AesEnvelope): Promise<Uint8Array> => {
+export const decryptAesGcm = async (
+  key: CryptoKey,
+  envelope: AesEnvelope,
+  additionalData?: Uint8Array,
+): Promise<Uint8Array> => {
   const pt = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: envelope.iv as BufferSource },
+    {
+      name: "AES-GCM",
+      iv: envelope.iv as BufferSource,
+      ...(additionalData ? { additionalData: additionalData as BufferSource } : {}),
+    },
     key,
     envelope.ciphertext as BufferSource,
   );

@@ -22,13 +22,16 @@ export type StoredSecret = {
 const toBytes = (v: Uint8Array | string): Uint8Array =>
   typeof v === "string" ? new TextEncoder().encode(v) : v;
 
+const aadFor = (input: LoadSecretInput): Uint8Array =>
+  new TextEncoder().encode(`vault:v1:${input.workspaceId}:${input.kind}:${input.target}`);
+
 export const storeSecret = async (
   tx: Tx,
   rawMek: Uint8Array,
   input: StoreSecretInput,
 ): Promise<StoredSecret> => {
   const mek = await importAesKey(rawMek);
-  const wrapped = await wrapSecret(mek, toBytes(input.plaintext));
+  const wrapped = await wrapSecret(mek, toBytes(input.plaintext), aadFor(input));
   const inserted = (await tx.execute(
     sql`INSERT INTO vault_secrets (workspace_id, kind, target, ciphertext, dek_ciphertext)
         VALUES (${input.workspaceId}, ${input.kind}, ${input.target}, ${wrapped.ciphertext}, ${wrapped.dekCiphertext})
@@ -83,10 +86,14 @@ export const loadSecretBytes = async (
   const row = rows[0];
   if (!row) return null;
   const mek = await importAesKey(rawMek);
-  return unwrapSecret(mek, {
-    ciphertext: row.ciphertext,
-    dekCiphertext: row.dekCiphertext,
-  });
+  return unwrapSecret(
+    mek,
+    {
+      ciphertext: row.ciphertext,
+      dekCiphertext: row.dekCiphertext,
+    },
+    aadFor(input),
+  );
 };
 
 export const loadSecretString = async (
