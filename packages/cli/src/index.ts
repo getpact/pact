@@ -125,7 +125,7 @@ const login = async () => {
 
 const refreshCmd = async () => {
   const cfg = await loadConfig();
-  if (!cfg || !cfg.workspaceId || !cfg.refreshToken) {
+  if (!cfg?.workspaceId || !cfg.refreshToken) {
     process.stderr.write("no stored credentials. run pact init or pact login first.\n");
     process.exit(1);
   }
@@ -148,7 +148,7 @@ const refreshCmd = async () => {
 
 const whoami = async () => {
   const cfg = await loadConfig();
-  if (!cfg || !cfg.email) {
+  if (!cfg?.email) {
     process.stderr.write("not signed in. run pact init or pact login first.\n");
     process.exit(1);
   }
