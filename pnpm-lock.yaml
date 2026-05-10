@@ -32,6 +32,9 @@ importers:
       '@getpact/audit':
         specifier: workspace:*
         version: link:../../packages/audit
+      '@getpact/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@getpact/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -81,6 +84,9 @@ importers:
       '@getpact/audit':
         specifier: workspace:*
         version: link:../../packages/audit
+      '@getpact/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@getpact/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -222,6 +228,9 @@ importers:
       '@getpact/adapter-slack':
         specifier: workspace:*
         version: link:../../packages/adapter-slack
+      '@getpact/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@getpact/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -328,6 +337,27 @@ importers:
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@cloudflare/workers-types@4.20260509.1)(postgres@3.4.9)
+
+  packages/auth:
+    dependencies:
+      '@getpact/core':
+        specifier: workspace:*
+        version: link:../core
+      '@getpact/crypto':
+        specifier: workspace:*
+        version: link:../crypto
+      '@getpact/db':
+        specifier: workspace:*
+        version: link:../db
+      '@getpact/keystore':
+        specifier: workspace:*
+        version: link:../keystore
+      drizzle-orm:
+        specifier: ^0.36.0
+        version: 0.36.4(@cloudflare/workers-types@4.20260509.1)(postgres@3.4.9)
+      jose:
+        specifier: ^5.9.0
+        version: 5.10.0
 
   packages/cli:
     dependencies:
