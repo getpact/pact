@@ -120,6 +120,13 @@
       "when": 1778475000000,
       "tag": "0016_brains_partial_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778480000000,
+      "tag": "0017_drop_adapter_configs",
+      "breakpoints": true
     }
   ]
 }

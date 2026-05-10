@@ -206,21 +206,6 @@ export const vaultSecrets = pgTable(
   ],
 );
 
-export const adapterConfigs = pgTable(
-  "adapter_configs",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    workspaceId: uuid("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
-    kind: text("kind").notNull(),
-    config: jsonb("config").notNull(),
-    status: text("status").notNull().default("active"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [uniqueIndex("adapter_configs_workspace_kind_idx").on(t.workspaceId, t.kind)],
-);
-
 export const brains = pgTable(
   "brains",
   {
@@ -246,8 +231,6 @@ export const brains = pgTable(
 
 export type VaultSecret = typeof vaultSecrets.$inferSelect;
 export type NewVaultSecret = typeof vaultSecrets.$inferInsert;
-export type AdapterConfig = typeof adapterConfigs.$inferSelect;
-export type NewAdapterConfig = typeof adapterConfigs.$inferInsert;
 export type Brain = typeof brains.$inferSelect;
 export type NewBrain = typeof brains.$inferInsert;
 
