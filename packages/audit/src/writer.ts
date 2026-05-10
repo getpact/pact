@@ -27,6 +27,8 @@ export type WriteResult = {
 };
 
 export const writeEvent = async (tx: Tx, opts: WriteEventOptions): Promise<WriteResult> => {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`audit:${opts.workspaceId}`}))`);
+
   const lockedRows = (await tx.execute(
     sql`SELECT last_hash FROM audit_chain_state WHERE workspace_id = ${opts.workspaceId} FOR UPDATE`,
   )) as unknown as Array<{ last_hash: string }>;
@@ -62,7 +64,7 @@ export const writeEvent = async (tx: Tx, opts: WriteEventOptions): Promise<Write
     ) VALUES (
       ${opts.workspaceId}, ${ts.toISOString()}, ${opts.event.actorKind}, ${opts.event.actorId ?? null},
       ${opts.event.action}, ${JSON.stringify(opts.event.target)},
-      ${opts.event.decision}, ${opts.event.supporting ? JSON.stringify(opts.event.supporting) : null},
+      ${opts.event.decision}, ${opts.event.supporting === undefined ? null : JSON.stringify(opts.event.supporting)},
       ${opts.signingKeyId}, ${prevHash}, ${thisHash}, ${signature}
     ) RETURNING id`,
   )) as unknown as Array<{ id: string }>;

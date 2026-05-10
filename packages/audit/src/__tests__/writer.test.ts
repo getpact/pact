@@ -98,7 +98,7 @@ run("audit writer", () => {
 
     const rows = (await withWorkspace(db, workspaceId, (tx) =>
       tx.execute(
-        sql`SELECT prev_hash, this_hash, signature, signing_key_id FROM audit_events WHERE workspace_id = ${workspaceId} AND action = 'chain.test' ORDER BY ts ASC, this_hash ASC`,
+        sql`SELECT prev_hash, this_hash, signature, signing_key_id FROM audit_events WHERE workspace_id = ${workspaceId} AND action = 'chain.test'`,
       ),
     )) as Array<{
       prev_hash: string;
@@ -108,6 +108,7 @@ run("audit writer", () => {
     }>;
 
     expect(rows.length).toBe(100);
+    const byHash = new Map(rows.map((row) => [row.this_hash, row]));
 
     const prevExpected = (await withWorkspace(db, workspaceId, (tx) =>
       tx.execute(
@@ -116,7 +117,9 @@ run("audit writer", () => {
     )) as Array<{ this_hash: string }>;
     let cursor = prevExpected[0]?.this_hash;
     if (!cursor) throw new Error("no prior event found");
-    for (const row of rows) {
+    for (const hash of hashes) {
+      const row = byHash.get(hash);
+      if (!row) throw new Error("missing chain row");
       expect(row.prev_hash).toBe(cursor);
       const ok = await verifyEd25519(
         publicKey,
@@ -184,5 +187,86 @@ run("audit writer", () => {
 
     const ok = await verifyEd25519(publicKey, fromBase64(row.this_hash), fromBase64(row.signature));
     expect(ok).toBe(true);
+  });
+
+  it("stores falsy supporting values exactly as signed", async () => {
+    const r = await withWorkspace(db, workspaceId, (tx) =>
+      writeEvent(tx, {
+        workspaceId,
+        workspaceCreatedAt: createdAt,
+        signingKeyId: "ws-audit-v1",
+        signingKey,
+        event: {
+          actorKind: "system",
+          action: "falsy.supporting",
+          target: { id: "x" },
+          decision: "allow",
+          supporting: false,
+        },
+      }),
+    );
+
+    const rows = (await withWorkspace(db, workspaceId, (tx) =>
+      tx.execute(
+        sql`SELECT supporting FROM audit_events WHERE workspace_id = ${workspaceId} AND this_hash = ${r.thisHash}`,
+      ),
+    )) as Array<{ supporting: unknown }>;
+    expect(rows[0]?.supporting).toBe(false);
+  });
+
+  it("serializes concurrent first events for a workspace", async () => {
+    const [ws] = await db
+      .insert(workspaces)
+      .values({ slug: `audit-race-${Date.now()}`, name: "Audit Race" })
+      .returning();
+    if (!ws) throw new Error("workspace insert failed");
+
+    try {
+      const [first, second] = await Promise.all([
+        withWorkspace(db, ws.id, (tx) =>
+          writeEvent(tx, {
+            workspaceId: ws.id,
+            workspaceCreatedAt: ws.createdAt,
+            signingKeyId: "ws-audit-v1",
+            signingKey,
+            event: {
+              actorKind: "system",
+              action: "concurrent.first",
+              target: { n: 1 },
+              decision: "allow",
+            },
+          }),
+        ),
+        withWorkspace(db, ws.id, (tx) =>
+          writeEvent(tx, {
+            workspaceId: ws.id,
+            workspaceCreatedAt: ws.createdAt,
+            signingKeyId: "ws-audit-v1",
+            signingKey,
+            event: {
+              actorKind: "system",
+              action: "concurrent.first",
+              target: { n: 2 },
+              decision: "allow",
+            },
+          }),
+        ),
+      ]);
+
+      const rows = (await withWorkspace(db, ws.id, (tx) =>
+        tx.execute(
+          sql`SELECT prev_hash, this_hash FROM audit_events WHERE workspace_id = ${ws.id} AND action = 'concurrent.first'`,
+        ),
+      )) as Array<{ prev_hash: string; this_hash: string }>;
+      const genesis = await computeGenesisHash(ws.id, ws.createdAt);
+      const prevHashes = rows.map((r) => r.prev_hash);
+      expect(rows).toHaveLength(2);
+      expect(prevHashes.filter((h) => h === genesis)).toHaveLength(1);
+      expect(prevHashes.filter((h) => h === first.thisHash || h === second.thisHash)).toHaveLength(
+        1,
+      );
+    } finally {
+      await db.delete(workspaces).where(eq(workspaces.id, ws.id));
+    }
   });
 });
