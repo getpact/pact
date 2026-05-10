@@ -2,7 +2,7 @@ import type { Email } from "@getpact/core";
 import { Hono } from "hono";
 import { decodeMek, type Env, tokenTtlSeconds } from "./env.js";
 import { buildWorkspaceJwks } from "./jwks.js";
-import { mintTokenForEmail } from "./mint.js";
+import { mintTokenForEmail, redeemRefreshAndMint } from "./mint.js";
 import { createWorkspace } from "./workspace.js";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -33,9 +33,32 @@ app.post("/v1/dev/mint", async (c) => {
   return c.json(result);
 });
 
+app.post("/v1/refresh", async (c) => {
+  const body = await c.req.json<{
+    workspaceId: string;
+    refreshToken: string;
+    audience: string;
+  }>();
+  const result = await redeemRefreshAndMint(c.env.DATABASE_URL, decodeMek(c.env), {
+    workspaceId: body.workspaceId,
+    refreshToken: body.refreshToken,
+    audience: body.audience,
+    ttlSeconds: tokenTtlSeconds(c.env),
+    issuerUrl: c.env.ISSUER_BASE_URL,
+  });
+  if (!result) return c.json({ error: "invalid_grant" }, 401);
+  return c.json(result);
+});
+
 app.get("/v1/workspaces/:id/.well-known/jwks.json", async (c) => {
   const id = c.req.param("id");
-  const jwks = await buildWorkspaceJwks(c.env.DATABASE_URL, id);
+  const jwks = await buildWorkspaceJwks(c.env.DATABASE_URL, id, "jwt");
+  return c.json(jwks, 200, { "cache-control": "public, max-age=300" });
+});
+
+app.get("/v1/workspaces/:id/.well-known/audit-jwks.json", async (c) => {
+  const id = c.req.param("id");
+  const jwks = await buildWorkspaceJwks(c.env.DATABASE_URL, id, "audit");
   return c.json(jwks, 200, { "cache-control": "public, max-age=300" });
 });
 

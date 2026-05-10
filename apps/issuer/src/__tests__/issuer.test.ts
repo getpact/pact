@@ -142,6 +142,101 @@ run("issuer end-to-end", () => {
     expect(key?.x).toBeDefined();
   });
 
+  it("rotates refresh token on each redeem and rejects reuse", async () => {
+    const env = await buildEnv();
+    const slug = `iss-rt-${Date.now()}`;
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "Rt", adminEmail: "alice@example.com" }),
+      },
+      env,
+    );
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+
+    const mintRes = await app.request(
+      "/v1/dev/mint",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    const minted = (await mintRes.json()) as { token: string; refreshToken: string };
+    expect(minted.refreshToken.length).toBeGreaterThan(20);
+
+    const refreshRes = await app.request(
+      "/v1/refresh",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          refreshToken: minted.refreshToken,
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(refreshRes.status).toBe(200);
+    const rotated = (await refreshRes.json()) as { token: string; refreshToken: string };
+    expect(rotated.refreshToken).not.toBe(minted.refreshToken);
+    expect(rotated.token).not.toBe(minted.token);
+
+    const reuseRes = await app.request(
+      "/v1/refresh",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          refreshToken: minted.refreshToken,
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(reuseRes.status).toBe(401);
+  });
+
+  it("rejects refresh with bogus token", async () => {
+    const env = await buildEnv();
+    const slug = `iss-rtb-${Date.now()}`;
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "Rtb", adminEmail: "admin@example.com" }),
+      },
+      env,
+    );
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+    const res = await app.request(
+      "/v1/refresh",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          refreshToken: "not-a-real-refresh",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("rejects mint for unknown email", async () => {
     const env = await buildEnv();
     const slug = `iss-err-${Date.now()}`;
