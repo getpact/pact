@@ -10,6 +10,7 @@ export type AuthContext = {
   groups: string[];
   roles: string[];
   jti: string;
+  token: string;
 };
 
 export const authenticate = async (
@@ -64,5 +65,6 @@ export const authenticate = async (
     groups: (claims.groups as string[] | undefined) ?? [],
     roles: (claims.scopes as string[] | undefined) ?? [],
     jti,
+    token,
   };
 };
