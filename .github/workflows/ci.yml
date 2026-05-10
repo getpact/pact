@@ -8,6 +8,23 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pact
+          POSTGRES_PASSWORD: pact
+          POSTGRES_DB: pact
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://pact:pact@localhost:5432/pact
+      RLS_TEST_DB: postgres://pact_app:pact_app@localhost:5432/pact
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -16,6 +33,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @getpact/db db:migrate
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
