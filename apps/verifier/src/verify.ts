@@ -6,6 +6,9 @@ import { listVerifyingKeys, loadActiveSigningKey } from "@getpact/keystore";
 import { evaluate, type TokenClaims, tryParsePolicy } from "@getpact/policy";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { decodeJwt, decodeProtectedHeader } from "jose";
+import { cacheKey, type RevocationCache } from "./cache.js";
+
+const REVOCATION_CACHE_TTL = 60;
 
 export type VerifyInput = {
   token: string;
@@ -63,11 +66,14 @@ const tryAudit = async (
   }
 };
 
-export const verifyAction = async (
-  databaseUrl: string,
-  rawMek: Uint8Array,
-  input: VerifyInput,
-): Promise<VerifyOutput> => {
+export type VerifyDeps = {
+  databaseUrl: string;
+  rawMek: Uint8Array;
+  cache?: RevocationCache;
+};
+
+export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promise<VerifyOutput> => {
+  const { databaseUrl, rawMek, cache } = deps;
   let claims: ReturnType<typeof decodeJwt>;
   try {
     claims = decodeJwt(input.token);
@@ -113,14 +119,25 @@ export const verifyAction = async (
     return result(false, ["signature invalid"], sub);
   }
 
-  const revoked = await withWorkspace(db, workspaceId, (tx) =>
-    tx
-      .select({ jti: revokedJtis.jti })
-      .from(revokedJtis)
-      .where(and(eq(revokedJtis.workspaceId, workspaceId), eq(revokedJtis.jti, jti)))
-      .limit(1),
-  );
-  if (revoked.length > 0) {
+  const ck = cacheKey(workspaceId, jti);
+  let revokedFlag: boolean | null = null;
+  if (cache) {
+    revokedFlag = await cache.get(ck);
+  }
+  if (revokedFlag === null) {
+    const revokedRows = await withWorkspace(db, workspaceId, (tx) =>
+      tx
+        .select({ jti: revokedJtis.jti })
+        .from(revokedJtis)
+        .where(and(eq(revokedJtis.workspaceId, workspaceId), eq(revokedJtis.jti, jti)))
+        .limit(1),
+    );
+    revokedFlag = revokedRows.length > 0;
+    if (cache) {
+      await cache.set(ck, revokedFlag, REVOCATION_CACHE_TTL);
+    }
+  }
+  if (revokedFlag === true) {
     await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["token revoked"], sub, input);
     return result(false, ["token revoked"], sub);
   }
