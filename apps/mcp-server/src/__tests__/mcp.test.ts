@@ -1,9 +1,12 @@
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
-import { createClient } from "@getpact/db";
-import { workspaces } from "@getpact/db/schema";
+import { createClient, withWorkspace } from "@getpact/db";
+import { policies, workspaces } from "@getpact/db/schema";
 import { eq } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
+import verifier from "../../../../apps/verifier/src/index.js";
 import app from "../index.js";
 
 const url = process.env.DATABASE_URL;
@@ -196,5 +199,163 @@ run("mcp server", () => {
     const body = (await res.json()) as { error?: { code: number; message: string } };
     expect(body.error?.code).toBe(-32601);
     expect(body.error?.message).toContain("nonexistent.tool");
+  });
+});
+
+run("mcp server with verifier", () => {
+  const adminDb = createClient(url as string);
+  const cleanup: string[] = [];
+  let server: ReturnType<typeof createServer>;
+  let verifierUrl: string;
+  let proxyEnv: Record<string, unknown> = {};
+
+  beforeAll(async () => {
+    server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let body = "";
+      req.on("data", (c) => {
+        body += c;
+      });
+      req.on("end", async () => {
+        try {
+          const init: RequestInit = {
+            method: req.method,
+            headers: { "content-type": "application/json" },
+          };
+          if (req.method !== "GET" && req.method !== "HEAD") init.body = body;
+          const upstreamRes = await verifier.request(req.url ?? "/", init, proxyEnv);
+          const text = await upstreamRes.text();
+          res.writeHead(upstreamRes.status, {
+            "content-type": upstreamRes.headers.get("content-type") ?? "application/json",
+          });
+          res.end(text);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : "proxy error";
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: message }));
+        }
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as AddressInfo).port;
+    verifierUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(
+    () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      ),
+  );
+
+  afterEach(async () => {
+    while (cleanup.length > 0) {
+      const id = cleanup.pop();
+      if (!id) continue;
+      try {
+        await adminDb.delete(workspaces).where(eq(workspaces.id, id));
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  const setupWithPolicy = async (policyBody: unknown) => {
+    const env = await buildEnv();
+    const slug = `mcpv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const createRes = await issuer.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "MCPV", adminEmail: "alice@example.com" }),
+      },
+      env,
+    );
+    const created = (await createRes.json()) as { workspaceId: string; adminUserId: string };
+    cleanup.push(created.workspaceId);
+
+    await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx.insert(policies).values({
+        workspaceId: created.workspaceId,
+        version: 1,
+        body: policyBody,
+        createdBy: created.adminUserId,
+      }),
+    );
+
+    const issueRes = await issuer.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    const issued = (await issueRes.json()) as { token: string };
+    return { env, slug, created, token: issued.token };
+  };
+
+  it("calls verifier and runs tool when policy allows", async () => {
+    const { env, slug, token } = await setupWithPolicy({
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+
+    proxyEnv = { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK };
+    const res = await app.request(
+      `/${slug}/mcp`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "pact.whoami", arguments: {} },
+        }),
+      },
+      { DATABASE_URL: env.DATABASE_URL, VERIFIER_URL: verifierUrl, MCP_AUDIENCE: "pact-mcp" },
+    );
+    const body = (await res.json()) as {
+      result?: { content: Array<{ text: string }> };
+      error?: unknown;
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.result?.content[0]?.text).toContain("alice@example.com");
+  });
+
+  it("denies tool when policy denies", async () => {
+    const { env, slug, token } = await setupWithPolicy({
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "deny" }],
+    });
+
+    proxyEnv = { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK };
+    const res = await app.request(
+      `/${slug}/mcp`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "pact.whoami", arguments: {} },
+        }),
+      },
+      { DATABASE_URL: env.DATABASE_URL, VERIFIER_URL: verifierUrl, MCP_AUDIENCE: "pact-mcp" },
+    );
+    const body = (await res.json()) as { error?: { code: number; data?: { reasons: string[] } } };
+    expect(body.error?.code).toBe(-32001);
+    expect(body.error?.data?.reasons).toBeDefined();
   });
 });
