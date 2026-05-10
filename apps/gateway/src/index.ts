@@ -26,6 +26,7 @@ type Env = {
   GATEWAY_RATE_LIMIT?: string;
   GATEWAY_RATE_WINDOW_SECONDS?: string;
   GATEWAY_AUDIT_MODE?: string;
+  GATEWAY_FORWARD_HEADER_ALLOWLIST?: string;
   UPSTREAM_HOST_ALLOWLIST?: string;
 };
 
@@ -161,35 +162,27 @@ export const verify = async (
   }
 };
 
-export const forwardedRequestHeaders = (headers: Headers): Headers => {
+const DEFAULT_FORWARD_HEADER_ALLOWLIST = [
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "content-type",
+  "user-agent",
+];
+
+const parseHeaderAllowlist = (raw: string | undefined): Set<string> =>
+  new Set(
+    (raw ?? DEFAULT_FORWARD_HEADER_ALLOWLIST.join(","))
+      .split(",")
+      .map((v) => v.trim().toLowerCase())
+      .filter((v) => v.length > 0),
+  );
+
+export const forwardedRequestHeaders = (headers: Headers, allowlist?: string): Headers => {
   const out = new Headers();
-  const blocked = new Set([
-    "authorization",
-    "cf-connecting-ip",
-    "cf-ipcountry",
-    "cf-ray",
-    "connection",
-    "content-length",
-    "cookie",
-    "forwarded",
-    "host",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-    "x-api-key",
-    "x-forwarded-for",
-    "x-forwarded-host",
-    "x-forwarded-proto",
-    "x-http-method",
-    "x-http-method-override",
-    "x-method-override",
-    "x-real-ip",
-  ]);
+  const allowed = parseHeaderAllowlist(allowlist);
   headers.forEach((value, key) => {
-    if (!blocked.has(key.toLowerCase())) out.set(key, value);
+    if (allowed.has(key.toLowerCase())) out.set(key, value);
   });
   return out;
 };
@@ -439,7 +432,10 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   const controller = new AbortController();
   const timeoutMs = upstreamTimeout(c.env);
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const outboundHeaders = forwardedRequestHeaders(c.req.raw.headers);
+  const outboundHeaders = forwardedRequestHeaders(
+    c.req.raw.headers,
+    c.env.GATEWAY_FORWARD_HEADER_ALLOWLIST,
+  );
   if (brainBearerToken) outboundHeaders.set("authorization", `Bearer ${brainBearerToken}`);
   const init: RequestInit = {
     method: c.req.method,

@@ -99,11 +99,12 @@ describe("gateway", () => {
     ).toThrow("gateway path escapes upstream base");
   });
 
-  it("strips method override and credential forwarding headers", () => {
+  it("forwards only explicitly allowed request headers", () => {
     const headers = forwardedRequestHeaders(
       new Headers({
         authorization: "Bearer secret",
         cookie: "session=secret",
+        "content-type": "application/json",
         "x-api-key": "secret",
         "x-client": "test",
         "x-forwarded-for": "10.0.0.1",
@@ -111,8 +112,10 @@ describe("gateway", () => {
         "x-http-method-override": "DELETE",
         "x-method-override": "PATCH",
       }),
+      "content-type,x-client",
     );
     expect(headers.get("x-client")).toBe("test");
+    expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("authorization")).toBeNull();
     expect(headers.get("cookie")).toBeNull();
     expect(headers.get("x-api-key")).toBeNull();
@@ -246,6 +249,7 @@ run("gateway integration", () => {
         VERIFIER_URL: "https://verifier.test",
         VERIFIER_SERVICE_TOKEN: "verifier-secret",
         GATEWAY_AUDIENCE: "pact-gateway",
+        GATEWAY_FORWARD_HEADER_ALLOWLIST: "x-client",
         MEK: testEnv.MEK,
       },
     );
