@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -27,7 +27,9 @@ export const loadConfig = async (): Promise<CliConfig | null> => {
 
 export const saveConfig = async (cfg: CliConfig): Promise<void> => {
   await mkdir(dir(), { recursive: true, mode: 0o700 });
+  await chmod(dir(), 0o700);
   await writeFile(path(), JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  await chmod(path(), 0o600);
 };
 
 export const ensureConfigDir = async (): Promise<void> => {

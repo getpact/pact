@@ -55,6 +55,23 @@ describe("cli config", () => {
     const mode = statSync(path).mode & 0o777;
     expect(mode).toBe(0o600);
   });
+
+  it("tightens permissions on an existing config path", async () => {
+    const { mkdirSync, statSync, writeFileSync } = await import("node:fs");
+    const { chmod } = await import("node:fs/promises");
+    const { saveConfig } = await import("../config.js");
+    const dir = join(tmp, ".pact");
+    const path = join(dir, "credentials");
+    mkdirSync(dir, { recursive: true, mode: 0o777 });
+    writeFileSync(path, "{}", { mode: 0o666 });
+    await chmod(dir, 0o777);
+    await chmod(path, 0o666);
+
+    await saveConfig({ endpoint: "https://issuer.test" });
+
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe("oauth helpers", () => {
