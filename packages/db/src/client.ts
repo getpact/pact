@@ -6,7 +6,14 @@ export type DbClient = ReturnType<typeof createClient>;
 
 export const createClient = (url: string, options?: Partial<Options<Record<string, never>>>) => {
   const defaultMax = process.env.PG_POOL_MAX ? Number.parseInt(process.env.PG_POOL_MAX, 10) : 5;
-  const client = postgres(url, { max: defaultMax, ...options });
+  const defaultIdle = process.env.PG_IDLE_TIMEOUT
+    ? Number.parseInt(process.env.PG_IDLE_TIMEOUT, 10)
+    : undefined;
+  const client = postgres(url, {
+    max: defaultMax,
+    ...(defaultIdle !== undefined ? { idle_timeout: defaultIdle } : {}),
+    ...options,
+  });
   return drizzle(client);
 };
 

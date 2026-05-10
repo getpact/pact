@@ -17,7 +17,8 @@
         "AUDIT_AUDIENCE",
         "MCP_AUDIENCE",
         "GATEWAY_AUDIENCE",
-        "PG_POOL_MAX"
+        "PG_POOL_MAX",
+        "PG_IDLE_TIMEOUT"
       ]
     },
     "typecheck": {
