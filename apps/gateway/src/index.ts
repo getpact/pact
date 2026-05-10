@@ -49,9 +49,12 @@ const parsePositiveInt = (raw: string | undefined, fallback: number, max: number
   return Math.min(parsed, max);
 };
 
-const gatewayAuditRequired = (env: Env): boolean =>
-  env.GATEWAY_AUDIT_MODE === "required" ||
-  (env.ENVIRONMENT === "production" && env.GATEWAY_AUDIT_MODE !== "best_effort");
+const gatewayAuditRequired = (env: Env): boolean => {
+  const mode = env.GATEWAY_AUDIT_MODE?.trim();
+  if (mode === "required") return true;
+  if (mode === "best_effort") return false;
+  return env.ENVIRONMENT === "production";
+};
 
 const logger = createLogger({ base: { app: "gateway" } });
 
@@ -262,7 +265,13 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   const auditFailure = (result: Awaited<ReturnType<typeof audit>>): Response | null =>
     result.ok
       ? null
-      : c.json({ error: "audit_unavailable", message: "gateway audit is required" }, 503);
+      : c.json(
+          {
+            error: "audit_unavailable",
+            message: `gateway audit is required (${result.reason})`,
+          },
+          503,
+        );
 
   const [brain] = await withWorkspace(db, workspaceId, (tx) =>
     tx
