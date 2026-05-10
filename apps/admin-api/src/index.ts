@@ -26,7 +26,7 @@ import { and, desc, eq, max, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { emitAdminAudit, writeAdminAudit } from "./audit.js";
+import { writeAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
 
@@ -75,23 +75,6 @@ const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Resp
 
 const isContext = (v: unknown): v is AdminContext =>
   typeof v === "object" && v !== null && "userId" in v;
-
-const audit = (
-  c: AppCtx,
-  ctx: AdminContext,
-  action: string,
-  target: unknown,
-  decision: "allow" | "deny" = "allow",
-): Promise<void> =>
-  emitAdminAudit({
-    databaseUrl: c.env.DATABASE_URL,
-    mek: c.env.MEK,
-    workspaceId: ctx.workspaceId,
-    actorUserId: ctx.userId,
-    action,
-    target,
-    decision,
-  });
 
 const auditInTx = (
   tx: Tx,
@@ -188,7 +171,14 @@ app.post("/v1/workspaces/:id/policies", async (c) => {
   const body = await c.req.json<{ body: unknown }>();
   const parsed = tryParsePolicy(body.body);
   if (!parsed) {
-    await audit(c, ctx, "admin.policy.rejected", { reason: "invalid" }, "deny");
+    try {
+      const db = createClient(c.env.DATABASE_URL);
+      await withWorkspace(db, workspaceId, (tx) =>
+        auditInTx(tx, c, ctx, "admin.policy.rejected", { reason: "invalid" }, "deny"),
+      );
+    } catch {
+      return c.json({ error: "audit_unavailable" }, 503);
+    }
     return c.json({ error: "invalid policy" }, 400);
   }
 
