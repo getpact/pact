@@ -21,8 +21,10 @@ export type GatewayAuditInput = {
   supporting: Record<string, unknown>;
 };
 
-export const emitGatewayAudit = async (input: GatewayAuditInput): Promise<void> => {
-  if (!input.mek) return;
+export type GatewayAuditResult = { ok: true } | { ok: false; reason: string };
+
+export const emitGatewayAudit = async (input: GatewayAuditInput): Promise<GatewayAuditResult> => {
+  if (!input.mek) return { ok: false, reason: "missing_mek" };
   try {
     const rawMek = fromBase64(input.mek);
     const [ws] = await input.db
@@ -30,7 +32,7 @@ export const emitGatewayAudit = async (input: GatewayAuditInput): Promise<void> 
       .from(schema.workspaces)
       .where(eq(schema.workspaces.id, input.workspaceId))
       .limit(1);
-    if (!ws) return;
+    if (!ws) return { ok: false, reason: "workspace_not_found" };
 
     await withWorkspace(input.db, input.workspaceId, async (tx) => {
       const auditKey = await loadActiveSigningKey(tx, input.workspaceId, "audit", rawMek);
@@ -49,7 +51,8 @@ export const emitGatewayAudit = async (input: GatewayAuditInput): Promise<void> 
         },
       });
     });
+    return { ok: true };
   } catch {
-    // best-effort: never fail gateway traffic because audit failed
+    return { ok: false, reason: "audit_failed" };
   }
 };

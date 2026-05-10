@@ -13,6 +13,9 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 - Queues: `pact-audit-archive`, `pact-oauth-refresh`
 - Vars on admin API and gateway: `UPSTREAM_HOST_ALLOWLIST` with comma-separated
   exact hosts or wildcard suffixes, for example `httpbin.org,*.slack.com`
+- Gateway audit is required in production by default. Set
+  `GATEWAY_AUDIT_MODE=best_effort` only for controlled non-critical smoke
+  environments.
 - Secrets per environment: `MEK`, `RESEND_API_KEY`, `SENTRY_DSN`, `BETTERSTACK_TOKEN`, `GOOGLE_OAUTH_CLIENT_SECRET`
 
 ## Deploy

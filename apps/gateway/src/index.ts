@@ -22,6 +22,7 @@ type Env = {
   GATEWAY_UPSTREAM_TIMEOUT_MS?: string;
   GATEWAY_RATE_LIMIT?: string;
   GATEWAY_RATE_WINDOW_SECONDS?: string;
+  GATEWAY_AUDIT_MODE?: string;
   UPSTREAM_HOST_ALLOWLIST?: string;
 };
 
@@ -47,6 +48,10 @@ const parsePositiveInt = (raw: string | undefined, fallback: number, max: number
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.min(parsed, max);
 };
+
+const gatewayAuditRequired = (env: Env): boolean =>
+  env.GATEWAY_AUDIT_MODE === "required" ||
+  (env.ENVIRONMENT === "production" && env.GATEWAY_AUDIT_MODE !== "best_effort");
 
 const logger = createLogger({ base: { app: "gateway" } });
 
@@ -231,13 +236,13 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     path: `/${path.replace(/^\/+/, "")}`,
     method: c.req.method,
   };
-  const audit = (input: {
+  const audit = async (input: {
     decision: "allow" | "deny";
     outcome: string;
     upstreamStatus?: number;
     reasons?: string[];
-  }) =>
-    emitGatewayAudit({
+  }) => {
+    const result = await emitGatewayAudit({
       db,
       mek: c.env.MEK,
       workspaceId,
@@ -252,6 +257,12 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
         ...(input.upstreamStatus !== undefined ? { upstreamStatus: input.upstreamStatus } : {}),
       },
     });
+    return result.ok || !gatewayAuditRequired(c.env) ? { ok: true as const } : result;
+  };
+  const auditFailure = (result: Awaited<ReturnType<typeof audit>>): Response | null =>
+    result.ok
+      ? null
+      : c.json({ error: "audit_unavailable", message: "gateway audit is required" }, 503);
 
   const [brain] = await withWorkspace(db, workspaceId, (tx) =>
     tx
@@ -270,11 +281,15 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
       .limit(1),
   );
   if (!brain) {
-    await audit({ decision: "deny", outcome: "brain_not_found" });
+    const failed = auditFailure(await audit({ decision: "deny", outcome: "brain_not_found" }));
+    if (failed) return failed;
     return c.json({ error: "not_found", message: "brain not found" }, 404);
   }
   if (brain.authScheme !== "none") {
-    await audit({ decision: "deny", outcome: "unsupported_auth_scheme" });
+    const failed = auditFailure(
+      await audit({ decision: "deny", outcome: "unsupported_auth_scheme" }),
+    );
+    if (failed) return failed;
     return c.json(
       { error: "not_implemented", message: "gateway brain auth is not implemented" },
       501,
@@ -298,7 +313,8 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     c.header("x-ratelimit-remaining", String(verdictRate.remaining));
     c.header("x-ratelimit-reset", String(Math.ceil(verdictRate.resetAt / 1000)));
     if (!verdictRate.allowed) {
-      await audit({ decision: "deny", outcome: "rate_limited" });
+      const failed = auditFailure(await audit({ decision: "deny", outcome: "rate_limited" }));
+      if (failed) return failed;
       const retry = Math.max(1, Math.ceil((verdictRate.resetAt - Date.now()) / 1000));
       c.header("retry-after", String(retry));
       return c.json({ error: "rate_limited", message: "too many requests" }, 429);
@@ -317,7 +333,10 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     );
   } catch (e) {
     const message = e instanceof Error ? e.message : "invalid gateway upstream";
-    await audit({ decision: "deny", outcome: "invalid_upstream", reasons: [message] });
+    const failed = auditFailure(
+      await audit({ decision: "deny", outcome: "invalid_upstream", reasons: [message] }),
+    );
+    if (failed) return failed;
     return c.json({ error: "invalid_gateway_upstream", message }, 400);
   }
 
@@ -340,17 +359,26 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     clearTimeout(timer);
     const aborted =
       controller.signal.aborted || (err instanceof Error && err.name === "AbortError");
-    await audit({ decision: "deny", outcome: aborted ? "timeout" : "upstream_failed" });
+    const failed = auditFailure(
+      await audit({ decision: "deny", outcome: aborted ? "timeout" : "upstream_failed" }),
+    );
+    if (failed) return failed;
     return aborted
       ? c.json({ error: "gateway_timeout", message: "upstream request timed out" }, 504)
       : c.json({ error: "bad_gateway", message: "upstream request failed" }, 502);
   }
   clearTimeout(timer);
   if (upstream.status >= 300 && upstream.status < 400) {
-    await audit({ decision: "deny", outcome: "redirect", upstreamStatus: upstream.status });
+    const failed = auditFailure(
+      await audit({ decision: "deny", outcome: "redirect", upstreamStatus: upstream.status }),
+    );
+    if (failed) return failed;
     return c.json({ error: "bad_gateway", message: "upstream returned redirect" }, 502);
   }
-  await audit({ decision: "allow", outcome: "forwarded", upstreamStatus: upstream.status });
+  const failed = auditFailure(
+    await audit({ decision: "allow", outcome: "forwarded", upstreamStatus: upstream.status }),
+  );
+  if (failed) return failed;
   return new Response(upstream.body, {
     status: upstream.status,
     headers: forwardedResponseHeaders(upstream.headers),

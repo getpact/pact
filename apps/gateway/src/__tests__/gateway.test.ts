@@ -313,6 +313,38 @@ run("gateway integration", () => {
     expect(upstreamCalls).toHaveLength(1);
   });
 
+  it("fails closed in production when gateway audit is unavailable", async () => {
+    const { testEnv, created, issued } = await setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        if (input.toString() === "https://verifier.test/v1/verify") {
+          return Response.json({ allow: true, reasons: ["ok"] });
+        }
+        return Response.json({ ok: true });
+      }),
+    );
+
+    const res = await app.request(
+      `/${created.workspaceId}/gateway/notion/v1/pages`,
+      { headers: { authorization: `Bearer ${issued.token}` } },
+      {
+        DATABASE_URL: testEnv.DATABASE_URL,
+        VERIFIER_URL: "https://verifier.test",
+        ENVIRONMENT: "production",
+        GATEWAY_AUDIENCE: "pact-gateway",
+        GATEWAY_RATE_LIMIT: "1000",
+        UPSTREAM_HOST_ALLOWLIST: "api.example.com",
+      },
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: "audit_unavailable",
+      message: "gateway audit is required",
+    });
+  });
+
   it("rejects a token routed through another workspace", async () => {
     const first = await setup();
     const second = await createTestWorkspace(issuer, first.testEnv, {
