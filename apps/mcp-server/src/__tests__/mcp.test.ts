@@ -9,9 +9,10 @@ import {
   uniqueSlug,
 } from "@getpact/test-helpers";
 import { eq } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
 import verifier from "../../../../apps/verifier/src/index.js";
+import { handleMcp } from "../handler.js";
 import app from "../index.js";
 
 const url = process.env.DATABASE_URL;
@@ -48,6 +49,78 @@ describe("mcp server auth hardening", () => {
       },
     );
     expect(res.status).toBe(401);
+  });
+});
+
+describe("mcp handler registry injection", () => {
+  const ctx = {
+    workspaceId: "00000000-0000-0000-0000-000000000001",
+    userId: "user-1",
+    email: "alice@example.com",
+    groups: [],
+    roles: ["admin"],
+    jti: "jti-1",
+    token: "token-1",
+  };
+
+  it("lists and calls tools from an injected registry", async () => {
+    const verify = vi.fn(async () => ({ allow: true, reasons: [] }));
+    const registry = new Map([
+      [
+        "test.echo",
+        {
+          descriptor: {
+            name: "test.echo",
+            description: "Echo test input.",
+            inputSchema: { type: "object" as const },
+          },
+          handler: async (args: Record<string, unknown>) => ({
+            content: [{ type: "text" as const, text: JSON.stringify(args) }],
+          }),
+        },
+      ],
+    ]);
+
+    const listed = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, ctx, {
+      audience: "pact-mcp",
+      deps: { databaseUrl: "postgres://unused" },
+      registry,
+    });
+    expect(listed.result).toEqual({
+      tools: [
+        {
+          name: "test.echo",
+          description: "Echo test input.",
+          inputSchema: { type: "object" },
+        },
+      ],
+    });
+
+    const called = await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "test.echo", arguments: { ok: true } },
+      },
+      ctx,
+      {
+        audience: "pact-mcp",
+        verify,
+        deps: { databaseUrl: "postgres://unused" },
+        registry,
+      },
+    );
+    expect(called.error).toBeUndefined();
+    expect(called.result).toEqual({
+      content: [{ type: "text", text: '{"ok":true}' }],
+    });
+    expect(verify).toHaveBeenCalledWith({
+      token: "token-1",
+      action: "tool:test.echo",
+      resource: "tool:test.echo",
+      audience: "pact-mcp",
+    });
   });
 });
 

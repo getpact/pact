@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSlackClient } from "../index.js";
+import { createSlackAdapter, createSlackClient } from "../index.js";
 
 describe("Slack adapter", () => {
   it("calls Slack auth.test with a bearer token", async () => {
@@ -107,5 +107,65 @@ describe("Slack adapter", () => {
       ok: false,
       error: "missing_scope",
     });
+  });
+
+  it("exports adapter tools backed by an injected token loader", async () => {
+    const calls: unknown[] = [];
+    const adapter = createSlackAdapter({
+      loadBotToken: async () => "xoxb-test",
+      createClient: () => ({
+        authTest: async () => ({ ok: true, team: "Acme" }),
+        conversationsList: async (input) => {
+          calls.push(input);
+          return { ok: true, channels: [{ id: "C1", name: "general" }], nextCursor: null };
+        },
+      }),
+    });
+    const ctx = {
+      workspaceId: "ws1",
+      userId: "u1",
+      email: "alice@example.com",
+      groups: [],
+      roles: ["admin"],
+    };
+    const deps = { databaseUrl: "postgres://unused", rawMek: new Uint8Array([1]) };
+
+    const auth = await adapter.tools
+      .find((tool) => tool.descriptor.name === "pact.slack.auth.test")
+      ?.handler({}, ctx, deps);
+    expect(auth?.content[0]?.text).toContain('"team": "Acme"');
+
+    const channels = await adapter.tools
+      .find((tool) => tool.descriptor.name === "pact.slack.channels.list")
+      ?.handler({ limit: 25, cursor: "next", types: "public_channel" }, ctx, deps);
+    expect(channels?.content[0]?.text).toContain("general");
+    expect(calls[0]).toEqual({ limit: 25, cursor: "next", types: "public_channel" });
+  });
+
+  it("adapter tools report missing vault prerequisites", async () => {
+    const adapter = createSlackAdapter({
+      loadBotToken: async () => null,
+      createClient: () => {
+        throw new Error("should not build client");
+      },
+    });
+    const ctx = {
+      workspaceId: "ws1",
+      userId: "u1",
+      email: "alice@example.com",
+      groups: [],
+      roles: ["admin"],
+    };
+
+    const noMek = await adapter.tools[0]?.handler({}, ctx, { databaseUrl: "postgres://unused" });
+    expect(noMek?.isError).toBe(true);
+    expect(noMek?.content[0]?.text).toBe("MEK is not configured");
+
+    const noToken = await adapter.tools[0]?.handler({}, ctx, {
+      databaseUrl: "postgres://unused",
+      rawMek: new Uint8Array([1]),
+    });
+    expect(noToken?.isError).toBe(true);
+    expect(noToken?.content[0]?.text).toBe("Slack bot token not found");
   });
 });

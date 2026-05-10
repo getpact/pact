@@ -164,6 +164,9 @@ importers:
 
   apps/mcp-server:
     dependencies:
+      '@getpact/adapter-sdk':
+        specifier: workspace:*
+        version: link:../../packages/adapter-sdk
       '@getpact/adapter-slack':
         specifier: workspace:*
         version: link:../../packages/adapter-slack
@@ -272,7 +275,11 @@ importers:
 
   packages/adapter-sdk: {}
 
-  packages/adapter-slack: {}
+  packages/adapter-slack:
+    dependencies:
+      '@getpact/adapter-sdk':
+        specifier: workspace:*
+        version: link:../adapter-sdk
 
   packages/audit:
     dependencies:

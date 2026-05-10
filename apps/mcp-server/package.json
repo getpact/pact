@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@getpact/adapter-sdk": "workspace:*",
     "@getpact/adapter-slack": "workspace:*",
     "@getpact/core": "workspace:*",
     "@getpact/crypto": "workspace:*",

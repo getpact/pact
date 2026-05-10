@@ -1,42 +1,20 @@
-import { createSlackClient } from "@getpact/adapter-slack";
+import {
+  type Adapter,
+  type AdapterTool,
+  buildToolRegistry,
+  json,
+  type ToolDescriptor,
+} from "@getpact/adapter-sdk";
+import { createSlackAdapter } from "@getpact/adapter-slack";
 import { createClient, withWorkspace } from "@getpact/db";
 import { auditEvents, policies, workspaces } from "@getpact/db/schema";
 import { loadSecretString } from "@getpact/vault";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import type { AuthContext } from "./auth.js";
 
-export type ToolDescriptor = {
-  name: string;
-  description: string;
-  inputSchema: { type: "object"; properties?: Record<string, unknown>; required?: string[] };
-};
+export type { ToolDeps, ToolDescriptor, ToolResult } from "@getpact/adapter-sdk";
+export type Tool = AdapterTool;
 
-export type ToolResult = {
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-};
-
-export type ToolDeps = {
-  databaseUrl: string;
-  rawMek?: Uint8Array;
-};
-
-export type ToolHandler = (
-  args: Record<string, unknown>,
-  ctx: AuthContext,
-  deps: ToolDeps,
-) => Promise<ToolResult>;
-
-export type Tool = {
-  descriptor: ToolDescriptor;
-  handler: ToolHandler;
-};
-
-const json = (value: unknown): ToolResult => ({
-  content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
-});
-
-const whoami: Tool = {
+const whoami: AdapterTool = {
   descriptor: {
     name: "pact.whoami",
     description: "Return the verified identity, groups, and roles for the current Pact JWT.",
@@ -52,7 +30,7 @@ const whoami: Tool = {
     }),
 };
 
-const workspaceInfo: Tool = {
+const workspaceInfo: AdapterTool = {
   descriptor: {
     name: "pact.workspace.info",
     description: "Return the workspace metadata visible to the current token.",
@@ -84,7 +62,7 @@ const workspaceInfo: Tool = {
   },
 };
 
-const auditRecent: Tool = {
+const auditRecent: AdapterTool = {
   descriptor: {
     name: "pact.audit.recent",
     description: "Return up to 50 most recent audit events for the current workspace.",
@@ -131,7 +109,7 @@ const auditRecent: Tool = {
   },
 };
 
-const policyActive: Tool = {
+const policyActive: AdapterTool = {
   descriptor: {
     name: "pact.policy.active",
     description: "Return the active policy version body for the current workspace.",
@@ -162,79 +140,32 @@ const policyActive: Tool = {
   },
 };
 
-const slackAuthTest: Tool = {
-  descriptor: {
-    name: "pact.slack.auth.test",
-    description: "Verify the workspace Slack bot token stored in Pact Vault.",
-    inputSchema: { type: "object" },
-  },
-  handler: async (_args, ctx, deps) => {
-    if (!deps.rawMek) {
-      return { content: [{ type: "text", text: "MEK is not configured" }], isError: true };
-    }
+const pactAdapter: Adapter = {
+  name: "pact",
+  tools: [whoami, workspaceInfo, auditRecent, policyActive],
+};
+
+const slackAdapter = createSlackAdapter({
+  loadBotToken: async (ctx, deps) => {
+    if (!deps.rawMek) return null;
     const db = createClient(deps.databaseUrl);
-    const token = await withWorkspace(db, ctx.workspaceId, (tx) =>
+    return withWorkspace(db, ctx.workspaceId, (tx) =>
       loadSecretString(tx, deps.rawMek as Uint8Array, {
         workspaceId: ctx.workspaceId,
         kind: "slack",
         target: "bot-token",
       }),
     );
-    if (!token) {
-      return { content: [{ type: "text", text: "Slack bot token not found" }], isError: true };
-    }
-    const result = await createSlackClient({ token }).authTest();
-    return json(result);
   },
-};
+});
 
-const slackChannelsList: Tool = {
-  descriptor: {
-    name: "pact.slack.channels.list",
-    description: "List Slack channels visible to the workspace bot token (paginated).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "number" },
-        cursor: { type: "string" },
-        types: { type: "string" },
-      },
-    },
-  },
-  handler: async (args, ctx, deps) => {
-    if (!deps.rawMek) {
-      return { content: [{ type: "text", text: "MEK is not configured" }], isError: true };
-    }
-    const db = createClient(deps.databaseUrl);
-    const token = await withWorkspace(db, ctx.workspaceId, (tx) =>
-      loadSecretString(tx, deps.rawMek as Uint8Array, {
-        workspaceId: ctx.workspaceId,
-        kind: "slack",
-        target: "bot-token",
-      }),
-    );
-    if (!token) {
-      return { content: [{ type: "text", text: "Slack bot token not found" }], isError: true };
-    }
-    const limit = typeof args.limit === "number" ? args.limit : undefined;
-    const cursor = typeof args.cursor === "string" ? args.cursor : undefined;
-    const types = typeof args.types === "string" ? args.types : undefined;
-    const result = await createSlackClient({ token }).conversationsList({
-      ...(limit !== undefined ? { limit } : {}),
-      ...(cursor ? { cursor } : {}),
-      ...(types ? { types } : {}),
-    });
-    return json(result);
-  },
-};
+const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter];
 
-export const registry: Map<string, Tool> = new Map([
-  [whoami.descriptor.name, whoami],
-  [workspaceInfo.descriptor.name, workspaceInfo],
-  [auditRecent.descriptor.name, auditRecent],
-  [policyActive.descriptor.name, policyActive],
-  [slackAuthTest.descriptor.name, slackAuthTest],
-  [slackChannelsList.descriptor.name, slackChannelsList],
-]);
+export const createToolRegistry = (
+  adapters: Adapter[] = defaultAdapters,
+): Map<string, AdapterTool> => buildToolRegistry(adapters);
 
-export const listTools = (): ToolDescriptor[] => [...registry.values()].map((t) => t.descriptor);
+export const registry: Map<string, AdapterTool> = createToolRegistry();
+
+export const listTools = (toolRegistry: Map<string, AdapterTool> = registry): ToolDescriptor[] =>
+  [...toolRegistry.values()].map((t) => t.descriptor);

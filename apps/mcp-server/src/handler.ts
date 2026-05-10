@@ -1,5 +1,5 @@
 import type { AuthContext } from "./auth.js";
-import { listTools, registry, type ToolDeps } from "./tools.js";
+import { listTools, registry, type Tool, type ToolDeps } from "./tools.js";
 import type { VerifyClient } from "./verify-client.js";
 
 type JsonRpcRequest = {
@@ -37,6 +37,7 @@ export type HandleOptions = {
   audience: string;
   verify?: VerifyClient;
   deps: ToolDeps;
+  registry?: Map<string, Tool>;
 };
 
 export const handleMcp = async (
@@ -45,6 +46,7 @@ export const handleMcp = async (
   opts: HandleOptions,
 ): Promise<JsonRpcResponse> => {
   const id = body.id ?? null;
+  const toolRegistry = opts.registry ?? registry;
   switch (body.method) {
     case "initialize":
       return ok(id, {
@@ -54,14 +56,14 @@ export const handleMcp = async (
       });
 
     case "tools/list":
-      return ok(id, { tools: listTools() });
+      return ok(id, { tools: listTools(toolRegistry) });
 
     case "tools/call": {
       const params = body.params ?? {};
       const name = params.name as string | undefined;
       const args = (params.arguments as Record<string, unknown> | undefined) ?? {};
       if (!name) return err(id, -32602, "missing tool name");
-      const tool = registry.get(name);
+      const tool = toolRegistry.get(name);
       if (!tool) return err(id, -32601, `unknown tool: ${name}`);
 
       const resource = `tool:${name}`;
