@@ -1,0 +1,68 @@
+import { canonicalizeEmail, type Email } from "@getpact/core";
+import { createClient, withWorkspace } from "@getpact/db";
+import { roles, userRoles, users, workspaces } from "@getpact/db/schema";
+import { createSigningKey } from "@getpact/keystore";
+
+export type CreateWorkspaceInput = {
+  slug: string;
+  name: string;
+  region?: string;
+  adminEmail: string;
+  adminName?: string;
+};
+
+export type CreateWorkspaceResult = {
+  workspaceId: string;
+  adminUserId: string;
+  jwtKeyId: string;
+  auditKeyId: string;
+};
+
+export const createWorkspace = async (
+  databaseUrl: string,
+  rawMek: Uint8Array,
+  input: CreateWorkspaceInput,
+): Promise<CreateWorkspaceResult> => {
+  const db = createClient(databaseUrl);
+
+  const [ws] = await db
+    .insert(workspaces)
+    .values({ slug: input.slug, name: input.name, region: input.region ?? "us-east-1" })
+    .returning();
+  if (!ws) throw new Error("workspace insert failed");
+
+  return withWorkspace(db, ws.id, async (tx) => {
+    const email = canonicalizeEmail(input.adminEmail) as Email;
+    const [user] = await tx
+      .insert(users)
+      .values({ workspaceId: ws.id, email, name: input.adminName ?? null })
+      .returning();
+    if (!user) throw new Error("admin user insert failed");
+
+    const [adminRole] = await tx
+      .insert(roles)
+      .values({ workspaceId: ws.id, name: "admin", description: "Workspace admin" })
+      .returning();
+    if (!adminRole) throw new Error("admin role insert failed");
+
+    await tx.insert(userRoles).values({ userId: user.id, roleId: adminRole.id });
+
+    const jwtKey = await createSigningKey(tx, {
+      workspaceId: ws.id,
+      kind: "jwt",
+      rawMek,
+    });
+    const auditKey = await createSigningKey(tx, {
+      workspaceId: ws.id,
+      kind: "audit",
+      rawMek,
+    });
+
+    return {
+      workspaceId: ws.id,
+      adminUserId: user.id,
+      jwtKeyId: jwtKey.id,
+      auditKeyId: auditKey.id,
+    };
+  });
+};
