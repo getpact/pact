@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeJwt } from "jose";
 import { emitGatewayAudit } from "./audit.js";
+import { databaseRateLimiter } from "./rate-limit.js";
 
 type Env = {
   DATABASE_URL: string;
@@ -14,6 +15,8 @@ type Env = {
   ENVIRONMENT?: string;
   GATEWAY_AUDIENCE?: string;
   GATEWAY_UPSTREAM_TIMEOUT_MS?: string;
+  GATEWAY_RATE_LIMIT?: string;
+  GATEWAY_RATE_WINDOW_SECONDS?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -27,6 +30,16 @@ const upstreamTimeout = (env: Env): number => {
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_UPSTREAM_TIMEOUT_MS;
   return Math.min(parsed, MAX_UPSTREAM_TIMEOUT_MS);
+};
+
+const DEFAULT_RATE_LIMIT = 60;
+const DEFAULT_RATE_WINDOW_SECONDS = 60;
+
+const parsePositiveInt = (raw: string | undefined, fallback: number, max: number): number => {
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
 };
 
 const logger = createLogger({ base: { app: "gateway" } });
@@ -253,6 +266,30 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
       { error: "not_implemented", message: "gateway brain auth is not implemented" },
       501,
     );
+  }
+
+  if (c.env.ENVIRONMENT !== "test") {
+    const limit = parsePositiveInt(c.env.GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1000);
+    const windowSeconds = parsePositiveInt(
+      c.env.GATEWAY_RATE_WINDOW_SECONDS,
+      DEFAULT_RATE_WINDOW_SECONDS,
+      3600,
+    );
+    const rateLimiter = databaseRateLimiter(c.env.DATABASE_URL);
+    const verdictRate = await rateLimiter.hit(
+      `gateway:${workspaceId}:${brainKind}`,
+      limit,
+      windowSeconds,
+    );
+    c.header("x-ratelimit-limit", String(limit));
+    c.header("x-ratelimit-remaining", String(verdictRate.remaining));
+    c.header("x-ratelimit-reset", String(Math.ceil(verdictRate.resetAt / 1000)));
+    if (!verdictRate.allowed) {
+      await audit({ decision: "deny", outcome: "rate_limited" });
+      const retry = Math.max(1, Math.ceil((verdictRate.resetAt - Date.now()) / 1000));
+      c.header("retry-after", String(retry));
+      return c.json({ error: "rate_limited", message: "too many requests" }, 429);
+    }
   }
 
   let target: URL;
