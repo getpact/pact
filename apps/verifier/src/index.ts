@@ -1,4 +1,5 @@
 import { fromBase64 } from "@getpact/crypto";
+import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type KVNamespace, kvRevocationCache } from "./cache.js";
@@ -14,6 +15,8 @@ type Env = {
 
 const app = new Hono<{ Bindings: Env }>();
 
+const logger = createLogger({ base: { app: "verifier" } });
+app.use("*", requestLogger(logger, "verifier"));
 app.use("/v1/*", bodyLimit({ maxSize: 16 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));

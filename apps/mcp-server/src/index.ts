@@ -1,4 +1,5 @@
 import { PactError } from "@getpact/core";
+import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { authenticate } from "./auth.js";
@@ -14,6 +15,8 @@ type Env = {
 
 const app = new Hono<{ Bindings: Env }>();
 
+const logger = createLogger({ base: { app: "mcp-server" } });
+app.use("*", requestLogger(logger, "mcp-server"));
 app.use("/:workspace/mcp", bodyLimit({ maxSize: 256 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));

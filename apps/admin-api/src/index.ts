@@ -1,6 +1,7 @@
 import { canonicalizeEmail, type Email, PactError } from "@getpact/core";
 import { createClient, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, invites, policies, revokedJtis, users } from "@getpact/db/schema";
+import { createLogger, requestLogger } from "@getpact/logger";
 import { tryParsePolicy } from "@getpact/policy";
 import { and, desc, eq, max, sql } from "drizzle-orm";
 import type { Context } from "hono";
@@ -21,6 +22,8 @@ type AppCtx = Context<{ Bindings: Env }>;
 
 const app = new Hono<{ Bindings: Env }>();
 
+const logger = createLogger({ base: { app: "admin-api" } });
+app.use("*", requestLogger(logger, "admin-api"));
 app.use("/v1/*", bodyLimit({ maxSize: 64 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));

@@ -1,6 +1,7 @@
 import { PactError } from "@getpact/core";
 import { createClient, withWorkspace } from "@getpact/db";
 import { auditChainState, workspaceSigningKeys, workspaces } from "@getpact/db/schema";
+import { createLogger, requestLogger } from "@getpact/logger";
 import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -20,6 +21,8 @@ const DEFAULT_LIMIT = 50;
 
 const app = new Hono<{ Bindings: Env }>();
 
+const logger = createLogger({ base: { app: "audit-api" } });
+app.use("*", requestLogger(logger, "audit-api"));
 app.use("/v1/*", bodyLimit({ maxSize: 16 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
