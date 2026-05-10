@@ -218,8 +218,11 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
 
   const workspaceParam = c.req.param("workspace");
   const brainKind = c.req.param("brain");
-  const path = c.req.param("*") ?? "";
   const requestUrl = new URL(c.req.url);
+  const prefix = `/${workspaceParam}/gateway/${brainKind}/`;
+  const path = requestUrl.pathname.startsWith(prefix)
+    ? requestUrl.pathname.slice(prefix.length)
+    : "";
   const audience = c.env.GATEWAY_AUDIENCE ?? "pact-gateway";
   const authz = gatewayAuthorization(c.req.method, brainKind, path, requestUrl.search);
 
