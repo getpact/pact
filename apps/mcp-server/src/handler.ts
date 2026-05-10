@@ -1,5 +1,6 @@
 import type { AuthContext } from "./auth.js";
 import { listTools, registry } from "./tools.js";
+import type { VerifyClient } from "./verify-client.js";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -32,9 +33,15 @@ const err = (
   error: data === undefined ? { code, message } : { code, message, data },
 });
 
+export type HandleOptions = {
+  audience: string;
+  verify?: VerifyClient;
+};
+
 export const handleMcp = async (
   body: JsonRpcRequest,
   ctx: AuthContext,
+  opts: HandleOptions,
 ): Promise<JsonRpcResponse> => {
   const id = body.id ?? null;
   switch (body.method) {
@@ -55,6 +62,20 @@ export const handleMcp = async (
       if (!name) return err(id, -32602, "missing tool name");
       const tool = registry.get(name);
       if (!tool) return err(id, -32601, `unknown tool: ${name}`);
+
+      if (opts.verify) {
+        const resource = typeof args.resource === "string" ? args.resource : `tool:${name}`;
+        const verdict = await opts.verify({
+          token: ctx.token,
+          action: `tool:${name}`,
+          resource,
+          audience: opts.audience,
+        });
+        if (!verdict.allow) {
+          return err(id, -32001, "denied", { reasons: verdict.reasons });
+        }
+      }
+
       try {
         const result = await tool.handler(args, ctx);
         return ok(id, result);

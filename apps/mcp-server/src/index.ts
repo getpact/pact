@@ -1,10 +1,12 @@
 import { Hono } from "hono";
 import { authenticate } from "./auth.js";
 import { handleMcp } from "./handler.js";
+import { httpVerifyClient } from "./verify-client.js";
 
 type Env = {
   DATABASE_URL: string;
   MCP_AUDIENCE?: string;
+  VERIFIER_URL?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -29,7 +31,11 @@ app.post("/:workspace/mcp", async (c) => {
   }
 
   const body = await c.req.json();
-  const response = await handleMcp(body, ctx);
+  const verify = c.env.VERIFIER_URL ? httpVerifyClient(c.env.VERIFIER_URL) : undefined;
+  const response = await handleMcp(body, ctx, {
+    audience,
+    ...(verify ? { verify } : {}),
+  });
   return c.json(response);
 });
 
