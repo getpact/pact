@@ -11,9 +11,9 @@ import {
   importPublicSpki,
   toBase64,
 } from "@getpact/crypto";
-import type { Tx } from "@getpact/db";
-import { schema } from "@getpact/db";
-import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import type { DbClient, Tx } from "@getpact/db";
+import { schema, withWorkspace } from "@getpact/db";
+import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 
 export type SigningKeyKind = "jwt" | "audit";
 
@@ -136,4 +136,107 @@ export const listVerifyingKeys = async (
       publicKey: await importPublicSpki(fromBase64(row.publicKeySpki)),
     })),
   );
+};
+
+export type RotateOptions = {
+  workspaceId: string;
+  kind: SigningKeyKind;
+  rawMek: Uint8Array;
+  verificationGraceSeconds?: number;
+};
+
+const DEFAULT_VERIFICATION_GRACE = 7 * 24 * 60 * 60;
+
+export type RotateResult = {
+  oldKeyId: string | null;
+  newKeyId: string;
+};
+
+export const rotateSigningKey = async (tx: Tx, opts: RotateOptions): Promise<RotateResult> => {
+  const grace = opts.verificationGraceSeconds ?? DEFAULT_VERIFICATION_GRACE;
+
+  const expired = (await tx.execute(
+    sql`UPDATE workspace_signing_keys
+        SET valid_for_signing_until = NOW(),
+            valid_for_verification_until = NOW() + (${grace} || ' seconds')::interval
+        WHERE workspace_id = ${opts.workspaceId}
+          AND kind = ${opts.kind}
+          AND valid_for_signing_until IS NULL
+        RETURNING id`,
+  )) as unknown as Array<{ id: string }>;
+  const oldKeyId = expired[0]?.id ?? null;
+
+  const created = await createSigningKey(tx, {
+    workspaceId: opts.workspaceId,
+    kind: opts.kind,
+    rawMek: opts.rawMek,
+  });
+
+  return { oldKeyId, newKeyId: created.id };
+};
+
+export type StaleSigningKey = {
+  workspaceId: string;
+  keyId: string;
+  kind: SigningKeyKind;
+  createdAt: Date;
+};
+
+export const findStaleSigningKeys = async (
+  db: DbClient,
+  kind: SigningKeyKind,
+  maxAgeSeconds: number,
+): Promise<StaleSigningKey[]> => {
+  const rows = (await db.execute(
+    sql`SELECT id, workspace_id, kind, created_at
+        FROM workspace_signing_keys
+        WHERE kind = ${kind}
+          AND valid_for_signing_until IS NULL
+          AND created_at < NOW() - (${maxAgeSeconds} || ' seconds')::interval`,
+  )) as unknown as Array<{
+    id: string;
+    workspace_id: string;
+    kind: SigningKeyKind;
+    created_at: Date;
+  }>;
+  return rows.map((r) => ({
+    workspaceId: r.workspace_id,
+    keyId: r.id,
+    kind: r.kind,
+    createdAt: r.created_at,
+  }));
+};
+
+export type RotateStaleResult = {
+  rotated: number;
+  errors: number;
+};
+
+export const rotateStaleKeys = async (
+  db: DbClient,
+  rawMek: Uint8Array,
+  kind: SigningKeyKind,
+  maxAgeSeconds: number,
+  graceSeconds?: number,
+): Promise<RotateStaleResult> => {
+  void lt;
+  const stale = await findStaleSigningKeys(db, kind, maxAgeSeconds);
+  let rotated = 0;
+  let errors = 0;
+  for (const key of stale) {
+    try {
+      await withWorkspace(db, key.workspaceId, (tx) =>
+        rotateSigningKey(tx, {
+          workspaceId: key.workspaceId,
+          kind,
+          rawMek,
+          ...(graceSeconds !== undefined ? { verificationGraceSeconds: graceSeconds } : {}),
+        }),
+      );
+      rotated++;
+    } catch {
+      errors++;
+    }
+  }
+  return { rotated, errors };
 };
