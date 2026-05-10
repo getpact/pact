@@ -1,0 +1,30 @@
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: "*.{js,ts,jsx,tsx,json,jsonc}"
+      run: pnpm biome check --no-errors-on-unmatched {staged_files}
+    ascii-tells:
+      run: |
+        files=$(git diff --cached --name-only --diff-filter=ACM)
+        if [ -z "$files" ]; then exit 0; fi
+        python3 - <<'PY' $files
+        import sys
+        bads = [chr(c) for c in (0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026)]
+        found = False
+        for f in sys.argv[1:]:
+            try:
+                with open(f, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except Exception:
+                continue
+            for b in bads:
+                if b in content:
+                    print(f"{f}: contains U+{ord(b):04X}")
+                    found = True
+                    break
+        if found:
+            print()
+            print("ASCII tell detected. Replace with single hyphen, straight quote, three dots.")
+            sys.exit(1)
+        PY

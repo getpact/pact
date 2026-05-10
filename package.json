@@ -13,11 +13,13 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "typecheck": "turbo run typecheck",
-    "dev": "turbo run dev"
+    "dev": "turbo run dev",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@types/node": "^22.0.0",
+    "lefthook": "^1.7.0",
     "turbo": "^2.4.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
