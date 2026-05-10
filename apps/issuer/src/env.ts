@@ -25,7 +25,5 @@ export const tokenTtlSeconds = (env: Env): number => {
 };
 
 export const isDevIssueEnabled = (env: Env): boolean => {
-  const flag = env.ENABLE_DEV_ISSUE === "true";
-  const local = env.ENVIRONMENT === "dev" || env.ENVIRONMENT === "test";
-  return flag || local;
+  return env.ENABLE_DEV_ISSUE === "true" && env.ENVIRONMENT !== "production";
 };

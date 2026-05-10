@@ -20,6 +20,7 @@ const buildEnv = async () => {
     GOOGLE_OAUTH_CLIENT_SECRET: "test",
     ISSUER_BASE_URL: "https://issuer.test/acme",
     ENVIRONMENT: "test",
+    ENABLE_DEV_ISSUE: "true",
   };
 };
 
@@ -66,6 +67,37 @@ run("issuer end-to-end", () => {
         }),
       },
       prodEnv,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("hides /v1/dev/issue unless explicitly enabled", async () => {
+    const env = await buildEnv();
+    const slug = `iss-dev-disabled-${Date.now()}`;
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "Dev Disabled", adminEmail: "alice@example.com" }),
+      },
+      env,
+    );
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+    const disabledEnv = { ...env, ENABLE_DEV_ISSUE: "false" };
+    const res = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-mcp",
+        }),
+      },
+      disabledEnv,
     );
     expect(res.status).toBe(404);
   });
