@@ -1,6 +1,13 @@
 #!/usr/bin/env node
-import { createWorkspace, devIssue, refresh } from "./api.js";
+import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
 import { loadConfig, saveConfig } from "./config.js";
+import {
+  buildGoogleAuthorizeUrl,
+  captureLoopbackCallback,
+  generatePkce,
+  newState,
+  openBrowser,
+} from "./oauth.js";
 
 const env = (key: string, fallback?: string): string => {
   const v = process.env[key] ?? fallback;
@@ -18,14 +25,17 @@ const help = () => {
       "pact <command>",
       "",
       "commands:",
-      "  init    create a workspace and store credentials",
-      "  login   refresh credentials using stored refresh token",
-      "  whoami  print the active user and workspace",
-      "  status  show endpoint and credential expiry",
+      "  init     create a workspace and store credentials (dev path)",
+      "  login    sign in via Google (browser loopback)",
+      "  refresh  rotate access token using stored refresh token",
+      "  whoami   print the active user and workspace",
+      "  status   show endpoint and credential expiry",
       "",
       "env:",
-      "  PACT_ENDPOINT  issuer URL (default http://localhost:8787)",
-      "  PACT_AUDIENCE  token audience (default pact-mcp)",
+      "  PACT_ENDPOINT       issuer URL (default http://localhost:8787)",
+      "  PACT_AUDIENCE       token audience (default pact-mcp)",
+      "  PACT_GOOGLE_CLIENT  Google OAuth client id (required for login)",
+      "  PACT_WORKSPACE_ID   workspace id (required for login)",
       "",
     ].join("\n"),
   );
@@ -62,9 +72,57 @@ const init = async () => {
 };
 
 const login = async () => {
+  const clientId = env("PACT_GOOGLE_CLIENT");
+  const workspaceId = env("PACT_WORKSPACE_ID");
+
+  const { codeVerifier, codeChallenge } = await generatePkce();
+  const state = newState();
+
+  const cb = await captureLoopbackCallback();
+  const authorizeUrl = buildGoogleAuthorizeUrl({
+    clientId,
+    redirectUri: cb.redirectUri,
+    codeChallenge,
+    state,
+    prompt: "select_account",
+  });
+
+  process.stdout.write(`opening browser for Google sign-in...\n`);
+  process.stdout.write(`if it does not open, visit:\n  ${authorizeUrl}\n`);
+  openBrowser(authorizeUrl);
+
+  const captured = await cb.awaitCallback();
+  if (captured.state !== state) {
+    throw new Error("oauth state mismatch");
+  }
+
+  const issued = await googleExchange(endpoint(), {
+    workspaceId,
+    code: captured.code,
+    codeVerifier,
+    redirectUri: cb.redirectUri,
+    audience: audience(),
+  });
+
+  const cfg = (await loadConfig()) ?? { endpoint: endpoint() };
+  await saveConfig({
+    ...cfg,
+    endpoint: endpoint(),
+    workspaceId,
+    accessToken: issued.token,
+    accessExpiresAt: issued.exp,
+    refreshToken: issued.refreshToken,
+    refreshExpiresAt: issued.refreshExpiresAt,
+  });
+  process.stdout.write(
+    `signed in. token expires at ${new Date(issued.exp * 1000).toISOString()}\n`,
+  );
+};
+
+const refreshCmd = async () => {
   const cfg = await loadConfig();
   if (!cfg || !cfg.workspaceId || !cfg.refreshToken) {
-    process.stderr.write("no stored credentials. run pact init first.\n");
+    process.stderr.write("no stored credentials. run pact init or pact login first.\n");
     process.exit(1);
   }
   const issued = await refresh(endpoint(), {
@@ -87,7 +145,7 @@ const login = async () => {
 const whoami = async () => {
   const cfg = await loadConfig();
   if (!cfg || !cfg.email) {
-    process.stderr.write("not signed in. run pact init first.\n");
+    process.stderr.write("not signed in. run pact init or pact login first.\n");
     process.exit(1);
   }
   process.stdout.write(`${cfg.email}\n`);
@@ -123,6 +181,9 @@ const main = async () => {
       return;
     case "login":
       await login();
+      return;
+    case "refresh":
+      await refreshCmd();
       return;
     case "whoami":
       await whoami();
