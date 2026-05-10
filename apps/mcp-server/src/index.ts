@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { authenticate } from "./auth.js";
 import { handleMcp } from "./handler.js";
 import { httpVerifyClient } from "./verify-client.js";
@@ -11,6 +12,8 @@ type Env = {
 };
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.use("/:workspace/mcp", bodyLimit({ maxSize: 256 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
 

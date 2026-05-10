@@ -5,6 +5,7 @@ import { tryParsePolicy } from "@getpact/policy";
 import { and, desc, eq, max, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { emitAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
@@ -19,6 +20,8 @@ type Env = {
 type AppCtx = Context<{ Bindings: Env }>;
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.use("/v1/*", bodyLimit({ maxSize: 64 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
 
