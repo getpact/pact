@@ -5,6 +5,9 @@ export type Env = {
   MEK: string;
   GOOGLE_OAUTH_CLIENT_ID: string;
   GOOGLE_OAUTH_CLIENT_SECRET: string;
+  GOOGLE_TOKEN_ENDPOINT?: string;
+  GOOGLE_JWKS_URI?: string;
+  GOOGLE_ISSUER?: string;
   ISSUER_BASE_URL: string;
   ENVIRONMENT?: string;
   ENABLE_DEV_ISSUE?: string;
