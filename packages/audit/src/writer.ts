@@ -1,5 +1,5 @@
-import { fromBase64, jcsBytes, sha256, signEd25519, toBase64 } from "@getpact/crypto";
-import type { schema } from "@getpact/db";
+import { jcsBytes, sha256, signEd25519, toBase64 } from "@getpact/crypto";
+import type { Tx } from "@getpact/db";
 import { sql } from "drizzle-orm";
 import { computeGenesisHash } from "./genesis.js";
 
@@ -21,29 +21,15 @@ export type WriteEventOptions = {
   ts?: Date;
 };
 
-type Tx = {
-  execute: (q: ReturnType<typeof sql>) => Promise<unknown[]>;
-  insert: (table: typeof schema.auditEvents | typeof schema.auditChainState) => {
-    values: (v: Record<string, unknown>) => {
-      onConflictDoUpdate?: (config: unknown) => unknown;
-      returning?: () => Promise<unknown[]>;
-    };
-  };
-};
-
 export type WriteResult = {
   thisHash: string;
   signature: string;
 };
 
-export const writeEvent = async (tx: unknown, opts: WriteEventOptions): Promise<WriteResult> => {
-  const t = tx as {
-    execute: (q: ReturnType<typeof sql>) => Promise<unknown[]>;
-  };
-
-  const lockedRows = (await t.execute(
+export const writeEvent = async (tx: Tx, opts: WriteEventOptions): Promise<WriteResult> => {
+  const lockedRows = (await tx.execute(
     sql`SELECT last_hash FROM audit_chain_state WHERE workspace_id = ${opts.workspaceId} FOR UPDATE`,
-  )) as Array<{ last_hash: string }>;
+  )) as unknown as Array<{ last_hash: string }>;
 
   const prevHash =
     lockedRows[0]?.last_hash ??
@@ -69,7 +55,7 @@ export const writeEvent = async (tx: unknown, opts: WriteEventOptions): Promise<
   const signatureBytes = await signEd25519(opts.signingKey, thisHashBytes);
   const signature = toBase64(signatureBytes);
 
-  const inserted = (await t.execute(
+  const inserted = (await tx.execute(
     sql`INSERT INTO audit_events (
       workspace_id, ts, actor_kind, actor_id, action, target,
       decision, supporting, signing_key_id, prev_hash, this_hash, signature
@@ -79,12 +65,12 @@ export const writeEvent = async (tx: unknown, opts: WriteEventOptions): Promise<
       ${opts.event.decision}, ${opts.event.supporting ? JSON.stringify(opts.event.supporting) : null},
       ${opts.signingKeyId}, ${prevHash}, ${thisHash}, ${signature}
     ) RETURNING id`,
-  )) as Array<{ id: string }>;
+  )) as unknown as Array<{ id: string }>;
 
   const newEventId = inserted[0]?.id;
   if (!newEventId) throw new Error("audit insert returned no id");
 
-  await t.execute(
+  await tx.execute(
     sql`INSERT INTO audit_chain_state (workspace_id, last_hash, last_event_id)
         VALUES (${opts.workspaceId}, ${thisHash}, ${newEventId})
         ON CONFLICT (workspace_id) DO UPDATE
@@ -92,9 +78,6 @@ export const writeEvent = async (tx: unknown, opts: WriteEventOptions): Promise<
             last_event_id = EXCLUDED.last_event_id,
             updated_at = NOW()`,
   );
-
-  // Sanity: confirm chain bytes round-trip through base64.
-  fromBase64(thisHash);
 
   return { thisHash, signature };
 };
