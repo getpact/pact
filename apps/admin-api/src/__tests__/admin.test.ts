@@ -2,6 +2,7 @@ import { createClient, withWorkspace } from "@getpact/db";
 import {
   auditEvents,
   brains,
+  invites,
   policies,
   revokedJtis,
   users,
@@ -555,6 +556,29 @@ run("admin api", () => {
         ),
     );
     expect(events).toHaveLength(1);
+  });
+
+  it("rolls back invite creation when required audit fails", async () => {
+    const { env, created, token } = await setup();
+    const res = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/invites`,
+      token,
+      "POST",
+      { email: "rollback-invite@example.com", scope: {}, ttl: "1d" },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+      },
+    );
+    expect(res.status).toBe(500);
+    const rows = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ id: invites.id })
+        .from(invites)
+        .where(eq(invites.email, "rollback-invite@example.com")),
+    );
+    expect(rows).toHaveLength(0);
   });
 
   it("busts the kv revocation cache when a jti is revoked", async () => {
