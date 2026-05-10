@@ -19,6 +19,14 @@ const check = async (name, url, init) => {
   return res;
 };
 
+const parseJson = async (name, res) => {
+  const body = await res.json();
+  if (body?.error) {
+    throw new Error(`${name} returned error: ${JSON.stringify(body.error)}`);
+  }
+  return body;
+};
+
 const health = [
   ["issuer", optional("PACT_ISSUER_URL")],
   ["verifier", optional("PACT_VERIFIER_URL")],
@@ -71,4 +79,47 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
   });
+
+  const toolCall = await check("mcp pact.whoami", `${mcpUrl}/${workspaceSlug}/mcp`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${issued.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "pact.whoami", arguments: {} },
+    }),
+  });
+  const toolBody = await parseJson("mcp pact.whoami", toolCall);
+  const toolText = toolBody.result?.content?.[0]?.text;
+  if (!toolText?.includes(email)) {
+    throw new Error("mcp pact.whoami did not return the smoke identity");
+  }
+
+  const auditUrl = optional("PACT_AUDIT_API_URL");
+  if (auditUrl) {
+    const auditIssue = await check(
+      `${issuerUrl} dev issue audit token`,
+      `${issuerUrl}/v1/dev/issue`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId, email, audience: "pact-audit" }),
+      },
+    );
+    const auditIssued = await auditIssue.json();
+    if (!auditIssued.token) throw new Error("audit token issue response did not include token");
+    const auditEvents = await check(
+      "audit contains mcp verifier event",
+      `${auditUrl}/v1/workspaces/${workspaceId}/audit/events?action=verify.tool:pact.whoami&limit=5`,
+      { headers: { authorization: `Bearer ${auditIssued.token}` } },
+    );
+    const auditBody = await auditEvents.json();
+    if (!Array.isArray(auditBody.events) || auditBody.events.length === 0) {
+      throw new Error("audit chain did not include verify.tool:pact.whoami");
+    }
+  }
 }
