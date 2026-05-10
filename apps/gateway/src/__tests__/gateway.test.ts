@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
 import app, {
   buildGatewayTarget,
+  canonicalGatewaySearch,
   forwardedRequestHeaders,
   gatewayAuthorization,
 } from "../index.js";
@@ -39,10 +40,18 @@ describe("gateway", () => {
   });
 
   it("builds gateway authorization from method, brain, and path", () => {
-    expect(gatewayAuthorization("POST", "notion", "v1/pages")).toEqual({
+    expect(gatewayAuthorization("POST", "notion", "v1/pages", "?b=2&a=1&b=1")).toEqual({
       action: "gateway.post",
-      resource: "gateway:notion:/v1/pages",
+      resource: "gateway:notion:/v1/pages?a=1&b=1&b=2",
     });
+  });
+
+  it("canonicalizes gateway query strings for authorization", () => {
+    expect(canonicalGatewaySearch("?includeSensitive=true&limit=1")).toBe(
+      "?includeSensitive=true&limit=1",
+    );
+    expect(canonicalGatewaySearch("?b=2&a=1&b=1")).toBe("?a=1&b=1&b=2");
+    expect(canonicalGatewaySearch("")).toBe("");
   });
 
   it("builds safe HTTPS upstream targets", () => {
@@ -181,7 +190,7 @@ run("gateway integration", () => {
           const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
           expect(body).toMatchObject({
             action: "gateway.get",
-            resource: "gateway:notion:/v1/pages",
+            resource: "gateway:notion:/v1/pages?limit=1",
             audience: "pact-gateway",
           });
           return Response.json({ allow: true, reasons: ["ok"] });
@@ -239,11 +248,25 @@ run("gateway integration", () => {
     );
     expect(rows).toContainEqual(
       expect.objectContaining({
+        action: "gateway.attempt",
+        decision: "allow",
+        target: expect.objectContaining({
+          brain: "notion",
+          resource: "gateway:notion:/v1/pages?limit=1",
+          query: "?limit=1",
+        }),
+        supporting: expect.objectContaining({
+          outcome: "attempt",
+        }),
+      }),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
         action: "gateway.get",
         decision: "allow",
         target: expect.objectContaining({
           brain: "notion",
-          resource: "gateway:notion:/v1/pages",
+          resource: "gateway:notion:/v1/pages?limit=1",
         }),
         supporting: expect.objectContaining({
           outcome: "forwarded",
@@ -315,15 +338,13 @@ run("gateway integration", () => {
 
   it("fails closed in production when gateway audit is unavailable", async () => {
     const { testEnv, created, issued } = await setup();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL) => {
-        if (input.toString() === "https://verifier.test/v1/verify") {
-          return Response.json({ allow: true, reasons: ["ok"] });
-        }
-        return Response.json({ ok: true });
-      }),
-    );
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      if (input.toString() === "https://verifier.test/v1/verify") {
+        return Response.json({ allow: true, reasons: ["ok"] });
+      }
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     const res = await app.request(
       `/${created.workspaceId}/gateway/notion/v1/pages`,
@@ -341,8 +362,9 @@ run("gateway integration", () => {
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({
       error: "audit_unavailable",
-      message: "gateway audit is required",
+      message: "gateway audit is required (missing_mek)",
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a token routed through another workspace", async () => {

@@ -1,5 +1,5 @@
 import { writeEvent } from "@getpact/audit";
-import type { Email } from "@getpact/core";
+import { type Email, tokenModeForAudience, ValidationError } from "@getpact/core";
 import { issueJwt } from "@getpact/crypto";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, roles, userRoles, users, workspaces } from "@getpact/db/schema";
@@ -84,6 +84,9 @@ const issueAccessToken = async (
     rawMek: Uint8Array;
   },
 ): Promise<{ token: string; jti: string; exp: number }> => {
+  const mode = tokenModeForAudience(input.audience);
+  if (!mode) throw new ValidationError("unsupported token audience");
+
   const userRoleRows = await tx
     .select({ name: roles.name })
     .from(userRoles)
@@ -105,7 +108,7 @@ const issueAccessToken = async (
       org: input.workspaceId,
       groups: userGroupRows.map((r) => r.name),
       roles: userRoleRows.map((r) => r.name),
-      mode: "A",
+      mode,
     },
     {
       privateKey: key.privateKey,

@@ -8,6 +8,20 @@ export type Email = string & { readonly _brand: "Email" };
 
 export const canonicalizeEmail = (raw: string): Email => raw.trim().toLowerCase() as Email;
 
+export type PactTokenMode = "A" | "B";
+
+export const PACT_AUDIENCE_MODES = {
+  "pact-admin": "A",
+  "pact-audit": "A",
+  "pact-mcp": "A",
+  "pact-gateway": "B",
+} as const satisfies Record<string, PactTokenMode>;
+
+export const tokenModeForAudience = (audience: string): PactTokenMode | null =>
+  Object.hasOwn(PACT_AUDIENCE_MODES, audience)
+    ? PACT_AUDIENCE_MODES[audience as keyof typeof PACT_AUDIENCE_MODES]
+    : null;
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export const isUuid = (value: unknown): value is string =>

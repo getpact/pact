@@ -102,10 +102,24 @@ export const gatewayAuthorization = (
   method: string,
   brain: string,
   path: string,
+  search = "",
 ): { action: string; resource: string } => ({
   action: `gateway.${method.toLowerCase()}`,
-  resource: `gateway:${brain}:/${path.replace(/^\/+/, "")}`,
+  resource: `gateway:${brain}:/${path.replace(/^\/+/, "")}${canonicalGatewaySearch(search)}`,
 });
+
+export const canonicalGatewaySearch = (search: string): string => {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const entries = [...params.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) => {
+    const keyOrder = leftKey.localeCompare(rightKey);
+    return keyOrder === 0 ? leftValue.localeCompare(rightValue) : keyOrder;
+  });
+  if (entries.length === 0) return "";
+
+  const canonical = new URLSearchParams();
+  for (const [key, value] of entries) canonical.append(key, value);
+  return `?${canonical.toString()}`;
+};
 
 const bearerToken = (value: string | undefined): string | null => {
   if (!value?.startsWith("Bearer ")) return null;
@@ -203,8 +217,9 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   const workspaceParam = c.req.param("workspace");
   const brainKind = c.req.param("brain");
   const path = c.req.param("*") ?? "";
+  const requestUrl = new URL(c.req.url);
   const audience = c.env.GATEWAY_AUDIENCE ?? "pact-gateway";
-  const authz = gatewayAuthorization(c.req.method, brainKind, path);
+  const authz = gatewayAuthorization(c.req.method, brainKind, path, requestUrl.search);
 
   const verdict = await verify(c.env.VERIFIER_URL, {
     token,
@@ -239,9 +254,11 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     resource: authz.resource,
     brain: brainKind,
     path: `/${path.replace(/^\/+/, "")}`,
+    query: canonicalGatewaySearch(requestUrl.search),
     method: c.req.method,
   };
   const audit = async (input: {
+    action?: string;
     decision: "allow" | "deny";
     outcome: string;
     upstreamStatus?: number;
@@ -252,7 +269,7 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
       mek: c.env.MEK,
       workspaceId,
       actorId: typeof claims.sub === "string" ? claims.sub : undefined,
-      action: authz.action,
+      action: input.action ?? authz.action,
       decision: input.decision,
       target: auditTarget,
       supporting: {
@@ -296,6 +313,32 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     if (failed) return failed;
     return c.json({ error: "not_found", message: "brain not found" }, 404);
   }
+
+  if (c.env.ENVIRONMENT !== "test") {
+    const limit = parsePositiveInt(c.env.GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1000);
+    const windowSeconds = parsePositiveInt(
+      c.env.GATEWAY_RATE_WINDOW_SECONDS,
+      DEFAULT_RATE_WINDOW_SECONDS,
+      3600,
+    );
+    const rateLimiter = databaseRateLimiter(c.env.DATABASE_URL);
+    const verdictRate = await rateLimiter.hit(
+      `gateway:${workspaceId}:${brainKind}`,
+      limit,
+      windowSeconds,
+    );
+    c.header("x-ratelimit-limit", String(limit));
+    c.header("x-ratelimit-remaining", String(verdictRate.remaining));
+    c.header("x-ratelimit-reset", String(Math.ceil(verdictRate.resetAt / 1000)));
+    if (!verdictRate.allowed) {
+      const failed = auditFailure(await audit({ decision: "deny", outcome: "rate_limited" }));
+      if (failed) return failed;
+      const retry = Math.max(1, Math.ceil((verdictRate.resetAt - Date.now()) / 1000));
+      c.header("retry-after", String(retry));
+      return c.json({ error: "rate_limited", message: "too many requests" }, 429);
+    }
+  }
+
   let brainBearerToken: string | null = null;
   if (brain.authScheme === "bearer") {
     if (!c.env.MEK) {
@@ -339,34 +382,8 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     );
   }
 
-  if (c.env.ENVIRONMENT !== "test") {
-    const limit = parsePositiveInt(c.env.GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1000);
-    const windowSeconds = parsePositiveInt(
-      c.env.GATEWAY_RATE_WINDOW_SECONDS,
-      DEFAULT_RATE_WINDOW_SECONDS,
-      3600,
-    );
-    const rateLimiter = databaseRateLimiter(c.env.DATABASE_URL);
-    const verdictRate = await rateLimiter.hit(
-      `gateway:${workspaceId}:${brainKind}`,
-      limit,
-      windowSeconds,
-    );
-    c.header("x-ratelimit-limit", String(limit));
-    c.header("x-ratelimit-remaining", String(verdictRate.remaining));
-    c.header("x-ratelimit-reset", String(Math.ceil(verdictRate.resetAt / 1000)));
-    if (!verdictRate.allowed) {
-      const failed = auditFailure(await audit({ decision: "deny", outcome: "rate_limited" }));
-      if (failed) return failed;
-      const retry = Math.max(1, Math.ceil((verdictRate.resetAt - Date.now()) / 1000));
-      c.header("retry-after", String(retry));
-      return c.json({ error: "rate_limited", message: "too many requests" }, 429);
-    }
-  }
-
   let target: URL;
   try {
-    const requestUrl = new URL(c.req.url);
     target = buildGatewayTarget(
       brain.baseUrl,
       path,
@@ -382,6 +399,11 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     if (failed) return failed;
     return c.json({ error: "invalid_gateway_upstream", message }, 400);
   }
+
+  const attemptFailed = auditFailure(
+    await audit({ action: "gateway.attempt", decision: "allow", outcome: "attempt" }),
+  );
+  if (attemptFailed) return attemptFailed;
 
   const controller = new AbortController();
   const timeoutMs = upstreamTimeout(c.env);

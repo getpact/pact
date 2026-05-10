@@ -1,5 +1,5 @@
 import { writeEvent } from "@getpact/audit";
-import { isUuid } from "@getpact/core";
+import { isUuid, tokenModeForAudience } from "@getpact/core";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { policies, revokedJtis, workspaces } from "@getpact/db/schema";
@@ -125,6 +125,16 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
     });
   } catch {
     return result(false, ["signature invalid"], sub);
+  }
+
+  const expectedMode = tokenModeForAudience(input.audience);
+  if (!expectedMode) {
+    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["invalid audience"], sub, input);
+    return result(false, ["invalid audience"], sub);
+  }
+  if (claims.mode !== expectedMode) {
+    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["token mode mismatch"], sub, input);
+    return result(false, ["token mode mismatch"], sub);
   }
 
   const ck = cacheKey(workspaceId, jti);

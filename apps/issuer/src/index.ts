@@ -106,14 +106,21 @@ app.post("/v1/dev/issue", async (c) => {
     return c.json({ error: "not_found" }, 404);
   }
   const body = await c.req.json<{ workspaceId: string; email: string; audience: string }>();
-  const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
-    workspaceId: body.workspaceId,
-    email: body.email as Email,
-    audience: body.audience,
-    ttlSeconds: tokenTtlSeconds(c.env),
-    issuerUrl: c.env.ISSUER_BASE_URL,
-  });
-  return c.json(result);
+  try {
+    const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
+      workspaceId: body.workspaceId,
+      email: body.email as Email,
+      audience: body.audience,
+      ttlSeconds: tokenTtlSeconds(c.env),
+      issuerUrl: c.env.ISSUER_BASE_URL,
+    });
+    return c.json(result);
+  } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400);
+    }
+    throw e;
+  }
 });
 
 app.post("/v1/oauth/google/exchange", async (c) => {
@@ -154,7 +161,10 @@ app.post("/v1/oauth/google/exchange", async (c) => {
       issuerUrl: c.env.ISSUER_BASE_URL,
     });
     return c.json(result);
-  } catch {
+  } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400);
+    }
     return c.json({ error: "user_not_in_workspace" }, 403);
   }
 });
@@ -165,15 +175,22 @@ app.post("/v1/refresh", async (c) => {
     refreshToken: string;
     audience: string;
   }>();
-  const result = await redeemRefreshAndIssue(c.env.DATABASE_URL, decodeMek(c.env), {
-    workspaceId: body.workspaceId,
-    refreshToken: body.refreshToken,
-    audience: body.audience,
-    ttlSeconds: tokenTtlSeconds(c.env),
-    issuerUrl: c.env.ISSUER_BASE_URL,
-  });
-  if (!result) return c.json({ error: "invalid_grant" }, 401);
-  return c.json(result);
+  try {
+    const result = await redeemRefreshAndIssue(c.env.DATABASE_URL, decodeMek(c.env), {
+      workspaceId: body.workspaceId,
+      refreshToken: body.refreshToken,
+      audience: body.audience,
+      ttlSeconds: tokenTtlSeconds(c.env),
+      issuerUrl: c.env.ISSUER_BASE_URL,
+    });
+    if (!result) return c.json({ error: "invalid_grant" }, 401);
+    return c.json(result);
+  } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400);
+    }
+    throw e;
+  }
 });
 
 app.get("/v1/workspaces/:id/.well-known/jwks.json", async (c) => {

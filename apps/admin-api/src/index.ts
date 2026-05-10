@@ -342,7 +342,9 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
       required: c.env.ENVIRONMENT === "production",
     });
     const authScheme = body.authScheme ?? "none";
-    if (authScheme !== "none") throw new ValidationError("only authScheme=none supported");
+    if (authScheme !== "none" && authScheme !== "bearer") {
+      throw new ValidationError("authScheme must be none or bearer");
+    }
     const scopeTemplate = body.scopeInjectionTemplate ?? {};
     ensureSafeJsonKeys(scopeTemplate);
     if (body.responseFilter !== undefined) ensureSafeJsonKeys(body.responseFilter);

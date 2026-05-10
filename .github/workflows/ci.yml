@@ -37,7 +37,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - name: run tests with capture
-        run: pnpm test 2>&1 | tee /tmp/vitest.log
+        run: |
+          set -o pipefail
+          pnpm test 2>&1 | tee /tmp/vitest.log
       - name: ensure DB-gated tests actually ran
         run: node scripts/check-db-tests-ran.mjs /tmp/vitest.log
       - run: pnpm build

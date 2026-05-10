@@ -3,6 +3,7 @@ import { createClient, withWorkspace } from "@getpact/db";
 import { auditEvents, workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
 import { eq } from "drizzle-orm";
+import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 import app from "../index.js";
 
@@ -166,6 +167,45 @@ run("issuer end-to-end", () => {
     expect(result.payload.sub).toBe(created.adminUserId);
     expect(result.payload.email).toBe("alice@example.com");
     expect(result.payload.roles).toEqual(["admin"]);
+    expect(result.payload.mode).toBe("A");
+  });
+
+  it("issues gateway audience tokens as Mode B", async () => {
+    const env = await buildEnv();
+    const slug = `iss-mode-b-${Date.now()}`;
+
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          name: "Issuer Mode B Test",
+          adminEmail: "alice@example.com",
+        }),
+      },
+      env,
+    );
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+
+    const issueRes = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-gateway",
+        }),
+      },
+      env,
+    );
+    expect(issueRes.status).toBe(200);
+    const issued = (await issueRes.json()) as { token: string };
+    expect(decodeJwt(issued.token).mode).toBe("B");
   });
 
   it("publishes a workspace JWKS with the active signing key", async () => {

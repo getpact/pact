@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { assertAllowedUpstreamHost, assertSafeUpstreamUrl, isPrivateHost } from "../index.js";
+import {
+  assertAllowedUpstreamHost,
+  assertSafeUpstreamUrl,
+  isPrivateHost,
+  tokenModeForAudience,
+} from "../index.js";
+
+describe("token audience modes", () => {
+  it("maps gateway tokens to Mode B and service tokens to Mode A", () => {
+    expect(tokenModeForAudience("pact-gateway")).toBe("B");
+    expect(tokenModeForAudience("pact-mcp")).toBe("A");
+    expect(tokenModeForAudience("pact-admin")).toBe("A");
+    expect(tokenModeForAudience("pact-audit")).toBe("A");
+    expect(tokenModeForAudience("unknown")).toBeNull();
+  });
+});
 
 describe("upstream URL validation", () => {
   it("allows public HTTPS upstream URLs", () => {

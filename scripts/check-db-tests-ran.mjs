@@ -1,8 +1,5 @@
 #!/usr/bin/env node
-// Fail CI if any test file that is supposed to require DATABASE_URL was skipped.
-// We grep for `process.env.DATABASE_URL` test files and confirm they each
-// printed at least one passing test line in the vitest output captured at
-// VITEST_LOG_PATH (the CI step pipes vitest output there).
+// Fail CI if any test file that is supposed to require a real database was skipped.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -15,6 +12,12 @@ if (!logPath) {
 }
 
 const log = readFileSync(logPath, "utf8");
+const requiredEnv = ["DATABASE_URL", "RLS_TEST_DB"];
+const missingEnv = requiredEnv.filter((name) => !process.env[name]);
+if (missingEnv.length > 0) {
+  console.error(`Missing DB test environment: ${missingEnv.join(", ")}`);
+  exit(1);
+}
 
 const walk = (dir, out = []) => {
   for (const entry of readdirSync(dir)) {
@@ -29,7 +32,10 @@ const walk = (dir, out = []) => {
 
 const dbGated = walk("apps").concat(walk("packages")).filter((p) => {
   const src = readFileSync(p, "utf8");
-  return src.includes("process.env.DATABASE_URL") && src.includes("describe.skip");
+  return (
+    (src.includes("process.env.DATABASE_URL") || src.includes("process.env.RLS_TEST_DB")) &&
+    src.includes("describe.skip")
+  );
 });
 
 const missed = [];
@@ -39,10 +45,9 @@ for (const file of dbGated) {
     missed.push(rel);
     continue;
   }
-  // Look for a "skipped" or "todo" pattern adjacent to this file in the log.
   const idx = log.indexOf(rel);
   const slice = log.slice(idx, idx + 4096);
-  if (/skipped/.test(slice) && !/✓/.test(slice)) {
+  if (/\bskipped\b/.test(slice) && !/✓/.test(slice)) {
     missed.push(`${rel} (no passing assertions)`);
   }
 }
