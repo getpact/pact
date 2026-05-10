@@ -2,9 +2,31 @@ import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
 import { createClient, type DbClient, withWorkspace } from "@getpact/db";
 import { auditEvents, policies, revokedJtis, workspaces } from "@getpact/db/schema";
 import { and, eq } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
+import { type KVNamespace } from "../cache.js";
 import app from "../index.js";
+
+type KvSpy = {
+  binding: KVNamespace;
+  store: Map<string, string>;
+  getMock: ReturnType<typeof vi.fn>;
+  putMock: ReturnType<typeof vi.fn>;
+};
+
+const buildKvMock = (): KvSpy => {
+  const store = new Map<string, string>();
+  const getMock = vi.fn(async (key: string) => store.get(key) ?? null);
+  const putMock = vi.fn(async (key: string, value: string) => {
+    store.set(key, value);
+  });
+  return {
+    binding: { get: getMock, put: putMock } as unknown as KVNamespace,
+    store,
+    getMock,
+    putMock,
+  };
+};
 
 const url = process.env.DATABASE_URL;
 const run = url ? describe : describe.skip;
@@ -277,6 +299,45 @@ run("verifier", () => {
     expect(events[0]?.decision).toBe("deny");
     const supporting = events[0]?.supporting as { reasons: string[] };
     expect(supporting.reasons).toContain("no active policy");
+  });
+
+  it("uses revocation cache for second verify of same jti", async () => {
+    const { env, created, issued } = await setupWorkspace();
+    await insertPolicy(created.workspaceId, created.adminUserId, {
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+    const kv = buildKvMock();
+    const envWithKv = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      REVOCATION_CACHE: kv.binding,
+    };
+
+    const callBody = JSON.stringify({
+      token: issued.token,
+      action: "read",
+      resource: "doc:any",
+      audience: "pact-mcp",
+    });
+
+    const a = await app.request(
+      "/v1/verify",
+      { method: "POST", headers: { "content-type": "application/json" }, body: callBody },
+      envWithKv,
+    );
+    expect(a.status).toBe(200);
+    expect(kv.putMock).toHaveBeenCalled();
+
+    const putCallsAfterFirst = kv.putMock.mock.calls.length;
+
+    const b = await app.request(
+      "/v1/verify",
+      { method: "POST", headers: { "content-type": "application/json" }, body: callBody },
+      envWithKv,
+    );
+    expect(b.status).toBe(200);
+    expect(kv.getMock).toHaveBeenCalledTimes(2);
+    expect(kv.putMock.mock.calls.length).toBe(putCallsAfterFirst);
   });
 
   it("rejects malformed token", async () => {
