@@ -1,8 +1,11 @@
-import { canonicalizeEmail, type Email } from "@getpact/core";
+import { ConflictError, canonicalizeEmail, type Email } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { roles, userRoles, users, workspaces } from "@getpact/db/schema";
 import { createSigningKey } from "@getpact/keystore";
 import { sql } from "drizzle-orm";
+
+const isPgUniqueViolation = (e: unknown): boolean =>
+  typeof e === "object" && e !== null && "code" in e && (e as { code?: unknown }).code === "23505";
 
 export type CreateWorkspaceInput = {
   slug: string;
@@ -27,10 +30,16 @@ export const createWorkspace = async (
   const db = createClient(databaseUrl);
 
   return db.transaction(async (tx) => {
-    const [ws] = await tx
-      .insert(workspaces)
-      .values({ slug: input.slug, name: input.name, region: input.region ?? "us-east-1" })
-      .returning();
+    let ws: typeof workspaces.$inferSelect | undefined;
+    try {
+      [ws] = await tx
+        .insert(workspaces)
+        .values({ slug: input.slug, name: input.name, region: input.region ?? "us-east-1" })
+        .returning();
+    } catch (e) {
+      if (isPgUniqueViolation(e)) throw new ConflictError("workspace slug already exists");
+      throw e;
+    }
     if (!ws) throw new Error("workspace insert failed");
 
     await tx.execute(sql`SELECT set_config('app.current_workspace_id', ${ws.id}, true)`);

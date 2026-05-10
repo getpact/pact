@@ -1,4 +1,4 @@
-import { type Email, securityHeaders } from "@getpact/core";
+import { type Email, PactError, securityHeaders } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
@@ -90,8 +90,15 @@ app.post("/v1/workspaces", async (c) => {
     adminEmail: string;
     adminName?: string;
   }>();
-  const result = await createWorkspace(c.env.DATABASE_URL, decodeMek(c.env), body);
-  return c.json(result, 201);
+  try {
+    const result = await createWorkspace(c.env.DATABASE_URL, decodeMek(c.env), body);
+    return c.json(result, 201);
+  } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400 | 409);
+    }
+    throw e;
+  }
 });
 
 app.post("/v1/dev/issue", async (c) => {
