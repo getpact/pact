@@ -16,6 +16,10 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "canonicalize": "^2.0.0",
+    "jose": "^5.9.0"
+  },
   "files": [
     "dist"
   ]
