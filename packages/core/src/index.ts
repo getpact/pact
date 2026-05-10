@@ -27,6 +27,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 export const isUuid = (value: unknown): value is string =>
   typeof value === "string" && UUID_RE.test(value);
 
+export const timingSafeEqualString = (a: string, b: string): boolean => {
+  const ae = new TextEncoder().encode(a);
+  const be = new TextEncoder().encode(b);
+  const len = Math.max(ae.length, be.length);
+  let diff = ae.length ^ be.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (ae[i] ?? 0) ^ (be[i] ?? 0);
+  }
+  return diff === 0;
+};
+
 export class PactError extends Error {
   readonly code: string;
   readonly status: number;

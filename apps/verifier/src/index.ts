@@ -1,4 +1,4 @@
-import { securityHeaders } from "@getpact/core";
+import { securityHeaders, timingSafeEqualString } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
@@ -43,7 +43,8 @@ app.post("/v1/verify", async (c) => {
   }
   if (serviceToken) {
     const expected = `Bearer ${serviceToken}`;
-    if (c.req.header("Authorization") !== expected) {
+    const received = c.req.header("Authorization") ?? "";
+    if (!timingSafeEqualString(received, expected)) {
       return c.json({ error: "unauthorized", message: "invalid service token" }, 401);
     }
   }
