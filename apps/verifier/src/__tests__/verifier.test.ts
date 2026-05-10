@@ -1,7 +1,7 @@
 import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
 import { createClient, type DbClient, withWorkspace } from "@getpact/db";
-import { policies, revokedJtis, workspaces } from "@getpact/db/schema";
-import { eq } from "drizzle-orm";
+import { auditEvents, policies, revokedJtis, workspaces } from "@getpact/db/schema";
+import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
 import app from "../index.js";
@@ -96,7 +96,7 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { allow: boolean; reasons: string[] };
@@ -122,7 +122,7 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { allow: boolean };
@@ -155,15 +155,51 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { allow: boolean; reasons: string[] };
     expect(body.reasons).toContain("token revoked");
   });
 
+  it("emits an audit event for an allowed decision", async () => {
+    const { env, created, minted } = await setupWorkspace();
+    await insertPolicy(created.workspaceId, created.adminUserId, {
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+
+    await app.request(
+      "/v1/verify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: minted.token,
+          action: "read",
+          resource: "doc:abc",
+          audience: "pact-mcp",
+        }),
+      },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+    );
+
+    const events = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.workspaceId, created.workspaceId),
+            eq(auditEvents.action, "verify.read"),
+          ),
+        ),
+    );
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[0]?.decision).toBe("allow");
+  });
+
   it("rejects malformed token", async () => {
-    const env = { DATABASE_URL: url as string };
+    const env = { DATABASE_URL: url as string, MEK: "" };
     const res = await app.request(
       "/v1/verify",
       {
