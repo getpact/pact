@@ -27,6 +27,7 @@ type Env = {
   GATEWAY_RATE_WINDOW_SECONDS?: string;
   GATEWAY_AUDIT_MODE?: string;
   GATEWAY_FORWARD_HEADER_ALLOWLIST?: string;
+  GATEWAY_RESPONSE_HEADER_ALLOWLIST?: string;
   UPSTREAM_HOST_ALLOWLIST?: string;
 };
 
@@ -170,37 +171,36 @@ const DEFAULT_FORWARD_HEADER_ALLOWLIST = [
   "user-agent",
 ];
 
-const parseHeaderAllowlist = (raw: string | undefined): Set<string> =>
+const DEFAULT_RESPONSE_HEADER_ALLOWLIST = [
+  "content-type",
+  "content-encoding",
+  "content-disposition",
+  "content-language",
+  "content-range",
+];
+
+const parseAllowlist = (raw: string | undefined, fallback: string[]): Set<string> =>
   new Set(
-    (raw ?? DEFAULT_FORWARD_HEADER_ALLOWLIST.join(","))
+    (raw ?? fallback.join(","))
       .split(",")
       .map((v) => v.trim().toLowerCase())
-      .filter((v) => v.length > 0),
+      .filter((v) => v.length > 0 && !/[\r\n]/.test(v)),
   );
 
 export const forwardedRequestHeaders = (headers: Headers, allowlist?: string): Headers => {
   const out = new Headers();
-  const allowed = parseHeaderAllowlist(allowlist);
+  const allowed = parseAllowlist(allowlist, DEFAULT_FORWARD_HEADER_ALLOWLIST);
   headers.forEach((value, key) => {
     if (allowed.has(key.toLowerCase())) out.set(key, value);
   });
   return out;
 };
 
-const forwardedResponseHeaders = (headers: Headers): Headers => {
+export const forwardedResponseHeaders = (headers: Headers, allowlist?: string): Headers => {
   const out = new Headers();
-  const blocked = new Set([
-    "connection",
-    "content-length",
-    "proxy-authenticate",
-    "set-cookie",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-  ]);
+  const allowed = parseAllowlist(allowlist, DEFAULT_RESPONSE_HEADER_ALLOWLIST);
   headers.forEach((value, key) => {
-    if (!blocked.has(key.toLowerCase())) out.set(key, value);
+    if (allowed.has(key.toLowerCase())) out.set(key, value);
   });
   return out;
 };
@@ -475,7 +475,7 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   if (failed) return failed;
   return new Response(upstream.body, {
     status: upstream.status,
-    headers: forwardedResponseHeaders(upstream.headers),
+    headers: forwardedResponseHeaders(upstream.headers, c.env.GATEWAY_RESPONSE_HEADER_ALLOWLIST),
   });
 });
 
