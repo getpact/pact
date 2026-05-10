@@ -24,6 +24,18 @@ pnpm --filter @getpact/db db:migrate
 pnpm dev
 ```
 
+## Running tests
+
+DB-gated suites (admin, audit, gateway, issuer, mcp, verifier, vault, keystore, db, audit) require a running Postgres with `DATABASE_URL` and `RLS_TEST_DB` set.
+
+```
+pnpm test:db           # boots docker postgres, applies migrations, runs all tests
+```
+
+To run with an already-running Postgres, copy `.env.example` to `.env`, source it, then `pnpm test`.
+
+Without those env vars, DB-gated suites silently skip (with `describe.skip`). CI enforces they actually run via `scripts/check-db-tests-ran.mjs`.
+
 ## Packages
 
 OSS (MIT):
