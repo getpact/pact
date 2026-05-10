@@ -16,6 +16,11 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@getpact/crypto": "workspace:*",
+    "@getpact/db": "workspace:*",
+    "drizzle-orm": "^0.36.0"
+  },
   "files": [
     "dist"
   ]

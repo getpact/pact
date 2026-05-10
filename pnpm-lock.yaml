@@ -131,7 +131,17 @@ importers:
 
   packages/adapter-slack: {}
 
-  packages/audit: {}
+  packages/audit:
+    dependencies:
+      '@getpact/crypto':
+        specifier: workspace:*
+        version: link:../crypto
+      '@getpact/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.36.0
+        version: 0.36.4(@cloudflare/workers-types@4.20260509.1)(postgres@3.4.9)
 
   packages/cli: {}
 
