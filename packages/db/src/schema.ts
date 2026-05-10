@@ -236,7 +236,10 @@ export const brains = pgTable(
     status: text("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("brains_workspace_idx").on(t.workspaceId)],
+  (t) => [
+    index("brains_workspace_idx").on(t.workspaceId),
+    uniqueIndex("brains_workspace_kind_idx").on(t.workspaceId, t.kind),
+  ],
 );
 
 export type VaultSecret = typeof vaultSecrets.$inferSelect;
