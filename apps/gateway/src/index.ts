@@ -43,6 +43,8 @@ const upstreamTimeout = (env: Env): number => {
 
 const DEFAULT_RATE_LIMIT = 60;
 const DEFAULT_RATE_WINDOW_SECONDS = 60;
+const MAX_RATE_LIMIT = 1000;
+const MAX_RATE_WINDOW_SECONDS = 3600;
 
 const parsePositiveInt = (raw: string | undefined, fallback: number, max: number): number => {
   if (!raw) return fallback;
@@ -315,11 +317,11 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   }
 
   if (c.env.ENVIRONMENT !== "test") {
-    const limit = parsePositiveInt(c.env.GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1000);
+    const limit = parsePositiveInt(c.env.GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, MAX_RATE_LIMIT);
     const windowSeconds = parsePositiveInt(
       c.env.GATEWAY_RATE_WINDOW_SECONDS,
       DEFAULT_RATE_WINDOW_SECONDS,
-      3600,
+      MAX_RATE_WINDOW_SECONDS,
     );
     const rateLimiter = databaseRateLimiter(c.env.DATABASE_URL);
     const verdictRate = await rateLimiter.hit(
