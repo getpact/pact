@@ -1,3 +1,11 @@
+import {
+  type Adapter,
+  type AdapterContext,
+  errorResult,
+  json,
+  type ToolDeps,
+} from "@getpact/adapter-sdk";
+
 export type SlackFetch = typeof fetch;
 
 export type SlackClientOptions = {
@@ -83,6 +91,73 @@ const parseAuthTest = (value: unknown): SlackResult<SlackAuthTestResult> => {
   };
 };
 
+export type SlackAdapterOptions = {
+  loadBotToken: (ctx: AdapterContext, deps: ToolDeps) => Promise<string | null>;
+  createClient?: (token: string) => SlackClient;
+};
+
+const parseLimit = (value: unknown): number | undefined =>
+  typeof value === "number" ? value : undefined;
+
+const parseString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined;
+
+export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
+  const buildClient = opts.createClient ?? ((token: string) => createSlackClient({ token }));
+
+  const loadClient = async (ctx: AdapterContext, deps: ToolDeps): Promise<SlackClient | null> => {
+    if (!deps.rawMek) return null;
+    const token = await opts.loadBotToken(ctx, deps);
+    return token ? buildClient(token) : null;
+  };
+
+  return {
+    name: "slack",
+    tools: [
+      {
+        descriptor: {
+          name: "pact.slack.auth.test",
+          description: "Verify the workspace Slack bot token stored in Pact Vault.",
+          inputSchema: { type: "object" },
+        },
+        handler: async (_args, ctx, deps) => {
+          if (!deps.rawMek) return errorResult("MEK is not configured");
+          const client = await loadClient(ctx, deps);
+          if (!client) return errorResult("Slack bot token not found");
+          return json(await client.authTest());
+        },
+      },
+      {
+        descriptor: {
+          name: "pact.slack.channels.list",
+          description: "List Slack channels visible to the workspace bot token (paginated).",
+          inputSchema: {
+            type: "object",
+            properties: {
+              limit: { type: "number" },
+              cursor: { type: "string" },
+              types: { type: "string" },
+            },
+          },
+        },
+        handler: async (args, ctx, deps) => {
+          if (!deps.rawMek) return errorResult("MEK is not configured");
+          const client = await loadClient(ctx, deps);
+          if (!client) return errorResult("Slack bot token not found");
+          const input: SlackConversationsListInput = {};
+          const limit = parseLimit(args.limit);
+          const cursor = parseString(args.cursor);
+          const types = parseString(args.types);
+          if (limit !== undefined) input.limit = limit;
+          if (cursor) input.cursor = cursor;
+          if (types) input.types = types;
+          return json(await client.conversationsList(input));
+        },
+      },
+    ],
+  };
+};
+
 const parseConversationsList = (value: unknown): SlackResult<SlackConversationsListResult> => {
   if (!value || typeof value !== "object") {
     throw new Error("invalid Slack response");
@@ -114,6 +189,7 @@ const parseConversationsList = (value: unknown): SlackResult<SlackConversationsL
 
 export const createSlackClient = (opts: SlackClientOptions): SlackClient => {
   if (!opts.token) throw new Error("Slack token is required");
+  if (/[\r\n\t]/.test(opts.token)) throw new Error("Slack token contains illegal whitespace");
   const fetchImpl = opts.fetch ?? fetch;
   const apiBaseUrl = opts.apiBaseUrl ?? defaultApiBaseUrl;
 
