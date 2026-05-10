@@ -19,6 +19,10 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@getpact/audit": "workspace:*",
+    "@getpact/crypto": "workspace:*"
+  },
   "files": [
     "dist",
     "README.md",

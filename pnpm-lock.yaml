@@ -251,7 +251,14 @@ importers:
         specifier: ^0.36.0
         version: 0.36.4(@cloudflare/workers-types@4.20260509.1)(postgres@3.4.9)
 
-  packages/cli: {}
+  packages/cli:
+    dependencies:
+      '@getpact/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@getpact/crypto':
+        specifier: workspace:*
+        version: link:../crypto
 
   packages/core: {}
 

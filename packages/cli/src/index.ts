@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
+import { runAuditVerify } from "./audit-verify.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { type ClientId, installMcpServer } from "./mcp-install.js";
 import { serveStdio } from "./mcp-serve.js";
@@ -34,6 +35,7 @@ const help = () => {
       "  status           show endpoint and credential expiry",
       "  mcp install      register Pact MCP server with an agent client",
       "  mcp serve        run the Pact MCP stdio proxy (used by clients)",
+      "  audit verify     verify the workspace audit chain end to end",
       "",
       "env:",
       "  PACT_ENDPOINT       issuer URL (default http://localhost:8787)",
@@ -200,6 +202,24 @@ const mcp = async () => {
   }
 };
 
+const audit = async () => {
+  const sub = process.argv[3];
+  if (sub !== "verify") {
+    process.stderr.write("usage: pact audit verify\n");
+    process.exit(1);
+  }
+  const cfg = await loadConfig();
+  const report = await runAuditVerify(cfg);
+  if (report.ok) {
+    process.stdout.write(`audit chain ok. ${report.eventsChecked} events. head ${report.head}\n`);
+    return;
+  }
+  process.stderr.write(
+    `audit chain BROKEN at index ${report.brokenAt.index}: ${report.brokenAt.reason}\n`,
+  );
+  process.exit(2);
+};
+
 const main = async () => {
   const command = process.argv[2];
   switch (command) {
@@ -225,6 +245,9 @@ const main = async () => {
       return;
     case "mcp":
       await mcp();
+      return;
+    case "audit":
+      await audit();
       return;
     default:
       process.stderr.write(`unknown command: ${command}\n`);
