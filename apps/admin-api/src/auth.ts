@@ -84,7 +84,7 @@ export const authenticateAdmin = async (
     throw new Error("token revoked");
   }
 
-  const roles = stringArrayClaim(claims.scopes, "scopes");
+  const roles = stringArrayClaim(claims.roles, "roles");
   if (!roles.includes("admin")) {
     throw new Error("admin role required");
   }

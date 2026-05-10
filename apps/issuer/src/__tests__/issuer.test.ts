@@ -165,7 +165,7 @@ run("issuer end-to-end", () => {
     });
     expect(result.payload.sub).toBe(created.adminUserId);
     expect(result.payload.email).toBe("alice@example.com");
-    expect(result.payload.scopes).toEqual(["admin"]);
+    expect(result.payload.roles).toEqual(["admin"]);
   });
 
   it("publishes a workspace JWKS with the active signing key", async () => {

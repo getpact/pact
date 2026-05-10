@@ -23,7 +23,7 @@ describe("admin api auth hardening", () => {
     const token = tokenWithBadHeader({
       org: workspaceId,
       sub: "user-1",
-      scopes: ["admin"],
+      roles: ["admin"],
     });
     const res = await app.request(
       `/v1/workspaces/${workspaceId}/users`,

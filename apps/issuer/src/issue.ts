@@ -59,7 +59,7 @@ const issueAccessToken = async (
       email: input.email,
       org: input.workspaceId,
       groups: userGroupRows.map((r) => r.name),
-      scopes: userRoleRows.map((r) => r.name),
+      roles: userRoleRows.map((r) => r.name),
       mode: "A",
     },
     {

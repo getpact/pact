@@ -23,7 +23,7 @@ describe("audit api auth hardening", () => {
     const token = tokenWithBadHeader({
       org: workspaceId,
       sub: "user-1",
-      scopes: ["auditor"],
+      roles: ["auditor"],
     });
     const res = await app.request(
       `/v1/workspaces/${workspaceId}/audit/events`,

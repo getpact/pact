@@ -87,7 +87,7 @@ export const authenticate = async (
     userId: sub,
     email: (claims.email as string | undefined) ?? "",
     groups: stringArrayClaim(claims.groups, "groups"),
-    roles: stringArrayClaim(claims.scopes, "scopes"),
+    roles: stringArrayClaim(claims.roles, "roles"),
     jti,
     token,
   };

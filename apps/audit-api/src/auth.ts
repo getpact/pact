@@ -83,7 +83,7 @@ export const authenticateAuditReader = async (
     throw new Error("token revoked");
   }
 
-  const roles = stringArrayClaim(claims.scopes, "scopes");
+  const roles = stringArrayClaim(claims.roles, "roles");
   if (!roles.includes("admin") && !roles.includes("auditor")) {
     throw new Error("admin or auditor role required");
   }

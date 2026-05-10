@@ -166,7 +166,7 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
   }
 
   const groups = stringArrayClaim(claims.groups);
-  const roles = stringArrayClaim(claims.scopes);
+  const roles = stringArrayClaim(claims.roles);
   if (!groups || !roles) {
     await tryAudit(
       databaseUrl,
