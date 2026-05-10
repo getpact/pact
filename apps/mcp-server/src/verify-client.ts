@@ -12,12 +12,14 @@ export type VerifyClient = (input: {
 }) => Promise<VerifyResponse>;
 
 export const httpVerifyClient =
-  (verifierUrl: string): VerifyClient =>
+  (verifierUrl: string, serviceToken?: string): VerifyClient =>
   async (input) => {
     try {
+      const headers = new Headers({ "content-type": "application/json" });
+      if (serviceToken) headers.set("authorization", `Bearer ${serviceToken}`);
       const res = await fetch(`${verifierUrl.replace(/\/+$/, "")}/v1/verify`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify(input),
       });
       const body = (await res.json()) as Partial<VerifyResponse>;

@@ -300,6 +300,7 @@ run("mcp server", () => {
 run("mcp server with verifier", () => {
   const adminDb = createClient(url as string);
   const cleanup: string[] = [];
+  const verifierServiceToken = "verifier-service-secret";
   let server: ReturnType<typeof createServer>;
   let verifierUrl: string;
   let proxyEnv: Record<string, unknown> = {};
@@ -313,9 +314,13 @@ run("mcp server with verifier", () => {
       req.on("end", async () => {
         try {
           const method = req.method ?? "POST";
+          const headers = new Headers({ "content-type": "application/json" });
+          if (req.headers.authorization) {
+            headers.set("authorization", req.headers.authorization);
+          }
           const init: RequestInit = {
             method,
-            headers: { "content-type": "application/json" },
+            headers,
           };
           if (method !== "GET" && method !== "HEAD") init.body = body;
           const upstreamRes = await verifier.request(req.url ?? "/", init, proxyEnv);
@@ -386,6 +391,7 @@ run("mcp server with verifier", () => {
       DATABASE_URL: env.DATABASE_URL,
       MEK: env.MEK,
       ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+      VERIFIER_SERVICE_TOKEN: verifierServiceToken,
     };
   };
 
@@ -415,6 +421,7 @@ run("mcp server with verifier", () => {
         DATABASE_URL: env.DATABASE_URL,
         ISSUER_BASE_URL: env.ISSUER_BASE_URL,
         VERIFIER_URL: verifierUrl,
+        VERIFIER_SERVICE_TOKEN: verifierServiceToken,
         MCP_AUDIENCE: env.MCP_AUDIENCE,
       },
     );

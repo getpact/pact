@@ -44,6 +44,13 @@ const devIssueHeaders = () => ({
     : {}),
 });
 
+const verifierHeaders = () => ({
+  "content-type": "application/json",
+  ...(process.env.PACT_VERIFIER_SERVICE_TOKEN
+    ? { authorization: `Bearer ${process.env.PACT_VERIFIER_SERVICE_TOKEN}` }
+    : {}),
+});
+
 const health = [
   ["issuer", optional("PACT_ISSUER_URL")],
   ["verifier", optional("PACT_VERIFIER_URL")],
@@ -80,7 +87,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
 
   const verifierAllow = await check("verifier allow path", `${verifierUrl}/v1/verify`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: verifierHeaders(),
     body: JSON.stringify({
       token: issued.token,
       action: "smoke",

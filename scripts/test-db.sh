@@ -16,6 +16,11 @@ export DATABASE_URL="${DATABASE_URL:-postgres://pact:pact@${DB_HOST}:${DB_PORT}/
 export RLS_TEST_DB="${RLS_TEST_DB:-postgres://pact_app:pact_app@${DB_HOST}:${DB_PORT}/pact}"
 export PG_POOL_MAX="${PG_POOL_MAX:-4}"
 
+if ! docker info >/dev/null 2>&1; then
+  echo "[test-db] docker daemon is unavailable; start Docker or provide DATABASE_URL/RLS_TEST_DB" >&2
+  exit 1
+fi
+
 if ! docker ps --format '{{.Names}}' | grep -q "compose[-_]postgres"; then
   echo "[test-db] starting local postgres via docker compose"
   docker compose -f "$COMPOSE" up -d
@@ -33,4 +38,8 @@ echo "[test-db] applying migrations"
 pnpm --filter @getpact/db db:migrate
 
 echo "[test-db] running vitest with concurrency=1"
-pnpm exec turbo run test --concurrency=1
+LOG="${PACT_DB_TEST_LOG:-/tmp/pact-db-tests.log}"
+pnpm exec turbo run test --concurrency=1 2>&1 | tee "$LOG"
+
+echo "[test-db] checking DB-gated tests were not skipped"
+node scripts/check-db-tests-ran.mjs "$LOG"

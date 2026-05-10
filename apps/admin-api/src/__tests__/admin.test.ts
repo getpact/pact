@@ -1,5 +1,12 @@
 import { createClient, withWorkspace } from "@getpact/db";
-import { auditEvents, brains, vaultSecrets, workspaces } from "@getpact/db/schema";
+import {
+  auditEvents,
+  brains,
+  revokedJtis,
+  users,
+  vaultSecrets,
+  workspaces,
+} from "@getpact/db/schema";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -445,6 +452,53 @@ run("admin api", () => {
     expect(events.length).toBeGreaterThan(0);
     expect(events[0]?.actorKind).toBe("admin");
     expect(events[0]?.decision).toBe("allow");
+  });
+
+  it("rolls back user creation when required audit cannot decrypt keys", async () => {
+    const { env, created, token } = await setup();
+    const res = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/users`,
+      token,
+      "POST",
+      { email: "rollback-user@example.com" },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+      },
+    );
+    expect(res.status).toBe(500);
+    const rows = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx.select({ id: users.id }).from(users).where(eq(users.email, "rollback-user@example.com")),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rolls back revocation and skips cache bust when audit fails", async () => {
+    const { env, created, token } = await setup();
+    const putMock = vi.fn(async () => {});
+    const kv: KVNamespace = { put: putMock };
+    const res = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/revocations`,
+      token,
+      "POST",
+      { jti: "rollback-jti-1", reason: "test" },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+        REVOCATION_CACHE: kv,
+      },
+    );
+    expect(res.status).toBe(500);
+    expect(putMock).not.toHaveBeenCalled();
+    const rows = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ jti: revokedJtis.jti })
+        .from(revokedJtis)
+        .where(eq(revokedJtis.jti, "rollback-jti-1")),
+    );
+    expect(rows).toHaveLength(0);
   });
 
   it("busts the kv revocation cache when a jti is revoked", async () => {

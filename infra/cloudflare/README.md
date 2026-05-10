@@ -18,6 +18,9 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
   policy that blocks private, link-local, metadata, and RFC1918 destinations
   after DNS resolution. `UPSTREAM_HOST_ALLOWLIST` is required but is not enough
   by itself because DNS rebinding can change where an allowed hostname resolves.
+- Verifier service auth: set the same `VERIFIER_SERVICE_TOKEN` secret on the
+  verifier and every internal caller that invokes it, including MCP server and
+  gateway. Production verifier requests fail closed if this secret is missing.
 - Gateway audit is required in production by default. Set
   `GATEWAY_AUDIT_MODE=best_effort` only for controlled non-critical smoke
   environments.
@@ -29,8 +32,18 @@ Run `pnpm deploy:cloudflare` from the repository root after bootstrap. The scrip
 validates Worker manifests, runs `pnpm typecheck`, runs `pnpm build`, then deploys
 issuer, verifier, MCP server, admin API, and audit API in order.
 
-The gateway Worker is opt-in while Mode B is being hardened. Deploy it with
-`PACT_DEPLOY_GATEWAY=true pnpm deploy:cloudflare`.
+The gateway Worker is opt-in while Mode B is being hardened. Deploy it only
+after configuring both the runtime host allowlist and platform egress controls:
+
+```sh
+PACT_DEPLOY_GATEWAY=true \
+PACT_GATEWAY_UPSTREAM_HOST_ALLOWLIST_READY=true \
+PACT_GATEWAY_EGRESS_POLICY_READY=true \
+pnpm deploy:cloudflare
+```
+
+The two `*_READY` variables are intentional deployment gates. They assert that
+Cloudflare-side settings already exist; they do not replace runtime checks.
 
 After deploy, run a health smoke test:
 
@@ -38,6 +51,7 @@ After deploy, run a health smoke test:
 PACT_ISSUER_URL=https://pact-issuer.<subdomain>.workers.dev \
 PACT_VERIFIER_URL=https://pact-verifier.<subdomain>.workers.dev \
 PACT_MCP_URL=https://pact-mcp-server.<subdomain>.workers.dev \
+PACT_VERIFIER_SERVICE_TOKEN=<shared-secret> \
 pnpm smoke:cloudflare
 ```
 

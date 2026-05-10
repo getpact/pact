@@ -77,6 +77,77 @@ describe("verifier audience config", () => {
       message: "audience is not allowed",
     });
   });
+
+  it("requires service auth when configured", async () => {
+    const request = {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token: "unused",
+        action: "read",
+        resource: "doc:any",
+        audience: "pact-mcp",
+      }),
+    };
+    const env = {
+      DATABASE_URL: "postgres://unused",
+      MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      ISSUER_BASE_URL: "https://issuer.test",
+      VERIFIER_SERVICE_TOKEN: "service-secret",
+    };
+
+    const missing = await app.request("/v1/verify", request, env);
+    expect(missing.status).toBe(401);
+    expect(await missing.json()).toEqual({
+      error: "unauthorized",
+      message: "invalid service token",
+    });
+
+    const allowed = await app.request(
+      "/v1/verify",
+      {
+        ...request,
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer service-secret",
+        },
+      },
+      { ...env, VERIFIER_AUDIENCES: "pact-other" },
+    );
+    expect(allowed.status).toBe(400);
+    expect(await allowed.json()).toEqual({
+      error: "invalid_audience",
+      message: "audience is not allowed",
+    });
+  });
+
+  it("fails closed in production when service auth is not configured", async () => {
+    const res = await app.request(
+      "/v1/verify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: "unused",
+          action: "read",
+          resource: "doc:any",
+          audience: "pact-mcp",
+        }),
+      },
+      {
+        DATABASE_URL: "postgres://unused",
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ISSUER_BASE_URL: "https://issuer.test",
+        ENVIRONMENT: "production",
+      },
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: "misconfigured",
+      message: "verifier service token is required",
+    });
+  });
 });
 
 run("verifier", () => {

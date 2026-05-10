@@ -14,6 +14,7 @@ type Env = {
   MEK?: string;
   MCP_AUDIENCE?: string;
   VERIFIER_URL?: string;
+  VERIFIER_SERVICE_TOKEN?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -51,7 +52,9 @@ app.post("/:workspace/mcp", async (c) => {
   }
 
   const body = await c.req.json();
-  const verify = c.env.VERIFIER_URL ? httpVerifyClient(c.env.VERIFIER_URL) : undefined;
+  const verify = c.env.VERIFIER_URL
+    ? httpVerifyClient(c.env.VERIFIER_URL, c.env.VERIFIER_SERVICE_TOKEN)
+    : undefined;
   const response = await handleMcp(body, ctx, {
     audience,
     deps: {

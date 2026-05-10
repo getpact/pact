@@ -13,6 +13,7 @@ type Env = {
   ENVIRONMENT?: string;
   VERIFIER_AUDIENCE?: string;
   VERIFIER_AUDIENCES?: string;
+  VERIFIER_SERVICE_TOKEN?: string;
   REVOCATION_CACHE?: KVNamespace;
 };
 
@@ -36,6 +37,16 @@ export const allowedAudiences = (env: Pick<Env, "VERIFIER_AUDIENCE" | "VERIFIER_
     .filter((v) => v.length > 0);
 
 app.post("/v1/verify", async (c) => {
+  const serviceToken = c.env.VERIFIER_SERVICE_TOKEN?.trim();
+  if (!serviceToken && c.env.ENVIRONMENT === "production") {
+    return c.json({ error: "misconfigured", message: "verifier service token is required" }, 503);
+  }
+  if (serviceToken) {
+    const expected = `Bearer ${serviceToken}`;
+    if (c.req.header("Authorization") !== expected) {
+      return c.json({ error: "unauthorized", message: "invalid service token" }, 401);
+    }
+  }
   const body = await c.req.json<{
     token: string;
     action: string;

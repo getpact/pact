@@ -21,6 +21,7 @@ type Env = {
   MEK?: string;
   ENVIRONMENT?: string;
   GATEWAY_AUDIENCE?: string;
+  VERIFIER_SERVICE_TOKEN?: string;
   GATEWAY_UPSTREAM_TIMEOUT_MS?: string;
   GATEWAY_RATE_LIMIT?: string;
   GATEWAY_RATE_WINDOW_SECONDS?: string;
@@ -129,14 +130,24 @@ const bearerToken = (value: string | undefined): string | null => {
   return token.length > 0 ? token : null;
 };
 
+const clientRateKey = (headers: Headers): string => {
+  const cfIp = headers.get("cf-connecting-ip")?.trim();
+  if (cfIp) return cfIp;
+  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwarded && forwarded.length > 0 ? forwarded : "anonymous";
+};
+
 const verify = async (
   verifierUrl: string,
   input: { token: string; action: string; resource: string; audience: string },
+  serviceToken?: string,
 ): Promise<VerifyOutput> => {
   try {
+    const headers = new Headers({ "content-type": "application/json" });
+    if (serviceToken) headers.set("authorization", `Bearer ${serviceToken}`);
     const res = await fetch(`${verifierUrl.replace(/\/+$/, "")}/v1/verify`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify(input),
     });
     const body = (await res.json()) as Partial<VerifyOutput>;
@@ -226,17 +237,12 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   const audience = c.env.GATEWAY_AUDIENCE ?? "pact-gateway";
   const authz = gatewayAuthorization(c.req.method, brainKind, path, requestUrl.search);
 
-  const verdict = await verify(c.env.VERIFIER_URL, {
-    token,
-    action: authz.action,
-    resource: authz.resource,
-    audience,
-  });
-  if (!verdict.allow) {
-    return c.json({ error: "denied", reasons: verdict.reasons }, 403);
+  let claims: ReturnType<typeof decodeJwt>;
+  try {
+    claims = decodeJwt(token);
+  } catch {
+    return c.json({ error: "unauthorized", message: "malformed bearer token" }, 401);
   }
-
-  const claims = decodeJwt(token);
   const workspaceId = claims.org as string | undefined;
   if (!workspaceId || !isUuid(workspaceId)) {
     return c.json({ error: "unauthorized", message: "missing workspace claim" }, 401);
@@ -255,6 +261,64 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   if (!workspace || workspace.id !== workspaceId) {
     return c.json({ error: "unauthorized", message: "workspace mismatch" }, 401);
   }
+
+  const [brain] = await withWorkspace(db, workspaceId, (tx) =>
+    tx
+      .select({
+        baseUrl: schema.brains.baseUrl,
+        authScheme: schema.brains.authScheme,
+      })
+      .from(schema.brains)
+      .where(
+        and(
+          eq(schema.brains.workspaceId, workspaceId),
+          eq(schema.brains.kind, brainKind),
+          eq(schema.brains.status, "active"),
+        ),
+      )
+      .limit(1),
+  );
+  if (!brain) {
+    return c.json({ error: "not_found", message: "brain not found" }, 404);
+  }
+
+  if (c.env.ENVIRONMENT !== "test") {
+    const limit = parsePositiveInt(c.env.GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, MAX_RATE_LIMIT);
+    const windowSeconds = parsePositiveInt(
+      c.env.GATEWAY_RATE_WINDOW_SECONDS,
+      DEFAULT_RATE_WINDOW_SECONDS,
+      MAX_RATE_WINDOW_SECONDS,
+    );
+    const rateLimiter = databaseRateLimiter(c.env.DATABASE_URL);
+    const verdictRate = await rateLimiter.hit(
+      `gateway-pre:${workspace.id}:${brainKind}:${clientRateKey(c.req.raw.headers)}`,
+      limit,
+      windowSeconds,
+    );
+    c.header("x-ratelimit-limit", String(limit));
+    c.header("x-ratelimit-remaining", String(verdictRate.remaining));
+    c.header("x-ratelimit-reset", String(Math.ceil(verdictRate.resetAt / 1000)));
+    if (!verdictRate.allowed) {
+      const retry = Math.max(1, Math.ceil((verdictRate.resetAt - Date.now()) / 1000));
+      c.header("retry-after", String(retry));
+      return c.json({ error: "rate_limited", message: "too many requests" }, 429);
+    }
+  }
+
+  const verdict = await verify(
+    c.env.VERIFIER_URL,
+    {
+      token,
+      action: authz.action,
+      resource: authz.resource,
+      audience,
+    },
+    c.env.VERIFIER_SERVICE_TOKEN,
+  );
+  if (!verdict.allow) {
+    return c.json({ error: "denied", reasons: verdict.reasons }, 403);
+  }
+
   const auditTarget = {
     resource: authz.resource,
     brain: brainKind,
@@ -296,53 +360,6 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
           },
           503,
         );
-
-  const [brain] = await withWorkspace(db, workspaceId, (tx) =>
-    tx
-      .select({
-        baseUrl: schema.brains.baseUrl,
-        authScheme: schema.brains.authScheme,
-      })
-      .from(schema.brains)
-      .where(
-        and(
-          eq(schema.brains.workspaceId, workspaceId),
-          eq(schema.brains.kind, brainKind),
-          eq(schema.brains.status, "active"),
-        ),
-      )
-      .limit(1),
-  );
-  if (!brain) {
-    const failed = auditFailure(await audit({ decision: "deny", outcome: "brain_not_found" }));
-    if (failed) return failed;
-    return c.json({ error: "not_found", message: "brain not found" }, 404);
-  }
-
-  if (c.env.ENVIRONMENT !== "test") {
-    const limit = parsePositiveInt(c.env.GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, MAX_RATE_LIMIT);
-    const windowSeconds = parsePositiveInt(
-      c.env.GATEWAY_RATE_WINDOW_SECONDS,
-      DEFAULT_RATE_WINDOW_SECONDS,
-      MAX_RATE_WINDOW_SECONDS,
-    );
-    const rateLimiter = databaseRateLimiter(c.env.DATABASE_URL);
-    const verdictRate = await rateLimiter.hit(
-      `gateway:${workspaceId}:${brainKind}`,
-      limit,
-      windowSeconds,
-    );
-    c.header("x-ratelimit-limit", String(limit));
-    c.header("x-ratelimit-remaining", String(verdictRate.remaining));
-    c.header("x-ratelimit-reset", String(Math.ceil(verdictRate.resetAt / 1000)));
-    if (!verdictRate.allowed) {
-      const failed = auditFailure(await audit({ decision: "deny", outcome: "rate_limited" }));
-      if (failed) return failed;
-      const retry = Math.max(1, Math.ceil((verdictRate.resetAt - Date.now()) / 1000));
-      c.header("retry-after", String(retry));
-      return c.json({ error: "rate_limited", message: "too many requests" }, 429);
-    }
-  }
 
   let brainBearerToken: string | null = null;
   if (brain.authScheme === "bearer") {

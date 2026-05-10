@@ -121,11 +121,11 @@ describe("gateway", () => {
     expect(headers.get("x-method-override")).toBeNull();
   });
 
-  it("fails closed when verifier is unavailable", async () => {
+  it("rejects malformed bearer tokens before verifier", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
-        throw new Error("offline");
+        throw new Error("verifier must not be called");
       }),
     );
     const res = await app.request(
@@ -133,8 +133,11 @@ describe("gateway", () => {
       { headers: { authorization: "Bearer not-a-jwt" } },
       { ENVIRONMENT: "test", VERIFIER_URL: "https://verifier.test" },
     );
-    expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: "denied", reasons: ["verifier unavailable"] });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({
+      error: "unauthorized",
+      message: "malformed bearer token",
+    });
     vi.unstubAllGlobals();
   });
 });
@@ -189,6 +192,7 @@ run("gateway integration", () => {
         const target = input.toString();
         requested.push(target);
         if (target === "https://verifier.test/v1/verify") {
+          expect((init?.headers as Headers).get("authorization")).toBe("Bearer verifier-secret");
           const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
           expect(body).toMatchObject({
             action: "gateway.get",
@@ -224,6 +228,7 @@ run("gateway integration", () => {
       {
         DATABASE_URL: testEnv.DATABASE_URL,
         VERIFIER_URL: "https://verifier.test",
+        VERIFIER_SERVICE_TOKEN: "verifier-secret",
         GATEWAY_AUDIENCE: "pact-gateway",
         MEK: testEnv.MEK,
       },
@@ -335,7 +340,11 @@ run("gateway integration", () => {
     const upstreamCalls = fetchMock.mock.calls.filter(
       ([input]) => input.toString() === "https://api.example.com/base/v1/pages",
     );
+    const verifierCalls = fetchMock.mock.calls.filter(
+      ([input]) => input.toString() === "https://verifier.test/v1/verify",
+    );
     expect(upstreamCalls).toHaveLength(1);
+    expect(verifierCalls).toHaveLength(1);
   });
 
   it("fails closed in production when gateway audit is unavailable", async () => {
@@ -484,10 +493,8 @@ run("gateway integration", () => {
       adminEmail: "bob@example.com",
     });
     cleanup.push(second.workspaceId);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ allow: true, reasons: ["ok"] })),
-    );
+    const fetchMock = vi.fn(async () => Response.json({ allow: true, reasons: ["ok"] }));
+    vi.stubGlobal("fetch", fetchMock);
 
     const res = await app.request(
       `/${second.workspaceId}/gateway/notion/v1/pages`,
@@ -504,5 +511,6 @@ run("gateway integration", () => {
       error: "unauthorized",
       message: "workspace mismatch",
     });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

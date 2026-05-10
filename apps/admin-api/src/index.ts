@@ -9,7 +9,7 @@ import {
   ValidationError,
 } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
-import { createClient, withWorkspace } from "@getpact/db";
+import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import {
   brains,
   groupMembers,
@@ -26,7 +26,7 @@ import { and, desc, eq, max, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { emitAdminAudit } from "./audit.js";
+import { emitAdminAudit, writeAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
 
@@ -93,6 +93,23 @@ const audit = (
     decision,
   });
 
+const auditInTx = (
+  tx: Tx,
+  c: AppCtx,
+  ctx: AdminContext,
+  action: string,
+  target: unknown,
+  decision: "allow" | "deny" = "allow",
+): Promise<void> =>
+  writeAdminAudit(tx, {
+    rawMek: fromBase64(c.env.MEK),
+    workspaceId: ctx.workspaceId,
+    actorUserId: ctx.userId,
+    action,
+    target,
+    decision,
+  });
+
 app.get("/v1/workspaces/:id/users", async (c) => {
   const workspaceId = c.req.param("id");
   const ctx = await auth(c, workspaceId);
@@ -116,13 +133,14 @@ app.post("/v1/workspaces/:id/users", async (c) => {
   const body = await c.req.json<{ email: string; name?: string }>();
   const email = canonicalizeEmail(body.email) as Email;
   const db = createClient(c.env.DATABASE_URL);
-  const inserted = await withWorkspace(db, workspaceId, (tx) =>
-    tx
+  const inserted = await withWorkspace(db, workspaceId, async (tx) => {
+    const rows = await tx
       .insert(users)
       .values({ workspaceId, email, name: body.name ?? null })
-      .returning({ id: users.id, email: users.email }),
-  );
-  await audit(c, ctx, "admin.user.created", { userId: inserted[0]?.id, email });
+      .returning({ id: users.id, email: users.email });
+    await auditInTx(tx, c, ctx, "admin.user.created", { userId: rows[0]?.id, email });
+    return rows;
+  });
   return c.json({ user: inserted[0] }, 201);
 });
 
@@ -133,13 +151,17 @@ app.post("/v1/workspaces/:id/groups", async (c) => {
 
   const body = await c.req.json<{ name: string; description?: string }>();
   const db = createClient(c.env.DATABASE_URL);
-  const inserted = await withWorkspace(db, workspaceId, (tx) =>
-    tx
+  const inserted = await withWorkspace(db, workspaceId, async (tx) => {
+    const rows = await tx
       .insert(groups)
       .values({ workspaceId, name: body.name, description: body.description ?? null })
-      .returning({ id: groups.id, name: groups.name }),
-  );
-  await audit(c, ctx, "admin.group.created", { groupId: inserted[0]?.id, name: body.name });
+      .returning({ id: groups.id, name: groups.name });
+    await auditInTx(tx, c, ctx, "admin.group.created", {
+      groupId: rows[0]?.id,
+      name: body.name,
+    });
+    return rows;
+  });
   return c.json({ group: inserted[0] }, 201);
 });
 
@@ -151,10 +173,10 @@ app.post("/v1/workspaces/:id/groups/:groupId/members", async (c) => {
 
   const body = await c.req.json<{ userId: string }>();
   const db = createClient(c.env.DATABASE_URL);
-  await withWorkspace(db, workspaceId, (tx) =>
-    tx.insert(groupMembers).values({ groupId, userId: body.userId }),
-  );
-  await audit(c, ctx, "admin.group_member.added", { groupId, userId: body.userId });
+  await withWorkspace(db, workspaceId, async (tx) => {
+    await tx.insert(groupMembers).values({ groupId, userId: body.userId });
+    await auditInTx(tx, c, ctx, "admin.group_member.added", { groupId, userId: body.userId });
+  });
   return c.json({ ok: true }, 201);
 });
 
@@ -197,11 +219,11 @@ app.post("/v1/workspaces/:id/policies", async (c) => {
         createdBy: ctx.userId,
       })
       .returning({ id: policies.id, version: policies.version });
+    await auditInTx(tx, c, ctx, "admin.policy.created", {
+      policyId: row?.id,
+      version: row?.version,
+    });
     return row;
-  });
-  await audit(c, ctx, "admin.policy.created", {
-    policyId: created?.id,
-    version: created?.version,
   });
   return c.json({ policy: created }, 201);
 });
@@ -248,9 +270,12 @@ app.post("/v1/workspaces/:id/revocations", async (c) => {
             AND access_jti = ${body.jti}
             AND revoked_at IS NULL`,
     );
+    await auditInTx(tx, c, ctx, "admin.revocation.created", {
+      jti: body.jti,
+      reason: body.reason,
+    });
   });
   await bustRevocationCache(c.env.REVOCATION_CACHE, workspaceId, body.jti);
-  await audit(c, ctx, "admin.revocation.created", { jti: body.jti, reason: body.reason });
   return c.json({ ok: true }, 201);
 });
 
@@ -267,8 +292,8 @@ app.post("/v1/workspaces/:id/invites", async (c) => {
   const ttlSeconds = body.ttl === "1d" ? 86_400 : body.ttl === "1w" ? 604_800 : 2_592_000;
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
   const db = createClient(c.env.DATABASE_URL);
-  const inserted = await withWorkspace(db, workspaceId, (tx) =>
-    tx
+  const inserted = await withWorkspace(db, workspaceId, async (tx) => {
+    const rows = await tx
       .insert(invites)
       .values({
         workspaceId,
@@ -278,12 +303,13 @@ app.post("/v1/workspaces/:id/invites", async (c) => {
         expiresAt,
         createdBy: ctx.userId,
       })
-      .returning({ id: invites.id, email: invites.email, expiresAt: invites.expiresAt }),
-  );
-  await audit(c, ctx, "admin.invite.created", {
-    inviteId: inserted[0]?.id,
-    email: inserted[0]?.email,
-    ttl: body.ttl,
+      .returning({ id: invites.id, email: invites.email, expiresAt: invites.expiresAt });
+    await auditInTx(tx, c, ctx, "admin.invite.created", {
+      inviteId: rows[0]?.id,
+      email: rows[0]?.email,
+      ttl: body.ttl,
+    });
+    return rows;
   });
   return c.json({ invite: inserted[0] }, 201);
 });
@@ -360,7 +386,7 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
     const db = createClient(c.env.DATABASE_URL);
     const inserted = await withWorkspace(db, workspaceId, async (tx) => {
       try {
-        return await tx
+        const rows = await tx
           .insert(brains)
           .values({
             workspaceId,
@@ -371,14 +397,15 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
             responseFilter: body.responseFilter ?? null,
           })
           .returning({ id: brains.id, kind: brains.kind, baseUrl: brains.baseUrl });
+        await auditInTx(tx, c, ctx, "admin.brain.created", {
+          brainId: rows[0]?.id,
+          kind: body.kind,
+        });
+        return rows;
       } catch (e) {
         if (isUniqueViolation(e)) throw new ConflictError("brain kind already exists");
         throw e;
       }
-    });
-    await audit(c, ctx, "admin.brain.created", {
-      brainId: inserted[0]?.id,
-      kind: body.kind,
     });
     return c.json({ brain: inserted[0] }, 201);
   } catch (e) {
@@ -430,13 +457,13 @@ app.delete("/v1/workspaces/:id/brains/:brainId", async (c) => {
         kind: "brain_credential",
         target: kind,
       });
+      await auditInTx(tx, c, ctx, "admin.brain.deleted", { brainId, kind });
     }
     return rows;
   });
   if (removed.length === 0) {
     return c.json({ error: "not_found", message: "brain not found" }, 404);
   }
-  await audit(c, ctx, "admin.brain.deleted", { brainId, kind: removed[0]?.kind });
   return c.json({ ok: true });
 });
 
@@ -460,26 +487,27 @@ app.put("/v1/workspaces/:id/brains/:brainId/credential", async (c) => {
 
     const db = createClient(c.env.DATABASE_URL);
     const rawMek = fromBase64(c.env.MEK);
-    const [brainRow] = await withWorkspace(db, workspaceId, (tx) =>
-      tx
+    const result = await withWorkspace(db, workspaceId, async (tx) => {
+      const [brainRow] = await tx
         .select({ kind: brains.kind, authScheme: brains.authScheme })
         .from(brains)
         .where(and(eq(brains.workspaceId, workspaceId), eq(brains.id, brainId)))
-        .limit(1),
-    );
-    if (!brainRow) return c.json({ error: "not_found", message: "brain not found" }, 404);
-    if (brainRow.authScheme !== "bearer") {
-      throw new ValidationError("brain authScheme must be bearer to store credential");
-    }
-    await withWorkspace(db, workspaceId, (tx) =>
-      storeSecret(tx, rawMek, {
+        .limit(1);
+      if (!brainRow) return "not_found" as const;
+      if (brainRow.authScheme !== "bearer") {
+        throw new ValidationError("brain authScheme must be bearer to store credential");
+      }
+      await storeSecret(tx, rawMek, {
         workspaceId,
         kind: "brain_credential",
         target: brainRow.kind,
         plaintext: body.token,
-      }),
-    );
-    await audit(c, ctx, "admin.brain.credential.set", { brainId, kind: brainRow.kind });
+      });
+      await auditInTx(tx, c, ctx, "admin.brain.credential.set", { brainId, kind: brainRow.kind });
+      return "ok" as const;
+    });
+    if (result === "not_found")
+      return c.json({ error: "not_found", message: "brain not found" }, 404);
     return c.json({ ok: true });
   } catch (e) {
     if (e instanceof PactError) {
