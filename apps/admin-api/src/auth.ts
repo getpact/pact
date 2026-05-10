@@ -38,7 +38,12 @@ export const authenticateAdmin = async (
     throw new Error("token workspace mismatch");
   }
 
-  const kid = decodeProtectedHeader(token).kid;
+  let kid: string | undefined;
+  try {
+    kid = decodeProtectedHeader(token).kid;
+  } catch {
+    throw new Error("malformed token header");
+  }
   if (!kid) throw new Error("missing kid");
 
   const db = createClient(databaseUrl);

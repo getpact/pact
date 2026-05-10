@@ -10,6 +10,35 @@ import app from "../index.js";
 const url = process.env.DATABASE_URL;
 const run = url ? describe : describe.skip;
 
+const tokenWithBadHeader = (claims: Record<string, unknown>) =>
+  [
+    Buffer.from("not json").toString("base64url"),
+    Buffer.from(JSON.stringify(claims)).toString("base64url"),
+    "sig",
+  ].join(".");
+
+describe("admin api auth hardening", () => {
+  it("rejects malformed token headers as unauthorized", async () => {
+    const workspaceId = "00000000-0000-0000-0000-000000000000";
+    const token = tokenWithBadHeader({
+      org: workspaceId,
+      sub: "user-1",
+      scopes: ["admin"],
+    });
+    const res = await app.request(
+      `/v1/workspaces/${workspaceId}/users`,
+      { method: "GET", headers: { Authorization: `Bearer ${token}` } },
+      {
+        DATABASE_URL: "postgres://unused",
+        MEK: "unused",
+        ISSUER_BASE_URL: "https://issuer.test/acme",
+        ADMIN_AUDIENCE: "pact-admin",
+      },
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
 const buildEnv = async () => {
   const mek = await generateAesKey();
   return {

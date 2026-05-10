@@ -12,6 +12,40 @@ import app from "../index.js";
 const url = process.env.DATABASE_URL;
 const run = url ? describe : describe.skip;
 
+const tokenWithBadHeader = (claims: Record<string, unknown>) =>
+  [
+    Buffer.from("not json").toString("base64url"),
+    Buffer.from(JSON.stringify(claims)).toString("base64url"),
+    "sig",
+  ].join(".");
+
+describe("mcp server auth hardening", () => {
+  it("rejects malformed token headers as unauthorized", async () => {
+    const token = tokenWithBadHeader({
+      org: "00000000-0000-0000-0000-000000000000",
+      sub: "user-1",
+      jti: "jti-1",
+    });
+    const res = await app.request(
+      "/acme/mcp",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
+      },
+      {
+        DATABASE_URL: "postgres://unused",
+        ISSUER_BASE_URL: "https://issuer.test/acme",
+        MCP_AUDIENCE: "pact-mcp",
+      },
+    );
+    expect(res.status).toBe(401);
+  });
+});
+
 const buildEnv = async () => {
   const mek = await generateAesKey();
   return {
