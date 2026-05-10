@@ -1,7 +1,8 @@
+import { writeEvent } from "@getpact/audit";
 import type { Email } from "@getpact/core";
 import { issueJwt } from "@getpact/crypto";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
-import { groupMembers, groups, roles, userRoles, users } from "@getpact/db/schema";
+import { groupMembers, groups, roles, userRoles, users, workspaces } from "@getpact/db/schema";
 import { loadActiveSigningKey } from "@getpact/keystore";
 import { and, eq } from "drizzle-orm";
 import { type IssuedRefresh, issueRefresh } from "./refresh.js";
@@ -26,6 +27,50 @@ export type IssueTokenResult = {
 
 const newJti = () => crypto.randomUUID();
 const DEFAULT_REFRESH_TTL = 24 * 60 * 60;
+
+const tryAuditRefresh = async (
+  tx: Tx,
+  input: {
+    workspaceId: string;
+    rawMek: Uint8Array;
+    decision: "allow" | "deny";
+    userId?: string;
+    audience: string;
+    reason: string;
+    oldAccessJti?: string | null;
+    newAccessJti?: string;
+  },
+): Promise<void> => {
+  try {
+    const [ws] = await tx
+      .select({ createdAt: workspaces.createdAt })
+      .from(workspaces)
+      .where(eq(workspaces.id, input.workspaceId))
+      .limit(1);
+    if (!ws) return;
+    const auditKey = await loadActiveSigningKey(tx, input.workspaceId, "audit", input.rawMek);
+    await writeEvent(tx, {
+      workspaceId: input.workspaceId,
+      workspaceCreatedAt: ws.createdAt,
+      signingKeyId: auditKey.id,
+      signingKey: auditKey.privateKey,
+      event: {
+        actorKind: input.userId ? "user" : "system",
+        ...(input.userId ? { actorId: input.userId } : {}),
+        action: input.decision === "allow" ? "issuer.refresh.succeeded" : "issuer.refresh.denied",
+        target: { audience: input.audience },
+        decision: input.decision,
+        supporting: {
+          reason: input.reason,
+          oldAccessJti: input.oldAccessJti ?? null,
+          newAccessJti: input.newAccessJti ?? null,
+        },
+      },
+    });
+  } catch {
+    // best-effort: never fail token refresh because audit failed
+  }
+};
 
 const issueAccessToken = async (
   tx: Tx,
@@ -133,10 +178,30 @@ export const redeemRefreshAndIssue = async (
   const db = createClient(databaseUrl);
   return withWorkspace(db, input.workspaceId, async (tx) => {
     const redeemed = await redeemRefresh(tx, input.workspaceId, input.refreshToken, input.audience);
-    if (!redeemed) return null;
+    if (!redeemed) {
+      await tryAuditRefresh(tx, {
+        workspaceId: input.workspaceId,
+        rawMek,
+        decision: "deny",
+        audience: input.audience,
+        reason: "invalid_grant",
+      });
+      return null;
+    }
 
     const [user] = await tx.select().from(users).where(eq(users.id, redeemed.userId)).limit(1);
-    if (!user) return null;
+    if (!user) {
+      await tryAuditRefresh(tx, {
+        workspaceId: input.workspaceId,
+        rawMek,
+        decision: "deny",
+        userId: redeemed.userId,
+        audience: input.audience,
+        reason: "user_not_found",
+        oldAccessJti: redeemed.accessJti,
+      });
+      return null;
+    }
 
     const access = await issueAccessToken(tx, {
       workspaceId: input.workspaceId,
@@ -154,6 +219,17 @@ export const redeemRefreshAndIssue = async (
       audience: input.audience,
       accessJti: access.jti,
       ttlSeconds: input.refreshTtlSeconds ?? DEFAULT_REFRESH_TTL,
+    });
+
+    await tryAuditRefresh(tx, {
+      workspaceId: input.workspaceId,
+      rawMek,
+      decision: "allow",
+      userId: user.id,
+      audience: input.audience,
+      reason: "rotated",
+      oldAccessJti: redeemed.accessJti,
+      newAccessJti: access.jti,
     });
 
     return {

@@ -44,6 +44,7 @@ export const issueRefresh = async (tx: Tx, input: IssueRefreshInput): Promise<Is
 export type RedeemRefreshResult = {
   workspaceId: string;
   userId: string;
+  accessJti: string | null;
 };
 
 export const redeemRefresh = async (
@@ -64,11 +65,11 @@ export const redeemRefresh = async (
           AND expires_at > NOW()
           AND last_used_at IS NULL
           AND revoked_at IS NULL
-        RETURNING workspace_id, user_id`,
-  )) as Array<{ workspace_id: string; user_id: string }>;
+        RETURNING workspace_id, user_id, access_jti`,
+  )) as Array<{ workspace_id: string; user_id: string; access_jti: string | null }>;
   const row = claimed[0];
   if (!row) return null;
-  return { workspaceId: row.workspace_id, userId: row.user_id };
+  return { workspaceId: row.workspace_id, userId: row.user_id, accessJti: row.access_jti };
 };
 
 export const revokeRefreshForAccessJti = async (

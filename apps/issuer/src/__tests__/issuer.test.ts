@@ -1,6 +1,6 @@
 import { exportAesKey, generateAesKey, toBase64, verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { workspaces } from "@getpact/db/schema";
+import { auditEvents, workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
@@ -269,6 +269,28 @@ run("issuer end-to-end", () => {
       env,
     );
     expect(reuseRes.status).toBe(401);
+
+    const events = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({
+          action: auditEvents.action,
+          decision: auditEvents.decision,
+          supporting: auditEvents.supporting,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, created.workspaceId)),
+    );
+    const refreshEvents = events.filter((event) => event.action.startsWith("issuer.refresh."));
+    expect(refreshEvents.map((event) => event.action).sort()).toEqual([
+      "issuer.refresh.denied",
+      "issuer.refresh.succeeded",
+    ]);
+    expect(
+      refreshEvents.find((event) => event.action === "issuer.refresh.succeeded")?.decision,
+    ).toBe("allow");
+    expect(refreshEvents.find((event) => event.action === "issuer.refresh.denied")?.decision).toBe(
+      "deny",
+    );
   });
 
   it("redeems a refresh token at most once under concurrent requests", async () => {
