@@ -1,4 +1,4 @@
-import { type Email } from "@getpact/core";
+import type { Email } from "@getpact/core";
 import { mintJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, roles, userRoles, users } from "@getpact/db/schema";
