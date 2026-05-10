@@ -199,6 +199,86 @@ run("verifier", () => {
     expect(events[0]?.decision).toBe("allow");
   });
 
+  it("emits audit event on revoked token deny", async () => {
+    const { env, created, issued } = await setupWorkspace();
+    await insertPolicy(created.workspaceId, created.adminUserId, {
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+    await withWorkspace(db, created.workspaceId, (tx) =>
+      tx.insert(revokedJtis).values({
+        workspaceId: created.workspaceId,
+        jti: issued.jti,
+        reason: "test",
+      }),
+    );
+
+    await app.request(
+      "/v1/verify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: issued.token,
+          action: "delete",
+          resource: "doc:critical",
+          audience: "pact-mcp",
+        }),
+      },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+    );
+
+    const events = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.workspaceId, created.workspaceId),
+            eq(auditEvents.action, "verify.delete"),
+          ),
+        ),
+    );
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[0]?.decision).toBe("deny");
+    const supporting = events[0]?.supporting as { reasons: string[] };
+    expect(supporting.reasons).toContain("token revoked");
+  });
+
+  it("emits audit event on no-policy deny", async () => {
+    const { env, created, issued } = await setupWorkspace();
+
+    await app.request(
+      "/v1/verify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: issued.token,
+          action: "list",
+          resource: "doc:any",
+          audience: "pact-mcp",
+        }),
+      },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+    );
+
+    const events = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.workspaceId, created.workspaceId),
+            eq(auditEvents.action, "verify.list"),
+          ),
+        ),
+    );
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[0]?.decision).toBe("deny");
+    const supporting = events[0]?.supporting as { reasons: string[] };
+    expect(supporting.reasons).toContain("no active policy");
+  });
+
   it("rejects malformed token", async () => {
     const env = { DATABASE_URL: url as string, MEK: "" };
     const res = await app.request(
