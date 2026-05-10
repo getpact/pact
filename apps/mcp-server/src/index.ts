@@ -1,3 +1,4 @@
+import { PactError } from "@getpact/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { authenticate } from "./auth.js";
@@ -31,6 +32,9 @@ app.post("/:workspace/mcp", async (c) => {
       c.env.ISSUER_BASE_URL,
     );
   } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400 | 401 | 403 | 404);
+    }
     const message = e instanceof Error ? e.message : "auth failed";
     return c.json({ error: "unauthorized", message }, 401);
   }

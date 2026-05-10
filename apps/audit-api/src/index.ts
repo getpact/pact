@@ -1,3 +1,4 @@
+import { PactError } from "@getpact/core";
 import { createClient, withWorkspace } from "@getpact/db";
 import { auditChainState, workspaceSigningKeys, workspaces } from "@getpact/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -34,6 +35,9 @@ const auth = async (c: AppCtx, workspaceId: string): Promise<AuditAuthContext | 
       c.env.ISSUER_BASE_URL,
     );
   } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400 | 401 | 403 | 404);
+    }
     const message = e instanceof Error ? e.message : "auth failed";
     return c.json({ error: "unauthorized", message }, 401);
   }

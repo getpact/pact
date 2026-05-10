@@ -1,4 +1,4 @@
-import { isUuid } from "@getpact/core";
+import { AuthError, isUuid, NotFoundError, ValidationError } from "@getpact/core";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { revokedJtis, workspaces } from "@getpact/db/schema";
@@ -19,7 +19,7 @@ export type AuthContext = {
 const stringArrayClaim = (value: unknown, name: string): string[] => {
   if (value === undefined) return [];
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;
-  throw new Error(`invalid ${name} claim`);
+  throw new AuthError(`invalid ${name} claim`);
 };
 
 export const authenticate = async (
@@ -30,7 +30,7 @@ export const authenticate = async (
   issuer: string,
 ): Promise<AuthContext> => {
   if (!authHeader?.startsWith("Bearer ")) {
-    throw new Error("missing or malformed Authorization header");
+    throw new AuthError("missing or malformed Authorization header");
   }
   const token = authHeader.slice("Bearer ".length).trim();
 
@@ -38,25 +38,25 @@ export const authenticate = async (
   try {
     claims = decodeJwt(token);
   } catch {
-    throw new Error("malformed token");
+    throw new AuthError("malformed token");
   }
   const workspaceId = claims.org as string | undefined;
   const sub = claims.sub;
   const jti = claims.jti as string | undefined;
   if (!workspaceId || !sub || !jti) {
-    throw new Error("missing required claims");
+    throw new AuthError("missing required claims");
   }
   if (!isUuid(workspaceId)) {
-    throw new Error("malformed workspace id");
+    throw new ValidationError("malformed workspace id");
   }
 
   let kid: string | undefined;
   try {
     kid = decodeProtectedHeader(token).kid;
   } catch {
-    throw new Error("malformed token header");
+    throw new AuthError("malformed token header");
   }
-  if (!kid) throw new Error("missing kid");
+  if (!kid) throw new AuthError("missing kid");
 
   const db = createClient(databaseUrl);
   const [workspace] = await db
@@ -64,16 +64,16 @@ export const authenticate = async (
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
-  if (!workspace) throw new Error("unknown workspace");
+  if (!workspace) throw new NotFoundError("unknown workspace");
   if (workspaceSlug !== workspace.id && workspaceSlug !== workspace.slug) {
-    throw new Error("token workspace mismatch");
+    throw new AuthError("token workspace mismatch");
   }
 
   const keys = await withWorkspace(db, workspaceId, (tx) =>
     listVerifyingKeys(tx, workspaceId, "jwt"),
   );
   const matched = keys.find((k) => k.id === kid);
-  if (!matched) throw new Error("unknown kid");
+  if (!matched) throw new AuthError("unknown kid");
 
   await verifyJwt(token, {
     publicKey: matched.publicKey,
@@ -89,7 +89,7 @@ export const authenticate = async (
       .limit(1),
   );
   if (revoked.length > 0) {
-    throw new Error("token revoked");
+    throw new AuthError("token revoked");
   }
 
   return {

@@ -1,4 +1,4 @@
-import { canonicalizeEmail, type Email } from "@getpact/core";
+import { canonicalizeEmail, type Email, PactError } from "@getpact/core";
 import { createClient, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, invites, policies, revokedJtis, users } from "@getpact/db/schema";
 import { tryParsePolicy } from "@getpact/policy";
@@ -36,6 +36,9 @@ const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Resp
       c.env.ISSUER_BASE_URL,
     );
   } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400 | 401 | 403 | 404);
+    }
     const message = e instanceof Error ? e.message : "auth failed";
     return c.json({ error: "unauthorized", message }, 401);
   }
@@ -202,14 +205,21 @@ app.post("/v1/workspaces/:id/revocations", async (c) => {
 
   const body = await c.req.json<{ jti: string; reason?: string }>();
   const db = createClient(c.env.DATABASE_URL);
-  await withWorkspace(db, workspaceId, (tx) =>
-    tx.insert(revokedJtis).values({
+  await withWorkspace(db, workspaceId, async (tx) => {
+    await tx.insert(revokedJtis).values({
       workspaceId,
       jti: body.jti,
       revokedBy: ctx.userId,
       reason: body.reason ?? null,
-    }),
-  );
+    });
+    await tx.execute(
+      sql`UPDATE refresh_tokens
+          SET revoked_at = COALESCE(revoked_at, NOW())
+          WHERE workspace_id = ${workspaceId}
+            AND access_jti = ${body.jti}
+            AND revoked_at IS NULL`,
+    );
+  });
   await bustRevocationCache(c.env.REVOCATION_CACHE, workspaceId, body.jti);
   await audit(c, ctx, "admin.revocation.created", { jti: body.jti, reason: body.reason });
   return c.json({ ok: true }, 201);
