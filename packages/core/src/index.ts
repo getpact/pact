@@ -6,5 +6,4 @@ export type RoleId = string & { readonly _brand: "RoleId" };
 
 export type Email = string & { readonly _brand: "Email" };
 
-export const canonicalizeEmail = (raw: string): Email =>
-  raw.trim().toLowerCase() as Email;
+export const canonicalizeEmail = (raw: string): Email => raw.trim().toLowerCase() as Email;
