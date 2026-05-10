@@ -16,6 +16,7 @@ export const authenticateAdmin = async (
   workspaceId: string,
   authHeader: string | undefined,
   audience: string,
+  issuer: string,
 ): Promise<AdminContext> => {
   if (!authHeader?.startsWith("Bearer ")) {
     throw new Error("missing or malformed Authorization header");
@@ -30,8 +31,7 @@ export const authenticateAdmin = async (
   }
   const tokenWorkspace = claims.org as string | undefined;
   const sub = claims.sub;
-  const issuer = claims.iss as string | undefined;
-  if (!tokenWorkspace || !sub || !issuer) {
+  if (!tokenWorkspace || !sub) {
     throw new Error("missing required claims");
   }
   if (tokenWorkspace !== workspaceId) {

@@ -2,7 +2,7 @@ import { canonicalizeEmail, type Email } from "@getpact/core";
 import { createClient, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, invites, policies, revokedJtis, users } from "@getpact/db/schema";
 import { tryParsePolicy } from "@getpact/policy";
-import { and, desc, eq, max } from "drizzle-orm";
+import { and, desc, eq, max, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { emitAdminAudit } from "./audit.js";
@@ -12,6 +12,7 @@ import { bustRevocationCache, type KVNamespace } from "./cache.js";
 type Env = {
   DATABASE_URL: string;
   MEK: string;
+  ISSUER_BASE_URL: string;
   ADMIN_AUDIENCE?: string;
   REVOCATION_CACHE?: KVNamespace;
 };
@@ -29,6 +30,7 @@ const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Resp
       workspaceId,
       c.req.header("Authorization"),
       audience,
+      c.env.ISSUER_BASE_URL,
     );
   } catch (e) {
     const message = e instanceof Error ? e.message : "auth failed";
@@ -135,6 +137,8 @@ app.post("/v1/workspaces/:id/policies", async (c) => {
 
   const db = createClient(c.env.DATABASE_URL);
   const created = await withWorkspace(db, workspaceId, async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`policy:${workspaceId}`}))`);
+
     const [latest] = await tx
       .select({ maxVersion: max(policies.version) })
       .from(policies)

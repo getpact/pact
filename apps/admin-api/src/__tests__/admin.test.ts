@@ -19,6 +19,7 @@ const buildEnv = async () => {
     GOOGLE_OAUTH_CLIENT_SECRET: "test",
     ISSUER_BASE_URL: "https://issuer.test/acme",
     ENVIRONMENT: "test",
+    ENABLE_DEV_ISSUE: "true",
     ADMIN_AUDIENCE: "pact-admin",
   };
 };
@@ -83,7 +84,10 @@ run("admin api", () => {
       headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
     };
     if (method === "POST") init.body = JSON.stringify(body);
-    return app.request(path, init, env);
+    return app.request(path, init, {
+      ISSUER_BASE_URL: "https://issuer.test/acme",
+      ...env,
+    });
   };
 
   it("rejects without admin role", async () => {
@@ -197,6 +201,38 @@ run("admin api", () => {
     expect(v1Row?.replacedAt).not.toBeNull();
   });
 
+  it("serializes concurrent policy creation", async () => {
+    const { env, created, token } = await setup();
+    const request = (action: string) =>
+      callAdmin(
+        `/v1/workspaces/${created.workspaceId}/policies`,
+        token,
+        "POST",
+        {
+          body: {
+            rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow", action }],
+          },
+        },
+        { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      );
+
+    const [a, b] = await Promise.all([request("read"), request("write")]);
+    expect([a.status, b.status].sort()).toEqual([201, 201]);
+
+    const list = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/policies`,
+      token,
+      "GET",
+      undefined,
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+    );
+    const listed = (await list.json()) as {
+      policies: Array<{ version: number; replacedAt: string | null }>;
+    };
+    expect(listed.policies.map((p) => p.version).sort()).toEqual([1, 2]);
+    expect(listed.policies.filter((p) => p.replacedAt === null)).toHaveLength(1);
+  });
+
   it("revokes a jti", async () => {
     const { env, created, token } = await setup();
     const res = await callAdmin(
@@ -245,6 +281,7 @@ run("admin api", () => {
       "POST",
       { jti: "kv-bust-jti-1", reason: "key leak" },
       {
+        ISSUER_BASE_URL: env.ISSUER_BASE_URL,
         DATABASE_URL: env.DATABASE_URL,
         MEK: env.MEK,
         ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
@@ -264,7 +301,12 @@ run("admin api", () => {
       token,
       "POST",
       { body: { rules: "not-an-array" } },
-      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: env.MEK,
+        ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+        ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+      },
     );
     expect(res.status).toBe(400);
   });
