@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/db" },
+    { "path": "./packages/crypto" },
+    { "path": "./packages/policy" },
+    { "path": "./packages/audit" },
+    { "path": "./packages/vault" },
+    { "path": "./packages/adapter-sdk" },
+    { "path": "./packages/adapter-slack" },
+    { "path": "./packages/adapter-drive" },
+    { "path": "./packages/adapter-partner" },
+    { "path": "./packages/verifier-sdk-node" },
+    { "path": "./packages/cli" }
+  ]
+}
