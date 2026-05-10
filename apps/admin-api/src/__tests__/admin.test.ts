@@ -1,6 +1,11 @@
-import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { auditEvents, workspaces } from "@getpact/db/schema";
+import {
+  buildTestEnv,
+  createTestWorkspace,
+  issueTestToken,
+  uniqueSlug,
+} from "@getpact/test-helpers";
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
@@ -39,20 +44,6 @@ describe("admin api auth hardening", () => {
   });
 });
 
-const buildEnv = async () => {
-  const mek = await generateAesKey();
-  return {
-    DATABASE_URL: url as string,
-    MEK: toBase64(await exportAesKey(mek)),
-    GOOGLE_OAUTH_CLIENT_ID: "test",
-    GOOGLE_OAUTH_CLIENT_SECRET: "test",
-    ISSUER_BASE_URL: "https://issuer.test/acme",
-    ENVIRONMENT: "test",
-    ENABLE_DEV_ISSUE: "true",
-    ADMIN_AUDIENCE: "pact-admin",
-  };
-};
-
 run("admin api", () => {
   const adminDb = createClient(url as string);
   const cleanup: string[] = [];
@@ -70,34 +61,17 @@ run("admin api", () => {
   });
 
   const setup = async () => {
-    const env = await buildEnv();
-    const slug = `adm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const createRes = await issuer.request(
-      "/v1/workspaces",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slug, name: "Adm", adminEmail: "alice@example.com" }),
-      },
-      env,
-    );
-    const created = (await createRes.json()) as { workspaceId: string };
+    const env = await buildTestEnv(url as string);
+    const created = await createTestWorkspace(issuer, env, {
+      slug: uniqueSlug("adm"),
+      adminEmail: "alice@example.com",
+    });
     cleanup.push(created.workspaceId);
-
-    const issueRes = await issuer.request(
-      "/v1/dev/issue",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId: created.workspaceId,
-          email: "alice@example.com",
-          audience: "pact-admin",
-        }),
-      },
-      env,
-    );
-    const issued = (await issueRes.json()) as { token: string };
+    const issued = await issueTestToken(issuer, env, {
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: env.ADMIN_AUDIENCE,
+    });
     return { env, created, token: issued.token };
   };
 
