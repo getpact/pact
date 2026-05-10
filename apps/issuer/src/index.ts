@@ -1,6 +1,7 @@
 import type { Email } from "@getpact/core";
 import { Hono } from "hono";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
+import { exchangeGoogleCode } from "./google.js";
 import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
 import { createWorkspace } from "./workspace.js";
@@ -34,6 +35,49 @@ app.post("/v1/dev/issue", async (c) => {
     issuerUrl: c.env.ISSUER_BASE_URL,
   });
   return c.json(result);
+});
+
+app.post("/v1/oauth/google/exchange", async (c) => {
+  const body = await c.req.json<{
+    workspaceId: string;
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+    audience: string;
+  }>();
+
+  let identity: Awaited<ReturnType<typeof exchangeGoogleCode>>;
+  try {
+    identity = await exchangeGoogleCode({
+      clientId: c.env.GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret: c.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      code: body.code,
+      codeVerifier: body.codeVerifier,
+      redirectUri: body.redirectUri,
+      ...(c.env.GOOGLE_TOKEN_ENDPOINT ? { tokenEndpoint: c.env.GOOGLE_TOKEN_ENDPOINT } : {}),
+      ...(c.env.GOOGLE_JWKS_URI ? { jwksUri: c.env.GOOGLE_JWKS_URI } : {}),
+      ...(c.env.GOOGLE_ISSUER ? { expectedIssuer: c.env.GOOGLE_ISSUER } : {}),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "google verification failed";
+    return c.json({ error: "invalid_grant", detail: msg }, 401);
+  }
+  if (!identity.emailVerified) {
+    return c.json({ error: "email_not_verified" }, 403);
+  }
+
+  try {
+    const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
+      workspaceId: body.workspaceId,
+      email: identity.email as Email,
+      audience: body.audience,
+      ttlSeconds: tokenTtlSeconds(c.env),
+      issuerUrl: c.env.ISSUER_BASE_URL,
+    });
+    return c.json(result);
+  } catch {
+    return c.json({ error: "user_not_in_workspace" }, 403);
+  }
 });
 
 app.post("/v1/refresh", async (c) => {
