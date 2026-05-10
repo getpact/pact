@@ -270,10 +270,6 @@ importers:
         specifier: ^4.0.0
         version: 4.90.0(@cloudflare/workers-types@4.20260509.1)
 
-  packages/adapter-drive: {}
-
-  packages/adapter-partner: {}
-
   packages/adapter-sdk: {}
 
   packages/adapter-slack: {}
