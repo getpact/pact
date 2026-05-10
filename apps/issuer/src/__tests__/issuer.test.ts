@@ -271,6 +271,59 @@ run("issuer end-to-end", () => {
     expect(reuseRes.status).toBe(401);
   });
 
+  it("redeems a refresh token at most once under concurrent requests", async () => {
+    const env = await buildEnv();
+    const slug = `iss-rt-race-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "Race", adminEmail: "alice@example.com" }),
+      },
+      env,
+    );
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+
+    const issueRes = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    const issued = (await issueRes.json()) as { refreshToken: string };
+
+    const fire = () =>
+      app.request(
+        "/v1/refresh",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workspaceId: created.workspaceId,
+            refreshToken: issued.refreshToken,
+            audience: "pact-mcp",
+          }),
+        },
+        env,
+      );
+
+    const results = await Promise.all([fire(), fire(), fire(), fire(), fire()]);
+    const statuses = results.map((r) => r.status).sort();
+    const okCount = statuses.filter((s) => s === 200).length;
+    const failCount = statuses.filter((s) => s === 401).length;
+    expect(okCount).toBe(1);
+    expect(failCount).toBe(4);
+  });
+
   it("rejects refresh with bogus token", async () => {
     const env = await buildEnv();
     const slug = `iss-rtb-${Date.now()}`;
