@@ -4,7 +4,7 @@ compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-ENVIRONMENT = "dev"
+ENVIRONMENT = "production"
 
 [triggers]
 crons = ["0 4 * * 0"]
