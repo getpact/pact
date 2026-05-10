@@ -346,6 +346,34 @@ run("issuer end-to-end", () => {
     expect(failCount).toBe(4);
   });
 
+  it("rejects duplicate workspace slug", async () => {
+    const env = await buildEnv();
+    const slug = `iss-dup-${Date.now()}`;
+    const first = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "First", adminEmail: "a@example.com" }),
+      },
+      env,
+    );
+    expect(first.status).toBe(201);
+    const created = (await first.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+
+    const second = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "Second", adminEmail: "b@example.com" }),
+      },
+      env,
+    );
+    expect(second.status).toBeGreaterThanOrEqual(400);
+  });
+
   it("rejects refresh with bogus token", async () => {
     const env = await buildEnv();
     const slug = `iss-rtb-${Date.now()}`;
