@@ -20,3 +20,17 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: install gitleaks
+        run: |
+          version=8.30.1
+          wget -q "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          tar -xzf "gitleaks_${version}_linux_x64.tar.gz" gitleaks
+          sudo mv gitleaks /usr/local/bin/
+      - run: gitleaks detect --source . --no-banner --redact
