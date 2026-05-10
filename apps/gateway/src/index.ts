@@ -151,8 +151,9 @@ export const verify = async (
       body: JSON.stringify(input),
     });
     const body = (await res.json()) as Partial<VerifyOutput>;
-    if (res.ok && typeof body.allow === "boolean" && Array.isArray(body.reasons)) {
-      return { allow: body.allow, reasons: body.reasons };
+    const bodyOk = typeof body.allow === "boolean" && Array.isArray(body.reasons);
+    if (bodyOk && (res.ok || res.status === 403)) {
+      return { allow: body.allow as boolean, reasons: body.reasons as string[] };
     }
     return { allow: false, reasons: [`verifier returned ${res.status}`] };
   } catch {
