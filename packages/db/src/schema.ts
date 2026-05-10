@@ -238,7 +238,9 @@ export const brains = pgTable(
   },
   (t) => [
     index("brains_workspace_idx").on(t.workspaceId),
-    uniqueIndex("brains_workspace_kind_idx").on(t.workspaceId, t.kind),
+    uniqueIndex("brains_workspace_kind_idx")
+      .on(t.workspaceId, t.kind)
+      .where(sql`status = 'active'`),
   ],
 );
 
