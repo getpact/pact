@@ -287,6 +287,16 @@ export type NewAuditEvent = typeof auditEvents.$inferInsert;
 export type AuditChainState = typeof auditChainState.$inferSelect;
 export type NewAuditChainState = typeof auditChainState.$inferInsert;
 
+export const rateLimitBuckets = pgTable("rate_limit_buckets", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type RateLimitBucket = typeof rateLimitBuckets.$inferSelect;
+export type NewRateLimitBucket = typeof rateLimitBuckets.$inferInsert;
+
 export const workspaceSigningKeys = pgTable(
   "workspace_signing_keys",
   {

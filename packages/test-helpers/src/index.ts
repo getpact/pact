@@ -53,12 +53,13 @@ export const createTestWorkspace = async (
   env: TestEnv,
   input: CreateWorkspaceInput,
 ): Promise<CreatedWorkspace> => {
+  const clientIp = `127.0.0.${Math.floor(Math.random() * 200) + 1}`;
   const res = await Promise.resolve(
     issuer.request(
       "/v1/workspaces",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-forwarded-for": clientIp },
         body: JSON.stringify({
           slug: input.slug,
           name: input.name ?? input.slug,
@@ -93,12 +94,13 @@ export const issueTestToken = async (
   env: TestEnv,
   input: IssueTestTokenInput,
 ): Promise<IssuedTestToken> => {
+  const clientIp = `127.0.1.${Math.floor(Math.random() * 200) + 1}`;
   const res = await Promise.resolve(
     issuer.request(
       "/v1/dev/issue",
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-forwarded-for": clientIp },
         body: JSON.stringify(input),
       },
       env,

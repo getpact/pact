@@ -12,11 +12,6 @@ export type RateLimiter = {
 
 export type RateLimitKey = (c: Context) => string;
 
-export type KvLike = {
-  get: (key: string) => Promise<string | null>;
-  put: (key: string, value: string, opts?: { expirationTtl?: number }) => Promise<void>;
-};
-
 type Bucket = {
   count: number;
   resetAt: number;
@@ -47,25 +42,23 @@ const toResult = (bucket: Bucket, limit: number): RateLimitResult => ({
 
 export const memoryRateLimiter = (): RateLimiter => {
   const buckets = new Map<string, Bucket>();
+  let hits = 0;
   return {
     async hit(key, limit, windowSeconds) {
       validateLimit(limit, windowSeconds);
+      hits += 1;
+      if (hits % 256 === 0) {
+        const now = Date.now();
+        for (const [bucketKey, bucket] of buckets) {
+          if (bucket.resetAt <= now) buckets.delete(bucketKey);
+        }
+      }
       const bucket = nextBucket(buckets.get(key), windowSeconds);
       buckets.set(key, bucket);
       return toResult(bucket, limit);
     },
   };
 };
-
-export const kvRateLimiter = (kv: KvLike): RateLimiter => ({
-  async hit(key, limit, windowSeconds) {
-    validateLimit(limit, windowSeconds);
-    const stored = await kv.get(key);
-    const bucket = nextBucket(stored ? (JSON.parse(stored) as Bucket) : undefined, windowSeconds);
-    await kv.put(key, JSON.stringify(bucket), { expirationTtl: windowSeconds });
-    return toResult(bucket, limit);
-  },
-});
 
 export type RateLimitMiddlewareOptions = {
   limiter: RateLimiter;
@@ -128,7 +121,3 @@ const buildOpts = (
 
 export const memoryRateLimit = (opts: FixedWindowRateLimitOptions): MiddlewareHandler =>
   rateLimit(buildOpts(memoryRateLimiter(), opts));
-
-export const kvRateLimit = (
-  opts: FixedWindowRateLimitOptions & { kv: KvLike },
-): MiddlewareHandler => rateLimit(buildOpts(kvRateLimiter(opts.kv), opts));

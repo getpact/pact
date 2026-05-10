@@ -1,19 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { type KvLike, kvRateLimiter, memoryRateLimiter, rateLimit } from "../index.js";
-
-const fakeKv = (): KvLike & { store: Map<string, string> } => {
-  const store = new Map<string, string>();
-  return {
-    store,
-    async get(key) {
-      return store.get(key) ?? null;
-    },
-    async put(key, value) {
-      store.set(key, value);
-    },
-  };
-};
+import { memoryRateLimiter, rateLimit } from "../index.js";
 
 describe("memoryRateLimiter", () => {
   it("allows up to limit and rejects subsequent calls", async () => {
@@ -39,21 +26,6 @@ describe("memoryRateLimiter", () => {
     const rl = memoryRateLimiter();
     await expect(rl.hit("ip", 0, 60)).rejects.toThrow();
     await expect(rl.hit("ip", 1, 0)).rejects.toThrow();
-  });
-});
-
-describe("kvRateLimiter", () => {
-  it("counts hits across calls", async () => {
-    const kv = fakeKv();
-    const rl = kvRateLimiter(kv);
-    const a = await rl.hit("ip", 3, 60);
-    const b = await rl.hit("ip", 3, 60);
-    const c = await rl.hit("ip", 3, 60);
-    const d = await rl.hit("ip", 3, 60);
-    expect(a.allowed).toBe(true);
-    expect(b.allowed).toBe(true);
-    expect(c.allowed).toBe(true);
-    expect(d.allowed).toBe(false);
   });
 });
 

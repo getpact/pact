@@ -2,13 +2,14 @@ import type { Email } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
-import { kvRateLimiter, memoryRateLimiter, type RateLimiter, rateLimit } from "@getpact/ratelimit";
+import { memoryRateLimiter, type RateLimiter, rateLimit } from "@getpact/ratelimit";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
 import { exchangeGoogleCode } from "./google.js";
 import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
+import { databaseRateLimiter } from "./rate-limit.js";
 import { createWorkspace } from "./workspace.js";
 
 export const app = new Hono<{ Bindings: Env }>();
@@ -18,14 +19,25 @@ app.use("*", requestLogger(logger, "issuer"));
 app.use("/v1/*", bodyLimit({ maxSize: 32 * 1024 }));
 
 const memLimiter = memoryRateLimiter();
+const testLimiter: RateLimiter = {
+  async hit(_key, limit) {
+    return { allowed: true, remaining: limit, resetAt: Date.now() + 60_000 };
+  },
+};
 const limiter = (env: Env): RateLimiter =>
-  env.RATE_LIMIT_KV ? kvRateLimiter(env.RATE_LIMIT_KV) : memLimiter;
+  env.ENVIRONMENT === "production"
+    ? databaseRateLimiter(env.DATABASE_URL)
+    : env.ENVIRONMENT === "test"
+      ? testLimiter
+      : memLimiter;
 const rateLimitKey =
-  (route: string) =>
+  (env: Env, route: string) =>
   (c: Context): string => {
     const client =
       c.req.header("cf-connecting-ip") ??
-      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+      (env.ENVIRONMENT === "production"
+        ? undefined
+        : c.req.header("x-forwarded-for")?.split(",")[0]?.trim()) ??
       "anonymous";
     return `${route}:${client}`;
   };
@@ -35,7 +47,7 @@ app.use("/v1/refresh", (c, next) =>
     limiter: limiter(c.env),
     limit: 30,
     windowSeconds: 60,
-    keyFn: rateLimitKey("refresh"),
+    keyFn: rateLimitKey(c.env, "refresh"),
   })(c, next),
 );
 app.use("/v1/oauth/google/exchange", (c, next) =>
@@ -43,7 +55,7 @@ app.use("/v1/oauth/google/exchange", (c, next) =>
     limiter: limiter(c.env),
     limit: 10,
     windowSeconds: 60,
-    keyFn: rateLimitKey("oauth-google-exchange"),
+    keyFn: rateLimitKey(c.env, "oauth-google-exchange"),
   })(c, next),
 );
 app.use("/v1/workspaces", (c, next) =>
@@ -51,7 +63,7 @@ app.use("/v1/workspaces", (c, next) =>
     limiter: limiter(c.env),
     limit: 5,
     windowSeconds: 60,
-    keyFn: rateLimitKey("workspaces"),
+    keyFn: rateLimitKey(c.env, "workspaces"),
   })(c, next),
 );
 app.use("/v1/dev/issue", (c, next) =>
@@ -59,7 +71,7 @@ app.use("/v1/dev/issue", (c, next) =>
     limiter: limiter(c.env),
     limit: 30,
     windowSeconds: 60,
-    keyFn: rateLimitKey("dev-issue"),
+    keyFn: rateLimitKey(c.env, "dev-issue"),
   })(c, next),
 );
 
