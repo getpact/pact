@@ -1,0 +1,15 @@
+The pact monorepo contains both proprietary apps and open-source packages.
+
+Apps under `apps/` are not licensed for redistribution.
+
+Open-source packages under `packages/` are licensed individually:
+
+- `@getpact/cli` - MIT
+- `@getpact/verifier-sdk` (`packages/verifier-sdk-node`) - MIT
+- `@getpact/adapter-sdk` - MIT
+- `@getpact/adapter-slack` - MIT
+- `@getpact/adapter-drive` - MIT
+- `@getpact/adapter-partner` - MIT
+- `getpact-verifier` (`packages/verifier-sdk-python`) - MIT
+
+The MIT text for each open-source package lives at `packages/<name>/LICENSE`.
