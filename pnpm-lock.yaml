@@ -29,6 +29,9 @@ importers:
 
   apps/admin-api:
     dependencies:
+      '@getpact/audit':
+        specifier: workspace:*
+        version: link:../../packages/audit
       '@getpact/core':
         specifier: workspace:*
         version: link:../../packages/core
