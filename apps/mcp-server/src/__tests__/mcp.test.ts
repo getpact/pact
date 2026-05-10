@@ -14,6 +14,7 @@ import issuer from "../../../../apps/issuer/src/index.js";
 import verifier from "../../../../apps/verifier/src/index.js";
 import { handleMcp } from "../handler.js";
 import app from "../index.js";
+import { httpVerifyClient } from "../verify-client.js";
 
 const url = process.env.DATABASE_URL;
 const run = url ? describe : describe.skip;
@@ -49,6 +50,23 @@ describe("mcp server auth hardening", () => {
       },
     );
     expect(res.status).toBe(401);
+  });
+
+  it("treats non-2xx verifier allow bodies as denial", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ allow: true, reasons: ["ok"] }, { status: 500 })),
+    );
+    const verify = httpVerifyClient("https://verifier.test");
+    await expect(
+      verify({
+        token: "token",
+        action: "pact.whoami",
+        resource: "pact:whoami",
+        audience: "pact-mcp",
+      }),
+    ).resolves.toEqual({ allow: false, reasons: ["verifier returned 500"] });
+    vi.unstubAllGlobals();
   });
 });
 

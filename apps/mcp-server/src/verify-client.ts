@@ -23,7 +23,7 @@ export const httpVerifyClient =
         body: JSON.stringify(input),
       });
       const body = (await res.json()) as Partial<VerifyResponse>;
-      if (typeof body.allow === "boolean" && Array.isArray(body.reasons)) {
+      if (res.ok && typeof body.allow === "boolean" && Array.isArray(body.reasons)) {
         return {
           allow: body.allow,
           reasons: body.reasons,

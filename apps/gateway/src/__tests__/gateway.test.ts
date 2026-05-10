@@ -16,6 +16,7 @@ import app, {
   canonicalGatewaySearch,
   forwardedRequestHeaders,
   gatewayAuthorization,
+  verify,
 } from "../index.js";
 
 const env = { ENVIRONMENT: "test" };
@@ -138,6 +139,21 @@ describe("gateway", () => {
       error: "unauthorized",
       message: "malformed bearer token",
     });
+    vi.unstubAllGlobals();
+  });
+
+  it("treats non-2xx verifier allow bodies as denial", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ allow: true, reasons: ["ok"] }, { status: 500 })),
+    );
+    const res = await verify("https://verifier.test", {
+      token: "token",
+      action: "gateway.get",
+      resource: "gateway:notion:/v1/pages",
+      audience: "pact-gateway",
+    });
+    expect(res).toEqual({ allow: false, reasons: ["verifier returned 500"] });
     vi.unstubAllGlobals();
   });
 });
@@ -295,12 +311,76 @@ run("gateway integration", () => {
         DATABASE_URL: testEnv.DATABASE_URL,
         VERIFIER_URL: "https://verifier.test",
         GATEWAY_AUDIENCE: "pact-gateway",
+        MEK: testEnv.MEK,
       },
     );
 
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "denied", reasons: ["deny"] });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const rows = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select({
+          actorId: auditEvents.actorId,
+          action: auditEvents.action,
+          decision: auditEvents.decision,
+          supporting: auditEvents.supporting,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, created.workspaceId)),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        actorId: null,
+        action: "gateway.get",
+        decision: "deny",
+        supporting: expect.objectContaining({
+          outcome: "denied",
+          verifierReasons: ["deny"],
+        }),
+      }),
+    );
+  });
+
+  it("audits missing brains after verifier allows", async () => {
+    const { testEnv, created, issued } = await setup();
+    const fetchMock = vi.fn(async () => Response.json({ allow: true, reasons: ["ok"] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request(
+      `/${created.workspaceId}/gateway/missing/v1/pages`,
+      { headers: { authorization: `Bearer ${issued.token}` } },
+      {
+        DATABASE_URL: testEnv.DATABASE_URL,
+        VERIFIER_URL: "https://verifier.test",
+        GATEWAY_AUDIENCE: "pact-gateway",
+        MEK: testEnv.MEK,
+      },
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found", message: "brain not found" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const rows = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select({
+          actorId: auditEvents.actorId,
+          action: auditEvents.action,
+          decision: auditEvents.decision,
+          target: auditEvents.target,
+          supporting: auditEvents.supporting,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, created.workspaceId)),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        action: "gateway.get",
+        decision: "deny",
+        target: expect.objectContaining({ brain: "missing" }),
+        supporting: expect.objectContaining({ outcome: "brain_not_found" }),
+      }),
+    );
   });
 
   it("rate limits gateway calls before forwarding upstream", async () => {
@@ -344,7 +424,25 @@ run("gateway integration", () => {
       ([input]) => input.toString() === "https://verifier.test/v1/verify",
     );
     expect(upstreamCalls).toHaveLength(1);
-    expect(verifierCalls).toHaveLength(1);
+    expect(verifierCalls).toHaveLength(2);
+    const rows = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select({
+          actorId: auditEvents.actorId,
+          action: auditEvents.action,
+          decision: auditEvents.decision,
+          supporting: auditEvents.supporting,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, created.workspaceId)),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        action: "gateway.get",
+        decision: "deny",
+        supporting: expect.objectContaining({ outcome: "rate_limited" }),
+      }),
+    );
   });
 
   it("fails closed in production when gateway audit is unavailable", async () => {
@@ -374,6 +472,38 @@ run("gateway integration", () => {
     expect(await res.json()).toEqual({
       error: "audit_unavailable",
       message: "gateway audit is required (missing_mek)",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before upstream when required audit write fails", async () => {
+    const { testEnv, created, issued } = await setup();
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      if (input.toString() === "https://verifier.test/v1/verify") {
+        return Response.json({ allow: true, reasons: ["ok"] });
+      }
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request(
+      `/${created.workspaceId}/gateway/notion/v1/pages`,
+      { headers: { authorization: `Bearer ${issued.token}` } },
+      {
+        DATABASE_URL: testEnv.DATABASE_URL,
+        VERIFIER_URL: "https://verifier.test",
+        ENVIRONMENT: "production",
+        GATEWAY_AUDIENCE: "pact-gateway",
+        GATEWAY_RATE_LIMIT: "1000",
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        UPSTREAM_HOST_ALLOWLIST: "api.example.com",
+      },
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: "audit_unavailable",
+      message: "gateway audit is required (audit_failed)",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

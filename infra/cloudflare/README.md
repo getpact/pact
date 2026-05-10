@@ -21,6 +21,8 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 - Verifier service auth: set the same `VERIFIER_SERVICE_TOKEN` secret on the
   verifier and every internal caller that invokes it, including MCP server and
   gateway. Production verifier requests fail closed if this secret is missing.
+  Non-production verifiers without this secret remain publicly callable and are
+  only acceptable for disposable smoke environments.
 - Gateway audit is required in production by default. Set
   `GATEWAY_AUDIT_MODE=best_effort` only for controlled non-critical smoke
   environments.

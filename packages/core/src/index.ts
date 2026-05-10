@@ -27,13 +27,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 export const isUuid = (value: unknown): value is string =>
   typeof value === "string" && UUID_RE.test(value);
 
+const MAX_TIMING_SAFE_COMPARE_LENGTH = 4096;
+
 export const timingSafeEqualString = (a: string, b: string): boolean => {
-  const ae = new TextEncoder().encode(a);
-  const be = new TextEncoder().encode(b);
-  const len = Math.max(ae.length, be.length);
-  let diff = ae.length ^ be.length;
-  for (let i = 0; i < len; i++) {
-    diff |= (ae[i] ?? 0) ^ (be[i] ?? 0);
+  let diff = a.length ^ b.length;
+  if (a.length > MAX_TIMING_SAFE_COMPARE_LENGTH || b.length > MAX_TIMING_SAFE_COMPARE_LENGTH) {
+    diff |= 1;
+  }
+  for (let i = 0; i < MAX_TIMING_SAFE_COMPARE_LENGTH; i++) {
+    const left = i < a.length ? a.charCodeAt(i) : 0;
+    const right = i < b.length ? b.charCodeAt(i) : 0;
+    diff |= left ^ right;
   }
   return diff === 0;
 };

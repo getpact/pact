@@ -3,6 +3,7 @@ import {
   assertAllowedUpstreamHost,
   assertSafeUpstreamUrl,
   isPrivateHost,
+  timingSafeEqualString,
   tokenModeForAudience,
 } from "../index.js";
 
@@ -13,6 +14,21 @@ describe("token audience modes", () => {
     expect(tokenModeForAudience("pact-admin")).toBe("A");
     expect(tokenModeForAudience("pact-audit")).toBe("A");
     expect(tokenModeForAudience("unknown")).toBeNull();
+  });
+});
+
+describe("timing safe string comparison", () => {
+  it("compares equal strings and rejects mismatches", () => {
+    expect(timingSafeEqualString("Bearer service-secret", "Bearer service-secret")).toBe(true);
+    expect(timingSafeEqualString("Bearer service-secret", "Bearer wrong-secret")).toBe(false);
+    expect(timingSafeEqualString("Bearer service-secret", "Bearer service-secret-extra")).toBe(
+      false,
+    );
+  });
+
+  it("rejects oversized strings", () => {
+    const oversized = "a".repeat(4097);
+    expect(timingSafeEqualString(oversized, oversized)).toBe(false);
   });
 });
 

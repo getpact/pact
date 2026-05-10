@@ -137,7 +137,7 @@ const clientRateKey = (headers: Headers): string => {
   return forwarded && forwarded.length > 0 ? forwarded : "anonymous";
 };
 
-const verify = async (
+export const verify = async (
   verifierUrl: string,
   input: { token: string; action: string; resource: string; audience: string },
   serviceToken?: string,
@@ -151,7 +151,7 @@ const verify = async (
       body: JSON.stringify(input),
     });
     const body = (await res.json()) as Partial<VerifyOutput>;
-    if (typeof body.allow === "boolean" && Array.isArray(body.reasons)) {
+    if (res.ok && typeof body.allow === "boolean" && Array.isArray(body.reasons)) {
       return { allow: body.allow, reasons: body.reasons };
     }
     return { allow: false, reasons: [`verifier returned ${res.status}`] };
@@ -262,6 +262,17 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     return c.json({ error: "unauthorized", message: "workspace mismatch" }, 401);
   }
 
+  const verdict = await verify(
+    c.env.VERIFIER_URL,
+    {
+      token,
+      action: authz.action,
+      resource: authz.resource,
+      audience,
+    },
+    c.env.VERIFIER_SERVICE_TOKEN,
+  );
+
   const auditTarget = {
     resource: authz.resource,
     brain: brainKind,
@@ -269,7 +280,6 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     query: canonicalGatewaySearch(requestUrl.search),
     method: c.req.method,
   };
-  let verdictRef: VerifyOutput | null = null;
   const audit = async (input: {
     action?: string;
     decision: "allow" | "deny";
@@ -277,17 +287,18 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     upstreamStatus?: number;
     reasons?: string[];
   }) => {
+    const actorId = verdict.allow && typeof claims.sub === "string" ? claims.sub : undefined;
     const result = await emitGatewayAudit({
       db,
       mek: c.env.MEK,
       workspaceId,
-      actorId: typeof claims.sub === "string" ? claims.sub : undefined,
+      actorId,
       action: input.action ?? authz.action,
       decision: input.decision,
       target: auditTarget,
       supporting: {
         outcome: input.outcome,
-        ...(verdictRef ? { verifierReasons: verdictRef.reasons } : {}),
+        verifierReasons: verdict.reasons,
         ...(input.reasons ? { reasons: input.reasons } : {}),
         ...(input.upstreamStatus !== undefined ? { upstreamStatus: input.upstreamStatus } : {}),
       },
@@ -304,6 +315,12 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
           },
           503,
         );
+
+  if (!verdict.allow) {
+    const failed = auditFailure(await audit({ decision: "deny", outcome: "denied" }));
+    if (failed) return failed;
+    return c.json({ error: "denied", reasons: verdict.reasons }, 403);
+  }
 
   const [brain] = await withWorkspace(db, workspaceId, (tx) =>
     tx
@@ -336,7 +353,7 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     );
     const rateLimiter = databaseRateLimiter(c.env.DATABASE_URL);
     const verdictRate = await rateLimiter.hit(
-      `gateway-pre:${workspace.id}:${brainKind}:${clientRateKey(c.req.raw.headers)}`,
+      `gateway:${workspace.id}:${brainKind}:${clientRateKey(c.req.raw.headers)}`,
       limit,
       windowSeconds,
     );
@@ -350,23 +367,6 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
       c.header("retry-after", String(retry));
       return c.json({ error: "rate_limited", message: "too many requests" }, 429);
     }
-  }
-
-  const verdict = await verify(
-    c.env.VERIFIER_URL,
-    {
-      token,
-      action: authz.action,
-      resource: authz.resource,
-      audience,
-    },
-    c.env.VERIFIER_SERVICE_TOKEN,
-  );
-  verdictRef = verdict;
-  if (!verdict.allow) {
-    const failed = auditFailure(await audit({ decision: "deny", outcome: "denied" }));
-    if (failed) return failed;
-    return c.json({ error: "denied", reasons: verdict.reasons }, 403);
   }
 
   let brainBearerToken: string | null = null;

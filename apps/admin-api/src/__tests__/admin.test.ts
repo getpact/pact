@@ -2,6 +2,7 @@ import { createClient, withWorkspace } from "@getpact/db";
 import {
   auditEvents,
   brains,
+  policies,
   revokedJtis,
   users,
   vaultSecrets,
@@ -501,6 +502,61 @@ run("admin api", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("rolls back policy replacement when audit fails", async () => {
+    const { env, created, token } = await setup();
+    const runtime = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+    };
+    const v1 = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/policies`,
+      token,
+      "POST",
+      {
+        body: { rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }] },
+      },
+      runtime,
+    );
+    expect(v1.status).toBe(201);
+
+    const failed = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/policies`,
+      token,
+      "POST",
+      {
+        body: {
+          rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow", action: "read" }],
+        },
+      },
+      {
+        ...runtime,
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      },
+    );
+    expect(failed.status).toBe(500);
+
+    const rows = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ version: policies.version, replacedAt: policies.replacedAt })
+        .from(policies)
+        .where(eq(policies.workspaceId, created.workspaceId)),
+    );
+    expect(rows).toEqual([{ version: 1, replacedAt: null }]);
+    const events = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ action: auditEvents.action })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.workspaceId, created.workspaceId),
+            eq(auditEvents.action, "admin.policy.created"),
+          ),
+        ),
+    );
+    expect(events).toHaveLength(1);
+  });
+
   it("busts the kv revocation cache when a jti is revoked", async () => {
     const { env, created, token } = await setup();
     const putMock = vi.fn(async () => {});
@@ -540,5 +596,23 @@ run("admin api", () => {
       },
     );
     expect(res.status).toBe(400);
+  });
+
+  it("fails closed on invalid policy when audit cannot decrypt keys", async () => {
+    const { env, created, token } = await setup();
+    const res = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/policies`,
+      token,
+      "POST",
+      { body: { rules: "not-an-array" } },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+      },
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "audit_unavailable" });
   });
 });
