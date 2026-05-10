@@ -1,9 +1,10 @@
+import { writeEvent } from "@getpact/audit";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { policies, revokedJtis } from "@getpact/db/schema";
-import { listVerifyingKeys } from "@getpact/keystore";
+import { policies, revokedJtis, workspaces } from "@getpact/db/schema";
+import { listVerifyingKeys, loadActiveSigningKey } from "@getpact/keystore";
 import { evaluate, type TokenClaims, tryParsePolicy } from "@getpact/policy";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 
 export type VerifyInput = {
@@ -19,21 +20,66 @@ export type VerifyOutput = {
   sub?: string;
 };
 
+const result = (allow: boolean, reasons: string[], sub: string | undefined): VerifyOutput =>
+  sub ? { allow, reasons, sub } : { allow, reasons };
+
+const tryAudit = async (
+  databaseUrl: string,
+  rawMek: Uint8Array,
+  workspaceId: string,
+  decision: "allow" | "deny",
+  reasons: string[],
+  actorId: string | undefined,
+  input: VerifyInput,
+): Promise<void> => {
+  try {
+    const db = createClient(databaseUrl);
+    const [ws] = await db
+      .select({ id: workspaces.id, createdAt: workspaces.createdAt })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    if (!ws) return;
+
+    await withWorkspace(db, workspaceId, async (tx) => {
+      const auditKey = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
+      await writeEvent(tx, {
+        workspaceId,
+        workspaceCreatedAt: ws.createdAt,
+        signingKeyId: auditKey.id,
+        signingKey: auditKey.privateKey,
+        event: {
+          actorKind: "user",
+          ...(actorId ? { actorId } : {}),
+          action: `verify.${input.action}`,
+          target: { resource: input.resource, audience: input.audience },
+          decision,
+          supporting: { reasons },
+        },
+      });
+    });
+  } catch {
+    // best-effort: never fail the verify call because audit failed
+  }
+};
+
 export const verifyAction = async (
   databaseUrl: string,
+  rawMek: Uint8Array,
   input: VerifyInput,
 ): Promise<VerifyOutput> => {
   let claims: ReturnType<typeof decodeJwt>;
   try {
     claims = decodeJwt(input.token);
   } catch {
-    return { allow: false, reasons: ["malformed token"] };
+    return result(false, ["malformed token"], undefined);
   }
   const workspaceId = claims.org as string | undefined;
   const jti = claims.jti as string | undefined;
   const issuer = claims.iss as string | undefined;
+  const sub = claims.sub;
   if (!workspaceId || !jti || !issuer) {
-    return { allow: false, reasons: ["malformed token"] };
+    return result(false, ["malformed token"], sub);
   }
 
   const db = createClient(databaseUrl);
@@ -42,10 +88,10 @@ export const verifyAction = async (
   try {
     kid = decodeProtectedHeader(input.token).kid;
   } catch {
-    return { allow: false, reasons: ["malformed token header"] };
+    return result(false, ["malformed token header"], sub);
   }
   if (!kid) {
-    return { allow: false, reasons: ["missing kid"] };
+    return result(false, ["missing kid"], sub);
   }
 
   const keys = await withWorkspace(db, workspaceId, (tx) =>
@@ -53,7 +99,8 @@ export const verifyAction = async (
   );
   const matched = keys.find((k) => k.id === kid);
   if (!matched) {
-    return { allow: false, reasons: ["unknown kid"] };
+    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["unknown kid"], sub, input);
+    return result(false, ["unknown kid"], sub);
   }
   try {
     await verifyJwt(input.token, {
@@ -62,7 +109,8 @@ export const verifyAction = async (
       audience: input.audience,
     });
   } catch {
-    return { allow: false, reasons: ["signature invalid"] };
+    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["signature invalid"], sub, input);
+    return result(false, ["signature invalid"], sub);
   }
 
   const revoked = await withWorkspace(db, workspaceId, (tx) =>
@@ -73,7 +121,8 @@ export const verifyAction = async (
       .limit(1),
   );
   if (revoked.length > 0) {
-    return { allow: false, reasons: ["token revoked"] };
+    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["token revoked"], sub, input);
+    return result(false, ["token revoked"], sub);
   }
 
   const policyRow = await withWorkspace(db, workspaceId, (tx) =>
@@ -85,11 +134,9 @@ export const verifyAction = async (
       .limit(1),
   );
 
-  const sub = claims.sub;
   if (policyRow.length === 0) {
-    return sub
-      ? { allow: false, reasons: ["no active policy"], sub }
-      : { allow: false, reasons: ["no active policy"] };
+    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["no active policy"], sub, input);
+    return result(false, ["no active policy"], sub);
   }
 
   const tokenClaims: TokenClaims = {
@@ -101,17 +148,24 @@ export const verifyAction = async (
 
   const policy = tryParsePolicy(policyRow[0]?.body);
   if (!policy) {
-    return sub
-      ? { allow: false, reasons: ["invalid policy"], sub }
-      : { allow: false, reasons: ["invalid policy"] };
+    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["invalid policy"], sub, input);
+    return result(false, ["invalid policy"], sub);
   }
-  const result = evaluate({
+  const evalResult = evaluate({
     token: tokenClaims,
     action: input.action,
     resource: input.resource,
     policy,
   });
 
-  void sql;
-  return sub ? { ...result, sub } : result;
+  await tryAudit(
+    databaseUrl,
+    rawMek,
+    workspaceId,
+    evalResult.allow ? "allow" : "deny",
+    evalResult.reasons,
+    sub,
+    input,
+  );
+  return result(evalResult.allow, evalResult.reasons, sub);
 };

@@ -1,7 +1,8 @@
+import { fromBase64 } from "@getpact/crypto";
 import { Hono } from "hono";
 import { verifyAction } from "./verify.js";
 
-type Env = { DATABASE_URL: string };
+type Env = { DATABASE_URL: string; MEK: string };
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -14,7 +15,8 @@ app.post("/v1/verify", async (c) => {
     resource: string;
     audience: string;
   }>();
-  const result = await verifyAction(c.env.DATABASE_URL, body);
+  const rawMek = fromBase64(c.env.MEK);
+  const result = await verifyAction(c.env.DATABASE_URL, rawMek, body);
   return c.json(result, result.allow ? 200 : 403);
 });
 
