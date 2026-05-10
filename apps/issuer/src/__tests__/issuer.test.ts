@@ -19,6 +19,7 @@ const buildEnv = async () => {
     GOOGLE_OAUTH_CLIENT_ID: "test",
     GOOGLE_OAUTH_CLIENT_SECRET: "test",
     ISSUER_BASE_URL: "https://issuer.test/acme",
+    ENVIRONMENT: "test",
   };
 };
 
@@ -36,6 +37,37 @@ run("issuer end-to-end", () => {
         // ignore
       }
     }
+  });
+
+  it("hides /v1/dev/issue in production", async () => {
+    const env = await buildEnv();
+    const slug = `iss-prod-${Date.now()}`;
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "Prod", adminEmail: "alice@example.com" }),
+      },
+      env,
+    );
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+    const prodEnv = { ...env, ENVIRONMENT: "production", ENABLE_DEV_ISSUE: "false" };
+    const res = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-mcp",
+        }),
+      },
+      prodEnv,
+    );
+    expect(res.status).toBe(404);
   });
 
   it("creates workspace and issues a verifiable jwt", async () => {

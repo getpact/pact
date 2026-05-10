@@ -18,6 +18,7 @@ const buildEnv = async () => {
     GOOGLE_OAUTH_CLIENT_ID: "test",
     GOOGLE_OAUTH_CLIENT_SECRET: "test",
     ISSUER_BASE_URL: "https://issuer.test/acme",
+    ENVIRONMENT: "test",
   };
 };
 

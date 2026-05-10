@@ -1,6 +1,6 @@
 import type { Email } from "@getpact/core";
 import { Hono } from "hono";
-import { decodeMek, type Env, tokenTtlSeconds } from "./env.js";
+import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
 import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
 import { createWorkspace } from "./workspace.js";
@@ -22,6 +22,9 @@ app.post("/v1/workspaces", async (c) => {
 });
 
 app.post("/v1/dev/issue", async (c) => {
+  if (!isDevIssueEnabled(c.env)) {
+    return c.json({ error: "not_found" }, 404);
+  }
   const body = await c.req.json<{ workspaceId: string; email: string; audience: string }>();
   const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
     workspaceId: body.workspaceId,
