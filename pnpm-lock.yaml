@@ -118,12 +118,21 @@ importers:
 
   apps/gateway:
     dependencies:
+      '@getpact/audit':
+        specifier: workspace:*
+        version: link:../../packages/audit
       '@getpact/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@getpact/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@getpact/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@getpact/keystore':
+        specifier: workspace:*
+        version: link:../../packages/keystore
       '@getpact/logger':
         specifier: workspace:*
         version: link:../../packages/logger
@@ -143,6 +152,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250101.0
         version: 4.20260509.1
+      '@getpact/test-helpers':
+        specifier: workspace:*
+        version: link:../../packages/test-helpers
       wrangler:
         specifier: ^4.0.0
         version: 4.90.0(@cloudflare/workers-types@4.20260509.1)

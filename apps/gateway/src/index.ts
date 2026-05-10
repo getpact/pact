@@ -5,10 +5,12 @@ import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeJwt } from "jose";
+import { emitGatewayAudit } from "./audit.js";
 
 type Env = {
   DATABASE_URL: string;
   VERIFIER_URL: string;
+  MEK?: string;
   ENVIRONMENT?: string;
   GATEWAY_AUDIENCE?: string;
   GATEWAY_UPSTREAM_TIMEOUT_MS?: string;
@@ -38,7 +40,21 @@ export const buildGatewayTarget = (baseUrl: string, path: string, search: string
   const target = assertSafeUpstreamUrl(baseUrl);
   const basePath = target.pathname.endsWith("/") ? target.pathname : `${target.pathname}/`;
   const cleanPath = path.replace(/^\/+/, "");
+  for (const segment of cleanPath.split("/")) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      throw new Error("gateway path contains invalid encoding");
+    }
+    if (decoded === "." || decoded === "..") {
+      throw new Error("gateway path escapes upstream base");
+    }
+  }
   target.pathname = `${basePath}${cleanPath}`;
+  if (!target.pathname.startsWith(basePath)) {
+    throw new Error("gateway path escapes upstream base");
+  }
   target.search = search;
   return target;
 };
@@ -74,15 +90,42 @@ const verify = async (
   return { allow: false, reasons: [`verifier returned ${res.status}`] };
 };
 
-const forwardedHeaders = (headers: Headers): Headers => {
+const forwardedRequestHeaders = (headers: Headers): Headers => {
   const out = new Headers();
   const blocked = new Set([
     "authorization",
+    "cf-connecting-ip",
+    "cf-ipcountry",
+    "cf-ray",
     "connection",
     "content-length",
+    "cookie",
+    "forwarded",
     "host",
     "proxy-authenticate",
     "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+    "x-api-key",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+    "x-real-ip",
+  ]);
+  headers.forEach((value, key) => {
+    if (!blocked.has(key.toLowerCase())) out.set(key, value);
+  });
+  return out;
+};
+
+const forwardedResponseHeaders = (headers: Headers): Headers => {
+  const out = new Headers();
+  const blocked = new Set([
+    "connection",
+    "content-length",
+    "proxy-authenticate",
     "set-cookie",
     "te",
     "trailer",
@@ -146,6 +189,33 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   if (!workspace || workspace.id !== workspaceId) {
     return c.json({ error: "unauthorized", message: "workspace mismatch" }, 401);
   }
+  const auditTarget = {
+    resource: authz.resource,
+    brain: brainKind,
+    path: `/${path.replace(/^\/+/, "")}`,
+    method: c.req.method,
+  };
+  const audit = (input: {
+    decision: "allow" | "deny";
+    outcome: string;
+    upstreamStatus?: number;
+    reasons?: string[];
+  }) =>
+    emitGatewayAudit({
+      db,
+      mek: c.env.MEK,
+      workspaceId,
+      actorId: typeof claims.sub === "string" ? claims.sub : undefined,
+      action: authz.action,
+      decision: input.decision,
+      target: auditTarget,
+      supporting: {
+        outcome: input.outcome,
+        verifierReasons: verdict.reasons,
+        ...(input.reasons ? { reasons: input.reasons } : {}),
+        ...(input.upstreamStatus !== undefined ? { upstreamStatus: input.upstreamStatus } : {}),
+      },
+    });
 
   const [brain] = await withWorkspace(db, workspaceId, (tx) =>
     tx
@@ -163,8 +233,12 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
       )
       .limit(1),
   );
-  if (!brain) return c.json({ error: "not_found", message: "brain not found" }, 404);
+  if (!brain) {
+    await audit({ decision: "deny", outcome: "brain_not_found" });
+    return c.json({ error: "not_found", message: "brain not found" }, 404);
+  }
   if (brain.authScheme !== "none") {
+    await audit({ decision: "deny", outcome: "unsupported_auth_scheme" });
     return c.json(
       { error: "not_implemented", message: "gateway brain auth is not implemented" },
       501,
@@ -177,6 +251,7 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     target = buildGatewayTarget(brain.baseUrl, path, requestUrl.search);
   } catch (e) {
     const message = e instanceof Error ? e.message : "invalid gateway upstream";
+    await audit({ decision: "deny", outcome: "invalid_upstream", reasons: [message] });
     return c.json({ error: "invalid_gateway_upstream", message }, 400);
   }
 
@@ -185,7 +260,7 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const init: RequestInit = {
     method: c.req.method,
-    headers: forwardedHeaders(c.req.raw.headers),
+    headers: forwardedRequestHeaders(c.req.raw.headers),
     redirect: "manual",
     signal: controller.signal,
   };
@@ -199,17 +274,20 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     clearTimeout(timer);
     const aborted =
       controller.signal.aborted || (err instanceof Error && err.name === "AbortError");
+    await audit({ decision: "deny", outcome: aborted ? "timeout" : "upstream_failed" });
     return aborted
       ? c.json({ error: "gateway_timeout", message: "upstream request timed out" }, 504)
       : c.json({ error: "bad_gateway", message: "upstream request failed" }, 502);
   }
   clearTimeout(timer);
   if (upstream.status >= 300 && upstream.status < 400) {
+    await audit({ decision: "deny", outcome: "redirect", upstreamStatus: upstream.status });
     return c.json({ error: "bad_gateway", message: "upstream returned redirect" }, 502);
   }
+  await audit({ decision: "allow", outcome: "forwarded", upstreamStatus: upstream.status });
   return new Response(upstream.body, {
     status: upstream.status,
-    headers: forwardedHeaders(upstream.headers),
+    headers: forwardedResponseHeaders(upstream.headers),
   });
 });
 

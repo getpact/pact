@@ -11,8 +11,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@getpact/audit": "workspace:*",
     "@getpact/core": "workspace:*",
+    "@getpact/crypto": "workspace:*",
     "@getpact/db": "workspace:*",
+    "@getpact/keystore": "workspace:*",
     "@getpact/logger": "workspace:*",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",
@@ -21,6 +24,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",
+    "@getpact/test-helpers": "workspace:*",
     "wrangler": "^4.0.0"
   }
 }
