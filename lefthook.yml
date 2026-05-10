@@ -28,3 +28,15 @@ pre-commit:
             print("ASCII tell detected. Replace with single hyphen, straight quote, three dots.")
             sys.exit(1)
         PY
+    secret-patterns:
+      run: |
+        files=$(git diff --cached --name-only --diff-filter=ACM)
+        if [ -z "$files" ]; then exit 0; fi
+        hits=$(echo "$files" | xargs grep -lE "AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|sk_live_[A-Za-z0-9]{20,}|xox[abp]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]+PRIVATE KEY-----" 2>/dev/null || true)
+        if [ -n "$hits" ]; then
+          echo "Possible secret pattern detected in:"
+          echo "$hits"
+          echo ""
+          echo "Review staged files. Move secrets to env or vault."
+          exit 1
+        fi
