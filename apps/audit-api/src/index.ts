@@ -1,6 +1,6 @@
 import { createClient, withWorkspace } from "@getpact/db";
-import { auditChainState } from "@getpact/db/schema";
-import { eq } from "drizzle-orm";
+import { auditChainState, workspaceSigningKeys, workspaces } from "@getpact/db/schema";
+import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -53,6 +53,8 @@ app.get("/v1/workspaces/:id/audit/events", async (c) => {
   const untilRaw = url.searchParams.get("until");
   const limitRaw = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
   const cursor = parseCursor(url.searchParams.get("cursor") ?? undefined);
+  const orderRaw = url.searchParams.get("order");
+  const order = orderRaw === "asc" ? "asc" : "desc";
 
   const since = sinceRaw ? new Date(sinceRaw) : undefined;
   const until = untilRaw ? new Date(untilRaw) : undefined;
@@ -70,10 +72,64 @@ app.get("/v1/workspaces/:id/audit/events", async (c) => {
       ...(since ? { since } : {}),
       ...(until ? { until } : {}),
       limit,
+      order,
       ...(cursor ? { cursor } : {}),
     }),
   );
   return c.json(out);
+});
+
+app.get("/v1/workspaces/:id/audit/keys", async (c) => {
+  const workspaceId = c.req.param("id");
+  const ctx = await auth(c, workspaceId);
+  if (!isAuth(ctx)) return ctx;
+
+  const db = createClient(c.env.DATABASE_URL);
+  const rows = await withWorkspace(db, workspaceId, (tx) =>
+    tx
+      .select({
+        id: workspaceSigningKeys.id,
+        publicKeySpki: workspaceSigningKeys.publicKeySpki,
+        createdAt: workspaceSigningKeys.createdAt,
+        validForVerificationUntil: workspaceSigningKeys.validForVerificationUntil,
+      })
+      .from(workspaceSigningKeys)
+      .where(
+        and(
+          eq(workspaceSigningKeys.workspaceId, workspaceId),
+          eq(workspaceSigningKeys.kind, "audit"),
+        ),
+      ),
+  );
+  return c.json({
+    keys: rows.map((r) => ({
+      id: r.id,
+      publicKeySpki: r.publicKeySpki,
+      createdAt: r.createdAt.toISOString(),
+      validForVerificationUntil: r.validForVerificationUntil?.toISOString() ?? null,
+    })),
+  });
+});
+
+app.get("/v1/workspaces/:id/audit/workspace", async (c) => {
+  const workspaceId = c.req.param("id");
+  const ctx = await auth(c, workspaceId);
+  if (!isAuth(ctx)) return ctx;
+
+  const db = createClient(c.env.DATABASE_URL);
+  const [ws] = await withWorkspace(db, workspaceId, (tx) =>
+    tx
+      .select({ id: workspaces.id, slug: workspaces.slug, createdAt: workspaces.createdAt })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1),
+  );
+  if (!ws) return c.json({ error: "not found" }, 404);
+  return c.json({
+    id: ws.id,
+    slug: ws.slug,
+    createdAt: ws.createdAt.toISOString(),
+  });
 });
 
 app.get("/v1/workspaces/:id/audit/chain", async (c) => {

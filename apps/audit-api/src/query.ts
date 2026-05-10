@@ -1,6 +1,8 @@
 import type { Tx } from "@getpact/db";
 import { auditEvents } from "@getpact/db/schema";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+
+export type QueryOrder = "asc" | "desc";
 
 export type QueryInput = {
   workspaceId: string;
@@ -8,6 +10,7 @@ export type QueryInput = {
   since?: Date;
   until?: Date;
   limit: number;
+  order?: QueryOrder;
   cursor?: { ts: Date; thisHash: string };
 };
 
@@ -48,17 +51,24 @@ export const queryEvents = async (tx: Tx, input: QueryInput): Promise<QueryOutpu
   if (input.action) conditions.push(eq(auditEvents.action, input.action));
   if (input.since) conditions.push(gte(auditEvents.ts, input.since));
   if (input.until) conditions.push(lte(auditEvents.ts, input.until));
+  const order = input.order ?? "desc";
   if (input.cursor) {
+    const cmp = order === "asc" ? sql`>` : sql`<`;
     conditions.push(
-      sql`(${auditEvents.ts}, ${auditEvents.thisHash}) < (${input.cursor.ts.toISOString()}, ${input.cursor.thisHash})`,
+      sql`(${auditEvents.ts}, ${auditEvents.thisHash}) ${cmp} (${input.cursor.ts.toISOString()}, ${input.cursor.thisHash})`,
     );
   }
+
+  const orderClauses =
+    order === "asc"
+      ? [asc(auditEvents.ts), asc(auditEvents.thisHash)]
+      : [desc(auditEvents.ts), desc(auditEvents.thisHash)];
 
   const rows = await tx
     .select()
     .from(auditEvents)
     .where(and(...conditions))
-    .orderBy(desc(auditEvents.ts), desc(auditEvents.thisHash))
+    .orderBy(...orderClauses)
     .limit(input.limit + 1);
 
   const hasMore = rows.length > input.limit;
