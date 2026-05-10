@@ -62,6 +62,7 @@ export const securityHeaders = (opts: SecurityHeaderOptions = {}): Record<string
   "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
   "cross-origin-resource-policy": "same-origin",
   "referrer-policy": "no-referrer",
+  "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   ...(opts.production
