@@ -41,3 +41,14 @@ export const refresh = (
   endpoint: string,
   body: { workspaceId: string; refreshToken: string; audience: string },
 ): Promise<IssueResponse> => post(endpoint, "/v1/refresh", body);
+
+export const googleExchange = (
+  endpoint: string,
+  body: {
+    workspaceId: string;
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+    audience: string;
+  },
+): Promise<IssueResponse> => post(endpoint, "/v1/oauth/google/exchange", body);
