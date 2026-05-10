@@ -1,13 +1,31 @@
-export type Subject = { kind: "group" | "role" | "user"; value: string };
+import { z } from "zod";
 
-export type PolicyRule = {
-  subject: Subject;
-  effect: "allow" | "deny";
-  action?: string;
-  resource?: string;
+export const subjectSchema = z.object({
+  kind: z.enum(["group", "role", "user"]),
+  value: z.string().min(1),
+});
+
+export const policyRuleSchema = z.object({
+  subject: subjectSchema,
+  effect: z.enum(["allow", "deny"]),
+  action: z.string().optional(),
+  resource: z.string().optional(),
+});
+
+export const policySchema = z.object({
+  rules: z.array(policyRuleSchema),
+});
+
+export type Subject = z.infer<typeof subjectSchema>;
+export type PolicyRule = z.infer<typeof policyRuleSchema>;
+export type Policy = z.infer<typeof policySchema>;
+
+export const parsePolicy = (input: unknown): Policy => policySchema.parse(input);
+
+export const tryParsePolicy = (input: unknown): Policy | null => {
+  const result = policySchema.safeParse(input);
+  return result.success ? result.data : null;
 };
-
-export type Policy = { rules: PolicyRule[] };
 
 export type TokenClaims = {
   sub: string;
