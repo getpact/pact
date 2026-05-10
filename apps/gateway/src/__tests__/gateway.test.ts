@@ -1,3 +1,4 @@
+import { fromBase64 } from "@getpact/crypto";
 import { createClient, schema, withWorkspace } from "@getpact/db";
 import { auditEvents, workspaces } from "@getpact/db/schema";
 import {
@@ -6,6 +7,7 @@ import {
   issueTestToken,
   uniqueSlug,
 } from "@getpact/test-helpers";
+import { storeSecret } from "@getpact/vault";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
@@ -365,6 +367,114 @@ run("gateway integration", () => {
       message: "gateway audit is required (missing_mek)",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards stored brain credential as bearer authorization to upstream", async () => {
+    const testEnv = await buildTestEnv(url as string);
+    const created = await createTestWorkspace(issuer, testEnv, {
+      slug: uniqueSlug("gtw-bearer"),
+      adminEmail: "alice@example.com",
+    });
+    cleanup.push(created.workspaceId);
+    const issued = await issueTestToken(issuer, testEnv, {
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: "pact-gateway",
+    });
+    await withWorkspace(db, created.workspaceId, (tx) =>
+      tx.insert(schema.brains).values({
+        workspaceId: created.workspaceId,
+        kind: "notion",
+        baseUrl: "https://api.example.com/base",
+        authScheme: "bearer",
+        scopeInjectionTemplate: {},
+      }),
+    );
+    const rawMek = fromBase64(testEnv.MEK);
+    await withWorkspace(db, created.workspaceId, (tx) =>
+      storeSecret(tx, rawMek, {
+        workspaceId: created.workspaceId,
+        kind: "brain_credential",
+        target: "notion",
+        plaintext: "upstream-secret-token",
+      }),
+    );
+
+    let upstreamAuth: string | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const target = input.toString();
+        if (target === "https://verifier.test/v1/verify") {
+          return Response.json({ allow: true, reasons: ["ok"] });
+        }
+        upstreamAuth = (init?.headers as Headers).get("authorization");
+        return Response.json({ ok: true });
+      }),
+    );
+
+    const res = await app.request(
+      `/${created.workspaceId}/gateway/notion/v1/pages`,
+      { headers: { authorization: `Bearer ${issued.token}` } },
+      {
+        DATABASE_URL: testEnv.DATABASE_URL,
+        VERIFIER_URL: "https://verifier.test",
+        GATEWAY_AUDIENCE: "pact-gateway",
+        MEK: testEnv.MEK,
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(upstreamAuth).toBe("Bearer upstream-secret-token");
+  });
+
+  it("rejects bearer brain when credential missing from vault", async () => {
+    const testEnv = await buildTestEnv(url as string);
+    const created = await createTestWorkspace(issuer, testEnv, {
+      slug: uniqueSlug("gtw-nocred"),
+      adminEmail: "alice@example.com",
+    });
+    cleanup.push(created.workspaceId);
+    const issued = await issueTestToken(issuer, testEnv, {
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: "pact-gateway",
+    });
+    await withWorkspace(db, created.workspaceId, (tx) =>
+      tx.insert(schema.brains).values({
+        workspaceId: created.workspaceId,
+        kind: "notion",
+        baseUrl: "https://api.example.com/base",
+        authScheme: "bearer",
+        scopeInjectionTemplate: {},
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        if (input.toString() === "https://verifier.test/v1/verify") {
+          return Response.json({ allow: true, reasons: ["ok"] });
+        }
+        throw new Error("upstream must not be called when credential is missing");
+      }),
+    );
+
+    const res = await app.request(
+      `/${created.workspaceId}/gateway/notion/v1/pages`,
+      { headers: { authorization: `Bearer ${issued.token}` } },
+      {
+        DATABASE_URL: testEnv.DATABASE_URL,
+        VERIFIER_URL: "https://verifier.test",
+        GATEWAY_AUDIENCE: "pact-gateway",
+        MEK: testEnv.MEK,
+      },
+    );
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: "credential_missing",
+      message: "brain credential not in vault",
+    });
   });
 
   it("rejects a token routed through another workspace", async () => {
