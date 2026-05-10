@@ -53,3 +53,18 @@ export class ConflictError extends PactError {
     super("conflict", message, 409);
   }
 }
+
+export type SecurityHeaderOptions = {
+  production?: boolean;
+};
+
+export const securityHeaders = (opts: SecurityHeaderOptions = {}): Record<string, string> => ({
+  "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+  "cross-origin-resource-policy": "same-origin",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  ...(opts.production
+    ? { "strict-transport-security": "max-age=31536000; includeSubDomains; preload" }
+    : {}),
+});
