@@ -58,6 +58,7 @@ export type SlackClient = {
 };
 
 const defaultApiBaseUrl = "https://slack.com/api";
+const allowedChannelTypes = new Set(["public_channel"]);
 
 const requireString = (value: unknown, name: string): string | undefined => {
   if (typeof value === "string" && value.length > 0) return value;
@@ -102,6 +103,13 @@ const parseLimit = (value: unknown): number | undefined =>
 const parseString = (value: unknown): string | undefined =>
   typeof value === "string" && value.length > 0 ? value : undefined;
 
+const parseSafeChannelTypes = (value: unknown): string | undefined => {
+  const parsed = parseString(value) ?? "public_channel";
+  const types = parsed.split(",").map((v) => v.trim());
+  if (types.every((type) => allowedChannelTypes.has(type))) return parsed;
+  throw new Error("Slack channel types are restricted to public_channel");
+};
+
 export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
   const buildClient = opts.createClient ?? ((token: string) => createSlackClient({ token }));
 
@@ -136,7 +144,7 @@ export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
             properties: {
               limit: { type: "number" },
               cursor: { type: "string" },
-              types: { type: "string" },
+              types: { type: "string", enum: ["public_channel"] },
             },
           },
         },
@@ -147,10 +155,15 @@ export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
           const input: SlackConversationsListInput = {};
           const limit = parseLimit(args.limit);
           const cursor = parseString(args.cursor);
-          const types = parseString(args.types);
+          let types: string;
+          try {
+            types = parseSafeChannelTypes(args.types);
+          } catch (e) {
+            return errorResult(e instanceof Error ? e.message : "invalid Slack channel types");
+          }
           if (limit !== undefined) input.limit = limit;
           if (cursor) input.cursor = cursor;
-          if (types) input.types = types;
+          input.types = types;
           return json(await client.conversationsList(input));
         },
       },
