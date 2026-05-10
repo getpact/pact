@@ -127,6 +127,9 @@ importers:
       '@getpact/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@getpact/ratelimit':
+        specifier: workspace:*
+        version: link:../../packages/ratelimit
       drizzle-orm:
         specifier: ^0.36.0
         version: 0.36.4(@cloudflare/workers-types@4.20260509.1)(postgres@3.4.9)
@@ -328,6 +331,12 @@ importers:
       zod:
         specifier: ^3.23.0
         version: 3.25.76
+
+  packages/ratelimit:
+    dependencies:
+      hono:
+        specifier: ^4.6.0
+        version: 4.12.18
 
   packages/vault:
     dependencies:

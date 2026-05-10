@@ -2,6 +2,7 @@ import type { Email } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
+import { kvRateLimiter, memoryRateLimiter, type RateLimiter, rateLimit } from "@getpact/ratelimit";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
@@ -15,6 +16,23 @@ export const app = new Hono<{ Bindings: Env }>();
 const logger = createLogger({ base: { app: "issuer" } });
 app.use("*", requestLogger(logger, "issuer"));
 app.use("/v1/*", bodyLimit({ maxSize: 32 * 1024 }));
+
+const memLimiter = memoryRateLimiter();
+const limiter = (env: Env): RateLimiter =>
+  env.RATE_LIMIT_KV ? kvRateLimiter(env.RATE_LIMIT_KV) : memLimiter;
+
+app.use("/v1/refresh", (c, next) =>
+  rateLimit({ limiter: limiter(c.env), limit: 30, windowSeconds: 60 })(c, next),
+);
+app.use("/v1/oauth/google/exchange", (c, next) =>
+  rateLimit({ limiter: limiter(c.env), limit: 10, windowSeconds: 60 })(c, next),
+);
+app.use("/v1/workspaces", (c, next) =>
+  rateLimit({ limiter: limiter(c.env), limit: 5, windowSeconds: 60 })(c, next),
+);
+app.use("/v1/dev/issue", (c, next) =>
+  rateLimit({ limiter: limiter(c.env), limit: 30, windowSeconds: 60 })(c, next),
+);
 
 app.get("/health", (c) => c.json({ ok: true }));
 

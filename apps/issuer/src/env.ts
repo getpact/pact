@@ -1,4 +1,5 @@
 import { fromBase64 } from "@getpact/crypto";
+import type { KvLike } from "@getpact/ratelimit";
 
 export type Env = {
   DATABASE_URL: string;
@@ -12,6 +13,7 @@ export type Env = {
   ENVIRONMENT?: string;
   ENABLE_DEV_ISSUE?: string;
   TOKEN_TTL_SECONDS?: string;
+  RATE_LIMIT_KV?: KvLike;
 };
 
 export const decodeMek = (env: Env): Uint8Array => fromBase64(env.MEK);
