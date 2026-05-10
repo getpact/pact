@@ -9,6 +9,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./verifier": {
+      "types": "./dist/verifier.d.ts",
+      "import": "./dist/verifier.js"
+    },
+    "./genesis": {
+      "types": "./dist/genesis.d.ts",
+      "import": "./dist/genesis.js"
     }
   },
   "scripts": {
