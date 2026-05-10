@@ -2,7 +2,7 @@ import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { policies, revokedJtis } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
-import { evaluate, type Policy, type TokenClaims } from "@getpact/policy";
+import { evaluate, type TokenClaims, tryParsePolicy } from "@getpact/policy";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 
@@ -99,11 +99,17 @@ export const verifyAction = async (
     roles: (claims.scopes as string[] | undefined) ?? [],
   };
 
+  const policy = tryParsePolicy(policyRow[0]?.body);
+  if (!policy) {
+    return sub
+      ? { allow: false, reasons: ["invalid policy"], sub }
+      : { allow: false, reasons: ["invalid policy"] };
+  }
   const result = evaluate({
     token: tokenClaims,
     action: input.action,
     resource: input.resource,
-    policy: policyRow[0]?.body as Policy,
+    policy,
   });
 
   void sql;

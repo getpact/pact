@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluate, type Policy, type TokenClaims } from "../index.js";
+import { evaluate, type Policy, parsePolicy, type TokenClaims, tryParsePolicy } from "../index.js";
 
 const tokenFor = (overrides: Partial<TokenClaims> = {}): TokenClaims => ({
   sub: "user-123",
@@ -106,6 +106,16 @@ describe("policy evaluate", () => {
     const result = evaluate({ token: tokenFor(), action: "read", resource: "doc:x", policy });
     expect(result.allow).toBe(true);
     expect(result.reasons.length).toBe(2);
+  });
+
+  it("parsePolicy accepts a valid policy and rejects garbage", () => {
+    const valid = parsePolicy({
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+    expect(valid.rules.length).toBe(1);
+    expect(() => parsePolicy({ rules: [{ effect: "allow" }] })).toThrow();
+    expect(tryParsePolicy({ rules: "nope" })).toBeNull();
+    expect(tryParsePolicy(null)).toBeNull();
   });
 
   it("undefined action and resource on rule means wildcard", () => {
