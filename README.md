@@ -29,11 +29,9 @@ pnpm dev
 OSS (MIT):
 
 - `@getpact/cli`
-- `@getpact/verifier-sdk`
+- `@getpact/verifier-sdk-node`
 - `@getpact/adapter-sdk`
 - `@getpact/adapter-slack`
-- `@getpact/adapter-drive`
-- `@getpact/audit-verifier`
 - `getpact-verifier` (Python)
 
-Internal: `@getpact/core`, `@getpact/db`, `@getpact/crypto`, `@getpact/policy`, `@getpact/audit`, `@getpact/vault`.
+Internal: `@getpact/core`, `@getpact/db`, `@getpact/crypto`, `@getpact/policy`, `@getpact/audit`, `@getpact/vault`, `@getpact/keystore`, `@getpact/logger`, `@getpact/ratelimit`, `@getpact/test-helpers`.
