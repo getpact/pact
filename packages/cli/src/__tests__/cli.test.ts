@@ -92,3 +92,65 @@ describe("oauth helpers", () => {
     expect(url.searchParams.get("scope")).toContain("openid");
   });
 });
+
+describe("mcp install", () => {
+  let tmp: string;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmp = mkdtempSync(join(tmpdir(), "pact-cli-mcp-"));
+    process.env.HOME = tmp;
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (originalHome) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("writes pact entry into a fresh claude-code config", async () => {
+    const { installMcpServer, configPathFor } = await import("../mcp-install.js");
+    const { path, existed } = await installMcpServer("claude-code");
+    expect(existed).toBe(false);
+    expect(path).toBe(configPathFor("claude-code"));
+    const { readFileSync } = await import("node:fs");
+    const cfg = JSON.parse(readFileSync(path, "utf8")) as {
+      mcpServers: Record<string, { command: string; args: string[] }>;
+    };
+    expect(cfg.mcpServers.pact?.command).toBe("npx");
+    expect(cfg.mcpServers.pact?.args).toContain("@getpact/cli");
+    expect(cfg.mcpServers.pact?.args).toContain("mcp");
+    expect(cfg.mcpServers.pact?.args).toContain("serve");
+  });
+
+  it("merges into existing config without clobbering other servers", async () => {
+    const { installMcpServer, configPathFor } = await import("../mcp-install.js");
+    const path = configPathFor("claude-code");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({
+        mcpServers: { other: { command: "node", args: ["other.js"] } },
+        otherSetting: 42,
+      }),
+    );
+
+    const { existed } = await installMcpServer("claude-code");
+    expect(existed).toBe(true);
+
+    const { readFileSync } = await import("node:fs");
+    const cfg = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> & {
+      mcpServers: Record<string, { command: string }>;
+    };
+    expect(cfg.mcpServers.pact?.command).toBe("npx");
+    expect(cfg.mcpServers.other?.command).toBe("node");
+    expect(cfg.otherSetting).toBe(42);
+  });
+});
