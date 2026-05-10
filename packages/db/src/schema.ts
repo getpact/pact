@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -103,7 +104,11 @@ export const policies = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     replacedAt: timestamp("replaced_at", { withTimezone: true }),
   },
-  (t) => [index("policies_workspace_replaced_idx").on(t.workspaceId, t.replacedAt)],
+  (t) => [
+    index("policies_workspace_replaced_idx").on(t.workspaceId, t.replacedAt),
+    uniqueIndex("policies_workspace_version_idx").on(t.workspaceId, t.version),
+    uniqueIndex("policies_workspace_active_idx").on(t.workspaceId).where(sql`replaced_at IS NULL`),
+  ],
 );
 
 export const refreshTokens = pgTable(
