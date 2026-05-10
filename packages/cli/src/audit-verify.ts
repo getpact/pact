@@ -1,6 +1,6 @@
 import { computeGenesisHash } from "@getpact/audit/genesis";
 import { type AuditJwks, type StoredEvent, verifyChain } from "@getpact/audit/verifier";
-import { fromBase64, importPublicSpki } from "@getpact/crypto";
+import { type Ed25519PublicJwk, importPublicJwkEd25519 } from "@getpact/crypto";
 import { refresh } from "./api.js";
 import { type CliConfig, saveConfig } from "./config.js";
 
@@ -9,8 +9,8 @@ type EventsResponse = {
   nextCursor: string | null;
 };
 
-type KeysResponse = {
-  keys: Array<{ id: string; publicKeySpki: string }>;
+type JwksResponse = {
+  keys: Ed25519PublicJwk[];
 };
 
 type WorkspaceResponse = {
@@ -83,10 +83,20 @@ export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyRepor
     token,
   );
   const chain = await get<ChainResponse>(`${base}/v1/workspaces/${workspaceId}/audit/chain`, token);
-  const keysRes = await get<KeysResponse>(`${base}/v1/workspaces/${workspaceId}/audit/keys`, token);
+
+  // Fetch audit verifying keys from the issuer's public JWKS, not audit-api.
+  // This keeps the chain trustworthy if audit-api is compromised: a tampered
+  // audit-api cannot mint new signing keys, only the issuer can.
+  const issuerUrl = issuerBase(config).replace(/\/+$/, "");
+  const jwksRes = await fetch(
+    `${issuerUrl}/v1/workspaces/${workspaceId}/.well-known/audit-jwks.json`,
+  );
+  if (!jwksRes.ok) throw new Error(`audit jwks fetch failed: ${jwksRes.status}`);
+  const jwksBody = (await jwksRes.json()) as JwksResponse;
   const jwks: AuditJwks = {};
-  for (const k of keysRes.keys) {
-    jwks[k.id] = await importPublicSpki(fromBase64(k.publicKeySpki));
+  for (const jwk of jwksBody.keys) {
+    if (!jwk.kid) continue;
+    jwks[jwk.kid] = await importPublicJwkEd25519(jwk);
   }
 
   const all: StoredEvent[] = [];

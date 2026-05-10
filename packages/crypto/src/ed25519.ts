@@ -38,3 +38,15 @@ export const importPrivatePkcs8 = async (bytes: Uint8Array): Promise<CryptoKey> 
 
 export const importPublicSpki = async (bytes: Uint8Array): Promise<CryptoKey> =>
   crypto.subtle.importKey("spki", bytes as BufferSource, { name: "Ed25519" }, true, ["verify"]);
+
+export type Ed25519PublicJwk = {
+  kty: "OKP";
+  crv: "Ed25519";
+  x: string;
+  kid?: string;
+  alg?: string;
+  use?: string;
+};
+
+export const importPublicJwkEd25519 = async (jwk: Ed25519PublicJwk): Promise<CryptoKey> =>
+  crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, true, ["verify"]);
