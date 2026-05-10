@@ -58,6 +58,35 @@ export type SecurityHeaderOptions = {
   production?: boolean;
 };
 
+const blockedHosts = new Set(["localhost", "0.0.0.0", "127.0.0.1", "::1", "[::1]"]);
+
+export const isPrivateHost = (host: string): boolean => {
+  const value = host.toLowerCase();
+  if (blockedHosts.has(value) || value.endsWith(".local")) return true;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(value)) return true;
+  if (/^169\.254\./.test(value)) return true;
+  const match = value.match(/^172\.(\d+)\./);
+  if (match?.[1]) {
+    const n = Number(match[1]);
+    if (n >= 16 && n <= 31) return true;
+  }
+  if (value.includes(":")) return true;
+  return value.startsWith("[fc") || value.startsWith("[fd") || value.startsWith("[fe80");
+};
+
+export const assertSafeUpstreamUrl = (raw: string): URL => {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ValidationError("invalid upstream url");
+  }
+  if (url.protocol !== "https:") throw new ValidationError("upstream must use https");
+  if (url.username || url.password) throw new ValidationError("upstream credentials forbidden");
+  if (isPrivateHost(url.hostname)) throw new ValidationError("upstream host not allowed");
+  return url;
+};
+
 export const securityHeaders = (opts: SecurityHeaderOptions = {}): Record<string, string> => ({
   "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
   "cross-origin-resource-policy": "same-origin",

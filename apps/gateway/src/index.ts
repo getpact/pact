@@ -1,4 +1,4 @@
-import { isUuid, securityHeaders } from "@getpact/core";
+import { assertSafeUpstreamUrl, isUuid, securityHeaders } from "@getpact/core";
 import { createClient, schema, withWorkspace } from "@getpact/db";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { and, eq } from "drizzle-orm";
@@ -34,28 +34,8 @@ type VerifyOutput = {
   reasons: string[];
 };
 
-const blockedHosts = new Set(["localhost", "0.0.0.0", "127.0.0.1", "::1", "[::1]"]);
-
-const isBlockedHost = (host: string): boolean => {
-  const value = host.toLowerCase();
-  if (blockedHosts.has(value) || value.endsWith(".local")) return true;
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(value)) return true;
-  if (/^169\.254\./.test(value)) return true;
-  const match = value.match(/^172\.(\d+)\./);
-  if (match?.[1]) {
-    const n = Number(match[1]);
-    if (n >= 16 && n <= 31) return true;
-  }
-  if (value.includes(":")) return true;
-  return value.startsWith("[fc") || value.startsWith("[fd") || value.startsWith("[fe80");
-};
-
 export const buildGatewayTarget = (baseUrl: string, path: string, search: string): URL => {
-  const target = new URL(baseUrl);
-  if (target.protocol !== "https:") throw new Error("gateway upstream must use HTTPS");
-  if (target.username || target.password) throw new Error("gateway upstream credentials forbidden");
-  if (isBlockedHost(target.hostname)) throw new Error("gateway upstream host is not allowed");
-
+  const target = assertSafeUpstreamUrl(baseUrl);
   const basePath = target.pathname.endsWith("/") ? target.pathname : `${target.pathname}/`;
   const cleanPath = path.replace(/^\/+/, "");
   target.pathname = `${basePath}${cleanPath}`;
