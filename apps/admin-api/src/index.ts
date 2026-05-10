@@ -294,11 +294,6 @@ const pgErrorCode = (value: unknown): string | null => {
 
 const isUniqueViolation = (value: unknown): boolean => pgErrorCode(value) === "23505";
 
-const isConstraintViolation = (value: unknown): boolean => {
-  const code = pgErrorCode(value);
-  return code?.startsWith("23") ?? false;
-};
-
 const ensureSafeJsonKeys = (value: unknown, path = ""): void => {
   if (!value || typeof value !== "object") return;
   if (Array.isArray(value)) {
@@ -361,7 +356,6 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
           .returning({ id: brains.id, kind: brains.kind, baseUrl: brains.baseUrl });
       } catch (e) {
         if (isUniqueViolation(e)) throw new ConflictError("brain kind already exists");
-        if (isConstraintViolation(e)) throw new ValidationError("brain failed constraint check");
         throw e;
       }
     });
