@@ -371,7 +371,7 @@ run("issuer end-to-end", () => {
       },
       env,
     );
-    expect(second.status).toBeGreaterThanOrEqual(400);
+    expect(second.status).toBe(409);
   });
 
   it("rejects refresh with bogus token", async () => {
