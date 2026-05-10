@@ -45,6 +45,9 @@ export type StoredSigningKey = {
   publicSpki: string;
 };
 
+const aadFor = (workspaceId: string, kind: SigningKeyKind): Uint8Array =>
+  new TextEncoder().encode(`keystore:v1:${workspaceId}:${kind}`);
+
 export const createSigningKey = async (
   tx: Tx,
   opts: CreateSigningKeyOptions,
@@ -53,7 +56,7 @@ export const createSigningKey = async (
   const privBytes = await exportPrivatePkcs8(pair.privateKey);
   const pubBytes = await exportPublicSpki(pair.publicKey);
   const mek = await importMek(opts.rawMek);
-  const wrapped = await encryptAesGcm(mek, privBytes);
+  const wrapped = await encryptAesGcm(mek, privBytes, aadFor(opts.workspaceId, opts.kind));
 
   const inserted = (await tx.execute(
     sql`INSERT INTO workspace_signing_keys (workspace_id, kind, public_key_spki, private_key_wrapped)
@@ -98,7 +101,11 @@ export const loadActiveSigningKey = async (
   if (!row) throw new Error(`no active ${kind} signing key for workspace ${workspaceId}`);
 
   const mek = await importMek(rawMek);
-  const privBytes = await decryptAesGcm(mek, parse(row.privateKeyWrapped));
+  const privBytes = await decryptAesGcm(
+    mek,
+    parse(row.privateKeyWrapped),
+    aadFor(workspaceId, kind),
+  );
   const pubBytes = fromBase64(row.publicKeySpki);
   const privateKey = await importPrivatePkcs8(privBytes);
   const publicKey = await importPublicSpki(pubBytes);
