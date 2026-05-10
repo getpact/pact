@@ -1,4 +1,4 @@
-import { AuthError, AuthzError, isUuid } from "@getpact/core";
+import { AuthError, AuthzError, isUuid, tokenModeForAudience } from "@getpact/core";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { revokedJtis } from "@getpact/db/schema";
@@ -71,6 +71,10 @@ export const authenticateAdmin = async (
     issuer,
     audience,
   });
+  const expectedMode = tokenModeForAudience(audience);
+  if (!expectedMode || claims.mode !== expectedMode) {
+    throw new AuthError("token mode mismatch");
+  }
 
   const revoked = await withWorkspace(db, workspaceId, (tx) =>
     tx

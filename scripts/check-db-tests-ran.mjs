@@ -43,14 +43,15 @@ const dbGated = walk("apps")
 const missed = [];
 for (const file of dbGated) {
   const rel = file.replace(/^.*\/(apps|packages)\//, "$1/");
-  if (!log.includes(rel)) {
+  const packageLocal = rel.split("/").slice(2).join("/");
+  const idx = log.indexOf(rel) >= 0 ? log.indexOf(rel) : log.indexOf(packageLocal);
+  if (idx < 0) {
     missed.push(rel);
     continue;
   }
-  const idx = log.indexOf(rel);
   const slice = log.slice(idx, idx + 4096);
-  if (/\bskipped\b/.test(slice) && !/✓/.test(slice)) {
-    missed.push(`${rel} (no passing assertions)`);
+  if (/\bskipped\b/.test(slice)) {
+    missed.push(`${rel} (reported skipped tests)`);
   }
 }
 
