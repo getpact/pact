@@ -1,7 +1,6 @@
 import { sha256, toBase64, toHex } from "@getpact/crypto";
 import type { Tx } from "@getpact/db";
-import { refreshTokens } from "@getpact/db/schema";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 const REFRESH_BYTE_LEN = 32;
 
@@ -51,23 +50,18 @@ export const redeemRefresh = async (
   rawRefresh: string,
 ): Promise<RedeemRefreshResult | null> => {
   const hash = await hashRefresh(rawRefresh);
-  const now = new Date();
-  const rows = await tx
-    .select()
-    .from(refreshTokens)
-    .where(
-      and(
-        eq(refreshTokens.workspaceId, workspaceId),
-        eq(refreshTokens.ciphertext, hash),
-        gt(refreshTokens.expiresAt, now),
-        isNull(refreshTokens.lastUsedAt),
-      ),
-    )
-    .limit(1);
-
-  const row = rows[0];
+  // Atomic redeem: claim the row by setting last_used_at, only succeeds if
+  // not already used and not expired. Concurrent redeems collide here.
+  const claimed = (await tx.execute(
+    sql`UPDATE refresh_tokens
+        SET last_used_at = NOW()
+        WHERE workspace_id = ${workspaceId}
+          AND ciphertext = ${hash}
+          AND expires_at > NOW()
+          AND last_used_at IS NULL
+        RETURNING workspace_id, user_id`,
+  )) as Array<{ workspace_id: string; user_id: string }>;
+  const row = claimed[0];
   if (!row) return null;
-
-  await tx.execute(sql`UPDATE refresh_tokens SET last_used_at = NOW() WHERE id = ${row.id}`);
-  return { workspaceId: row.workspaceId, userId: row.userId };
+  return { workspaceId: row.workspace_id, userId: row.user_id };
 };
