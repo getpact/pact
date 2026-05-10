@@ -29,6 +29,27 @@
       "when": 1778374843423,
       "tag": "0003_steady_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778374882969,
+      "tag": "0004_enable_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778375026296,
+      "tag": "0005_pact_app_login",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778375080125,
+      "tag": "0006_fix_rls_empty_setting",
+      "breakpoints": true
     }
   ]
 }
