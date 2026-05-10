@@ -616,6 +616,120 @@ run("gateway integration", () => {
     });
   });
 
+  it("audits and returns 502 when upstream returns a redirect", async () => {
+    const { testEnv, created, issued } = await setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        if (input.toString() === "https://verifier.test/v1/verify") {
+          return Response.json({ allow: true, reasons: ["ok"] });
+        }
+        return new Response(null, { status: 302, headers: { location: "https://evil.test" } });
+      }),
+    );
+
+    const res = await app.request(
+      `/${created.workspaceId}/gateway/notion/v1/pages`,
+      { headers: { authorization: `Bearer ${issued.token}` } },
+      {
+        DATABASE_URL: testEnv.DATABASE_URL,
+        VERIFIER_URL: "https://verifier.test",
+        GATEWAY_AUDIENCE: "pact-gateway",
+        MEK: testEnv.MEK,
+      },
+    );
+
+    expect(res.status).toBe(502);
+    const rows = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select({ supporting: auditEvents.supporting })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, created.workspaceId)),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        supporting: expect.objectContaining({ outcome: "redirect", upstreamStatus: 302 }),
+      }),
+    );
+  });
+
+  it("audits and returns 504 when upstream times out", async () => {
+    const { testEnv, created, issued } = await setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        if (input.toString() === "https://verifier.test/v1/verify") {
+          return Response.json({ allow: true, reasons: ["ok"] });
+        }
+        const err = new Error("aborted");
+        err.name = "AbortError";
+        if (init?.signal) {
+          (init.signal as AbortSignal).addEventListener("abort", () => {});
+        }
+        throw err;
+      }),
+    );
+
+    const res = await app.request(
+      `/${created.workspaceId}/gateway/notion/v1/pages`,
+      { headers: { authorization: `Bearer ${issued.token}` } },
+      {
+        DATABASE_URL: testEnv.DATABASE_URL,
+        VERIFIER_URL: "https://verifier.test",
+        GATEWAY_AUDIENCE: "pact-gateway",
+        GATEWAY_UPSTREAM_TIMEOUT_MS: "1",
+        MEK: testEnv.MEK,
+      },
+    );
+
+    expect([502, 504]).toContain(res.status);
+    const rows = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select({ supporting: auditEvents.supporting })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, created.workspaceId)),
+    );
+    const outcomes = rows.map((r) => (r.supporting as { outcome?: string })?.outcome);
+    expect(outcomes.some((o) => o === "timeout" || o === "upstream_failed")).toBe(true);
+  });
+
+  it("audits and returns 502 when upstream fetch fails", async () => {
+    const { testEnv, created, issued } = await setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        if (input.toString() === "https://verifier.test/v1/verify") {
+          return Response.json({ allow: true, reasons: ["ok"] });
+        }
+        throw new Error("network down");
+      }),
+    );
+
+    const res = await app.request(
+      `/${created.workspaceId}/gateway/notion/v1/pages`,
+      { headers: { authorization: `Bearer ${issued.token}` } },
+      {
+        DATABASE_URL: testEnv.DATABASE_URL,
+        VERIFIER_URL: "https://verifier.test",
+        GATEWAY_AUDIENCE: "pact-gateway",
+        MEK: testEnv.MEK,
+      },
+    );
+
+    expect(res.status).toBe(502);
+    const rows = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .select({ supporting: auditEvents.supporting })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, created.workspaceId)),
+    );
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        supporting: expect.objectContaining({ outcome: "upstream_failed" }),
+      }),
+    );
+  });
+
   it("rejects a token routed through another workspace", async () => {
     const first = await setup();
     const second = await createTestWorkspace(issuer, first.testEnv, {
