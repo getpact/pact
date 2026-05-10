@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
 import { loadConfig, saveConfig } from "./config.js";
+import { type ClientId, installMcpServer } from "./mcp-install.js";
+import { serveStdio } from "./mcp-serve.js";
 import {
   buildGoogleAuthorizeUrl,
   captureLoopbackCallback,
@@ -25,11 +27,13 @@ const help = () => {
       "pact <command>",
       "",
       "commands:",
-      "  init     create a workspace and store credentials (dev path)",
-      "  login    sign in via Google (browser loopback)",
-      "  refresh  rotate access token using stored refresh token",
-      "  whoami   print the active user and workspace",
-      "  status   show endpoint and credential expiry",
+      "  init             create a workspace and store credentials (dev path)",
+      "  login            sign in via Google (browser loopback)",
+      "  refresh          rotate access token using stored refresh token",
+      "  whoami           print the active user and workspace",
+      "  status           show endpoint and credential expiry",
+      "  mcp install      register Pact MCP server with an agent client",
+      "  mcp serve        run the Pact MCP stdio proxy (used by clients)",
       "",
       "env:",
       "  PACT_ENDPOINT       issuer URL (default http://localhost:8787)",
@@ -168,6 +172,34 @@ const status = async () => {
   }
 };
 
+const mcp = async () => {
+  const sub = process.argv[3];
+  switch (sub) {
+    case "serve":
+      await serveStdio();
+      return;
+    case "install": {
+      const idx = process.argv.indexOf("--client");
+      const client = (idx >= 0 ? process.argv[idx + 1] : "claude-desktop") as ClientId;
+      if (!["claude-desktop", "claude-code", "cursor"].includes(client)) {
+        process.stderr.write(`unsupported client: ${client}\n`);
+        process.exit(1);
+      }
+      const { path, existed } = await installMcpServer(client);
+      process.stdout.write(
+        `pact MCP server registered (${client}) ${existed ? "in existing config" : "in new config"}\n  ${path}\n`,
+      );
+      return;
+    }
+    default:
+      process.stderr.write(
+        "usage: pact mcp install [--client claude-desktop|claude-code|cursor]\n",
+      );
+      process.stderr.write("       pact mcp serve\n");
+      process.exit(1);
+  }
+};
+
 const main = async () => {
   const command = process.argv[2];
   switch (command) {
@@ -190,6 +222,9 @@ const main = async () => {
       return;
     case "status":
       await status();
+      return;
+    case "mcp":
+      await mcp();
       return;
     default:
       process.stderr.write(`unknown command: ${command}\n`);
