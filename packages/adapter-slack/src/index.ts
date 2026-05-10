@@ -110,6 +110,9 @@ const parseSafeChannelTypes = (value: unknown): string => {
   throw new Error("Slack channel types are restricted to public_channel");
 };
 
+const slackResult = <T extends { ok: true }>(result: SlackResult<T>) =>
+  result.ok ? json(result) : errorResult(`Slack API error: ${result.error}`);
+
 export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
   const buildClient = opts.createClient ?? ((token: string) => createSlackClient({ token }));
 
@@ -128,11 +131,15 @@ export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
           description: "Verify the workspace Slack bot token stored in Pact Vault.",
           inputSchema: { type: "object" },
         },
+        authorize: (_args, ctx) => ({
+          action: "slack.auth.test",
+          resource: `slack:workspace:${ctx.workspaceId}`,
+        }),
         handler: async (_args, ctx, deps) => {
           if (!deps.rawMek) return errorResult("MEK is not configured");
           const client = await loadClient(ctx, deps);
           if (!client) return errorResult("Slack bot token not found");
-          return json(await client.authTest());
+          return slackResult(await client.authTest());
         },
       },
       {
@@ -148,6 +155,10 @@ export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
             },
           },
         },
+        authorize: () => ({
+          action: "slack.channels.list",
+          resource: "slack:channels:public",
+        }),
         handler: async (args, ctx, deps) => {
           if (!deps.rawMek) return errorResult("MEK is not configured");
           const client = await loadClient(ctx, deps);
@@ -164,7 +175,7 @@ export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
           if (limit !== undefined) input.limit = limit;
           if (cursor) input.cursor = cursor;
           input.types = types;
-          return json(await client.conversationsList(input));
+          return slackResult(await client.conversationsList(input));
         },
       },
     ],

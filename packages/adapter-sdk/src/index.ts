@@ -34,8 +34,19 @@ export type AdapterToolHandler = (
   deps: ToolDeps,
 ) => Promise<ToolResult>;
 
+export type ToolAuthorization = {
+  action: string;
+  resource: string;
+};
+
+export type AdapterToolAuthorizer = (
+  args: Record<string, unknown>,
+  ctx: AdapterContext,
+) => ToolAuthorization;
+
 export type AdapterTool = {
   descriptor: ToolDescriptor;
+  authorize?: AdapterToolAuthorizer;
   handler: AdapterToolHandler;
 };
 
@@ -51,6 +62,11 @@ export const json = (value: unknown): ToolResult => ({
 export const errorResult = (message: string): ToolResult => ({
   content: [{ type: "text", text: message }],
   isError: true,
+});
+
+export const defaultToolAuthorization = (toolName: string): ToolAuthorization => ({
+  action: `tool:${toolName}`,
+  resource: `tool:${toolName}`,
 });
 
 export const buildToolRegistry = (adapters: Adapter[]): Map<string, AdapterTool> => {

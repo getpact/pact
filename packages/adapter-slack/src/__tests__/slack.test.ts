@@ -169,6 +169,36 @@ describe("Slack adapter", () => {
     expect(noToken?.content[0]?.text).toBe("Slack bot token not found");
   });
 
+  it("adapter tools surface Slack API errors as MCP errors", async () => {
+    const adapter = createSlackAdapter({
+      loadBotToken: async () => "xoxb-test",
+      createClient: () => ({
+        authTest: async () => ({ ok: false, error: "invalid_auth" }),
+        conversationsList: async () => ({ ok: false, error: "missing_scope" }),
+      }),
+    });
+    const ctx = {
+      workspaceId: "ws1",
+      userId: "u1",
+      email: "alice@example.com",
+      groups: [],
+      roles: ["admin"],
+    };
+    const deps = { databaseUrl: "postgres://unused", rawMek: new Uint8Array([1]) };
+
+    const auth = await adapter.tools
+      .find((tool) => tool.descriptor.name === "pact.slack.auth.test")
+      ?.handler({}, ctx, deps);
+    expect(auth?.isError).toBe(true);
+    expect(auth?.content[0]?.text).toBe("Slack API error: invalid_auth");
+
+    const channels = await adapter.tools
+      .find((tool) => tool.descriptor.name === "pact.slack.channels.list")
+      ?.handler({}, ctx, deps);
+    expect(channels?.isError).toBe(true);
+    expect(channels?.content[0]?.text).toBe("Slack API error: missing_scope");
+  });
+
   it("adapter channel listing rejects non-public Slack surfaces", async () => {
     const adapter = createSlackAdapter({
       loadBotToken: async () => "xoxb-test",

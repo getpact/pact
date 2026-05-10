@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type Adapter, buildToolRegistry, errorResult, json } from "../index.js";
+import {
+  type Adapter,
+  buildToolRegistry,
+  defaultToolAuthorization,
+  errorResult,
+  json,
+} from "../index.js";
 
 describe("adapter sdk", () => {
   const sample: Adapter = {
@@ -32,5 +38,12 @@ describe("adapter sdk", () => {
     const r = errorResult("nope");
     expect(r.isError).toBe(true);
     expect(r.content[0]?.text).toBe("nope");
+  });
+
+  it("builds default tool authorization", () => {
+    expect(defaultToolAuthorization("sample.echo")).toEqual({
+      action: "tool:sample.echo",
+      resource: "tool:sample.echo",
+    });
   });
 });

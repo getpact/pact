@@ -1,3 +1,4 @@
+import { defaultToolAuthorization } from "@getpact/adapter-sdk";
 import type { AuthContext } from "./auth.js";
 import { listTools, registry, type Tool, type ToolDeps } from "./tools.js";
 import type { VerifyClient } from "./verify-client.js";
@@ -66,7 +67,7 @@ export const handleMcp = async (
       const tool = toolRegistry.get(name);
       if (!tool) return err(id, -32601, `unknown tool: ${name}`);
 
-      const resource = `tool:${name}`;
+      const authorization = tool.authorize?.(args, ctx) ?? defaultToolAuthorization(name);
       if (!opts.verify) {
         return err(id, -32002, "verifier unavailable");
       }
@@ -76,8 +77,8 @@ export const handleMcp = async (
         try {
           verdict = await opts.verify({
             token: ctx.token,
-            action: `tool:${name}`,
-            resource,
+            action: authorization.action,
+            resource: authorization.resource,
             audience: opts.audience,
           });
         } catch {

@@ -74,6 +74,10 @@ describe("mcp handler registry injection", () => {
             description: "Echo test input.",
             inputSchema: { type: "object" as const },
           },
+          authorize: () => ({
+            action: "test.echo",
+            resource: "test:echo",
+          }),
           handler: async (args: Record<string, unknown>) => ({
             content: [{ type: "text" as const, text: JSON.stringify(args) }],
           }),
@@ -117,8 +121,8 @@ describe("mcp handler registry injection", () => {
     });
     expect(verify).toHaveBeenCalledWith({
       token: "token-1",
-      action: "tool:test.echo",
-      resource: "tool:test.echo",
+      action: "test.echo",
+      resource: "test:echo",
       audience: "pact-mcp",
     });
   });
