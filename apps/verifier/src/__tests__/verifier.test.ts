@@ -4,7 +4,7 @@ import { auditEvents, policies, revokedJtis, workspaces } from "@getpact/db/sche
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
-import { type KVNamespace } from "../cache.js";
+import type { KVNamespace } from "../cache.js";
 import app from "../index.js";
 
 type KvSpy = {
