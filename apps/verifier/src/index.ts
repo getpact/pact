@@ -30,7 +30,7 @@ app.use("/v1/*", bodyLimit({ maxSize: 16 * 1024 }));
 app.get("/health", (c) => c.json({ ok: true }));
 
 export const allowedAudiences = (env: Pick<Env, "VERIFIER_AUDIENCE" | "VERIFIER_AUDIENCES">) =>
-  (env.VERIFIER_AUDIENCES ?? env.VERIFIER_AUDIENCE ?? "pact-mcp,pact-gateway")
+  (env.VERIFIER_AUDIENCES ?? env.VERIFIER_AUDIENCE ?? "pact-mcp")
     .split(",")
     .map((v) => v.trim())
     .filter((v) => v.length > 0);

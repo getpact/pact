@@ -37,6 +37,10 @@ const url = process.env.DATABASE_URL;
 const run = url ? describe : describe.skip;
 
 describe("verifier audience config", () => {
+  it("defaults to the MCP audience only", () => {
+    expect(allowedAudiences({})).toEqual(["pact-mcp"]);
+  });
+
   it("parses the allowed audience list", () => {
     expect(allowedAudiences({ VERIFIER_AUDIENCES: "pact-mcp, pact-gateway" })).toEqual([
       "pact-mcp",
