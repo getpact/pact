@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Fail CI if any test file that is supposed to require a real database was skipped.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { argv, exit } from "node:process";
 
@@ -30,13 +30,15 @@ const walk = (dir, out = []) => {
   return out;
 };
 
-const dbGated = walk("apps").concat(walk("packages")).filter((p) => {
-  const src = readFileSync(p, "utf8");
-  return (
-    (src.includes("process.env.DATABASE_URL") || src.includes("process.env.RLS_TEST_DB")) &&
-    src.includes("describe.skip")
-  );
-});
+const dbGated = walk("apps")
+  .concat(walk("packages"))
+  .filter((p) => {
+    const src = readFileSync(p, "utf8");
+    return (
+      (src.includes("process.env.DATABASE_URL") || src.includes("process.env.RLS_TEST_DB")) &&
+      src.includes("describe.skip")
+    );
+  });
 
 const missed = [];
 for (const file of dbGated) {

@@ -13,6 +13,11 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 - Queues: `pact-audit-archive`, `pact-oauth-refresh`
 - Vars on admin API and gateway: `UPSTREAM_HOST_ALLOWLIST` with comma-separated
   exact hosts or wildcard suffixes, for example `httpbin.org,*.slack.com`
+- Platform SSRF control for the gateway: outbound Worker traffic must be pinned
+  behind Cloudflare egress controls, Zero Trust Gateway, or equivalent network
+  policy that blocks private, link-local, metadata, and RFC1918 destinations
+  after DNS resolution. `UPSTREAM_HOST_ALLOWLIST` is required but is not enough
+  by itself because DNS rebinding can change where an allowed hostname resolves.
 - Gateway audit is required in production by default. Set
   `GATEWAY_AUDIT_MODE=best_effort` only for controlled non-critical smoke
   environments.
