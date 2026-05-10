@@ -1,3 +1,4 @@
+import { securityHeaders } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
@@ -9,6 +10,7 @@ type Env = {
   DATABASE_URL: string;
   MEK: string;
   ISSUER_BASE_URL: string;
+  ENVIRONMENT?: string;
   VERIFIER_AUDIENCE?: string;
   REVOCATION_CACHE?: KVNamespace;
 };
@@ -17,6 +19,11 @@ const app = new Hono<{ Bindings: Env }>();
 
 const logger = createLogger({ base: { app: "verifier" } });
 app.use("*", requestLogger(logger, "verifier"));
+app.use("*", async (c, next) => {
+  await next();
+  const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
+  for (const [k, v] of Object.entries(headers)) c.header(k, v);
+});
 app.use("/v1/*", bodyLimit({ maxSize: 16 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));

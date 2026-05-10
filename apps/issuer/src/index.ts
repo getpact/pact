@@ -1,4 +1,4 @@
-import type { Email } from "@getpact/core";
+import { type Email, securityHeaders } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
@@ -16,6 +16,11 @@ export const app = new Hono<{ Bindings: Env }>();
 
 const logger = createLogger({ base: { app: "issuer" } });
 app.use("*", requestLogger(logger, "issuer"));
+app.use("*", async (c, next) => {
+  await next();
+  const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
+  for (const [k, v] of Object.entries(headers)) c.header(k, v);
+});
 app.use("/v1/*", bodyLimit({ maxSize: 32 * 1024 }));
 
 const memLimiter = memoryRateLimiter();

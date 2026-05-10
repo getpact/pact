@@ -1,4 +1,4 @@
-import { PactError } from "@getpact/core";
+import { PactError, securityHeaders } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
@@ -10,6 +10,7 @@ import { httpVerifyClient } from "./verify-client.js";
 type Env = {
   DATABASE_URL: string;
   ISSUER_BASE_URL: string;
+  ENVIRONMENT?: string;
   MEK?: string;
   MCP_AUDIENCE?: string;
   VERIFIER_URL?: string;
@@ -19,6 +20,11 @@ const app = new Hono<{ Bindings: Env }>();
 
 const logger = createLogger({ base: { app: "mcp-server" } });
 app.use("*", requestLogger(logger, "mcp-server"));
+app.use("*", async (c, next) => {
+  await next();
+  const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
+  for (const [k, v] of Object.entries(headers)) c.header(k, v);
+});
 app.use("/:workspace/mcp", bodyLimit({ maxSize: 256 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));

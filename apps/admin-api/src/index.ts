@@ -1,4 +1,4 @@
-import { canonicalizeEmail, type Email, PactError } from "@getpact/core";
+import { canonicalizeEmail, type Email, PactError, securityHeaders } from "@getpact/core";
 import { createClient, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, invites, policies, revokedJtis, users } from "@getpact/db/schema";
 import { createLogger, requestLogger } from "@getpact/logger";
@@ -15,6 +15,7 @@ type Env = {
   DATABASE_URL: string;
   MEK: string;
   ISSUER_BASE_URL: string;
+  ENVIRONMENT?: string;
   ADMIN_AUDIENCE?: string;
   REVOCATION_CACHE?: KVNamespace;
 };
@@ -24,6 +25,11 @@ const app = new Hono<{ Bindings: Env }>();
 
 const logger = createLogger({ base: { app: "admin-api" } });
 app.use("*", requestLogger(logger, "admin-api"));
+app.use("*", async (c, next) => {
+  await next();
+  const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
+  for (const [k, v] of Object.entries(headers)) c.header(k, v);
+});
 app.use("/v1/*", bodyLimit({ maxSize: 64 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));

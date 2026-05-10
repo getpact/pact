@@ -1,4 +1,4 @@
-import { PactError } from "@getpact/core";
+import { PactError, securityHeaders } from "@getpact/core";
 import { createClient, withWorkspace } from "@getpact/db";
 import { auditChainState, workspaceSigningKeys, workspaces } from "@getpact/db/schema";
 import { createLogger, requestLogger } from "@getpact/logger";
@@ -12,6 +12,7 @@ import { parseCursor, queryEvents } from "./query.js";
 type Env = {
   DATABASE_URL: string;
   ISSUER_BASE_URL: string;
+  ENVIRONMENT?: string;
   AUDIT_AUDIENCE?: string;
 };
 type AppCtx = Context<{ Bindings: Env }>;
@@ -23,6 +24,11 @@ const app = new Hono<{ Bindings: Env }>();
 
 const logger = createLogger({ base: { app: "audit-api" } });
 app.use("*", requestLogger(logger, "audit-api"));
+app.use("*", async (c, next) => {
+  await next();
+  const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
+  for (const [k, v] of Object.entries(headers)) c.header(k, v);
+});
 app.use("/v1/*", bodyLimit({ maxSize: 16 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
