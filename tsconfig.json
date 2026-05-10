@@ -7,6 +7,7 @@
     { "path": "./packages/policy" },
     { "path": "./packages/audit" },
     { "path": "./packages/vault" },
+    { "path": "./packages/keystore" },
     { "path": "./packages/adapter-sdk" },
     { "path": "./packages/adapter-slack" },
     { "path": "./packages/adapter-drive" },
