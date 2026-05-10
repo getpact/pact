@@ -63,14 +63,23 @@ export const handleMcp = async (
       const tool = registry.get(name);
       if (!tool) return err(id, -32601, `unknown tool: ${name}`);
 
-      if (opts.verify) {
-        const resource = typeof args.resource === "string" ? args.resource : `tool:${name}`;
-        const verdict = await opts.verify({
-          token: ctx.token,
-          action: `tool:${name}`,
-          resource,
-          audience: opts.audience,
-        });
+      const resource = typeof args.resource === "string" ? args.resource : `tool:${name}`;
+      if (!opts.verify) {
+        return err(id, -32002, "verifier unavailable");
+      }
+
+      {
+        let verdict: Awaited<ReturnType<VerifyClient>>;
+        try {
+          verdict = await opts.verify({
+            token: ctx.token,
+            action: `tool:${name}`,
+            resource,
+            audience: opts.audience,
+          });
+        } catch {
+          return err(id, -32002, "verification failed");
+        }
         if (!verdict.allow) {
           return err(id, -32001, "denied", { reasons: verdict.reasons });
         }

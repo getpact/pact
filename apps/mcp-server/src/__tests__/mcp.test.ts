@@ -21,6 +21,7 @@ const buildEnv = async () => {
     GOOGLE_OAUTH_CLIENT_SECRET: "test",
     ISSUER_BASE_URL: "https://issuer.test/acme",
     ENVIRONMENT: "test",
+    ENABLE_DEV_ISSUE: "true",
     MCP_AUDIENCE: "pact-mcp",
   };
 };
@@ -89,7 +90,7 @@ run("mcp server", () => {
         },
         body: JSON.stringify(body),
       },
-      env,
+      { ISSUER_BASE_URL: "https://issuer.test/acme", ...env },
     );
 
   it("rejects requests without an Authorization header", async () => {
@@ -124,6 +125,20 @@ run("mcp server", () => {
     expect(body.result.serverInfo.name).toBe("pact-mcp");
   });
 
+  it("rejects a valid token on another workspace route", async () => {
+    const first = await setup();
+    const second = await setup();
+    const res = await callMcp(
+      second.slug,
+      first.token,
+      { jsonrpc: "2.0", id: 11, method: "initialize" },
+      {
+        DATABASE_URL: first.env.DATABASE_URL,
+      },
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("lists pact.whoami in tools/list", async () => {
     const { env, slug, token } = await setup();
     const res = await callMcp(
@@ -140,8 +155,8 @@ run("mcp server", () => {
     expect(names).toContain("pact.whoami");
   });
 
-  it("calls pact.whoami and returns claims", async () => {
-    const { env, slug, token, created } = await setup();
+  it("refuses tool calls when verifier is not configured", async () => {
+    const { env, slug, token } = await setup();
     const res = await callMcp(
       slug,
       token,
@@ -155,17 +170,10 @@ run("mcp server", () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      result: { content: Array<{ type: string; text: string }> };
+      error?: { code: number; message: string };
     };
-    const text = body.result.content[0]?.text ?? "";
-    const parsed = JSON.parse(text) as {
-      workspaceId: string;
-      email: string;
-      roles: string[];
-    };
-    expect(parsed.workspaceId).toBe(created.workspaceId);
-    expect(parsed.email).toBe("alice@example.com");
-    expect(parsed.roles).toEqual(["admin"]);
+    expect(body.error?.code).toBe(-32002);
+    expect(body.error?.message).toBe("verifier unavailable");
   });
 
   it("rejects unknown methods with -32601", async () => {
@@ -306,7 +314,11 @@ run("mcp server with verifier", () => {
       rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
     });
 
-    proxyEnv = { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK };
+    proxyEnv = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+    };
     const res = await app.request(
       `/${slug}/mcp`,
       {
@@ -322,7 +334,12 @@ run("mcp server with verifier", () => {
           params: { name: "pact.whoami", arguments: {} },
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL, VERIFIER_URL: verifierUrl, MCP_AUDIENCE: "pact-mcp" },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+        VERIFIER_URL: verifierUrl,
+        MCP_AUDIENCE: "pact-mcp",
+      },
     );
     const body = (await res.json()) as {
       result?: { content: Array<{ text: string }> };
@@ -337,7 +354,11 @@ run("mcp server with verifier", () => {
       rules: [{ subject: { kind: "role", value: "admin" }, effect: "deny" }],
     });
 
-    proxyEnv = { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK };
+    proxyEnv = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+    };
     const res = await app.request(
       `/${slug}/mcp`,
       {
@@ -353,7 +374,12 @@ run("mcp server with verifier", () => {
           params: { name: "pact.whoami", arguments: {} },
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL, VERIFIER_URL: verifierUrl, MCP_AUDIENCE: "pact-mcp" },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+        VERIFIER_URL: verifierUrl,
+        MCP_AUDIENCE: "pact-mcp",
+      },
     );
     const body = (await res.json()) as { error?: { code: number; data?: { reasons: string[] } } };
     expect(body.error?.code).toBe(-32001);

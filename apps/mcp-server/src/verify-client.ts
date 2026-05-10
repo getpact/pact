@@ -14,11 +14,22 @@ export type VerifyClient = (input: {
 export const httpVerifyClient =
   (verifierUrl: string): VerifyClient =>
   async (input) => {
-    const res = await fetch(`${verifierUrl.replace(/\/+$/, "")}/v1/verify`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    const body = (await res.json()) as VerifyResponse;
-    return body;
+    try {
+      const res = await fetch(`${verifierUrl.replace(/\/+$/, "")}/v1/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const body = (await res.json()) as Partial<VerifyResponse>;
+      if (typeof body.allow === "boolean" && Array.isArray(body.reasons)) {
+        return {
+          allow: body.allow,
+          reasons: body.reasons,
+          ...(typeof body.sub === "string" ? { sub: body.sub } : {}),
+        };
+      }
+      return { allow: false, reasons: [`verifier returned ${res.status}`] };
+    } catch {
+      return { allow: false, reasons: ["verifier unavailable"] };
+    }
   };

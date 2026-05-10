@@ -5,6 +5,7 @@ import { httpVerifyClient } from "./verify-client.js";
 
 type Env = {
   DATABASE_URL: string;
+  ISSUER_BASE_URL: string;
   MCP_AUDIENCE?: string;
   VERIFIER_URL?: string;
 };
@@ -24,6 +25,7 @@ app.post("/:workspace/mcp", async (c) => {
       workspace,
       c.req.header("Authorization"),
       audience,
+      c.env.ISSUER_BASE_URL,
     );
   } catch (e) {
     const message = e instanceof Error ? e.message : "auth failed";

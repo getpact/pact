@@ -1,6 +1,8 @@
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
+import { workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
+import { eq } from "drizzle-orm";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 
 export type AuthContext = {
@@ -18,8 +20,9 @@ export const authenticate = async (
   workspaceSlug: string,
   authHeader: string | undefined,
   audience: string,
+  issuer: string,
 ): Promise<AuthContext> => {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  if (!authHeader?.startsWith("Bearer ")) {
     throw new Error("missing or malformed Authorization header");
   }
   const token = authHeader.slice("Bearer ".length).trim();
@@ -33,8 +36,7 @@ export const authenticate = async (
   const workspaceId = claims.org as string | undefined;
   const sub = claims.sub;
   const jti = claims.jti as string | undefined;
-  const issuer = claims.iss as string | undefined;
-  if (!workspaceId || !sub || !jti || !issuer) {
+  if (!workspaceId || !sub || !jti) {
     throw new Error("missing required claims");
   }
 
@@ -42,6 +44,16 @@ export const authenticate = async (
   if (!kid) throw new Error("missing kid");
 
   const db = createClient(databaseUrl);
+  const [workspace] = await db
+    .select({ id: workspaces.id, slug: workspaces.slug })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  if (!workspace) throw new Error("unknown workspace");
+  if (workspaceSlug !== workspace.id && workspaceSlug !== workspace.slug) {
+    throw new Error("token workspace mismatch");
+  }
+
   const keys = await withWorkspace(db, workspaceId, (tx) =>
     listVerifyingKeys(tx, workspaceId, "jwt"),
   );
@@ -53,10 +65,6 @@ export const authenticate = async (
     issuer,
     audience,
   });
-
-  // Optional: cross-check workspace slug from URL matches the org claim.
-  // For now the slug -> id resolution is left to the caller; tests pass id directly.
-  void workspaceSlug;
 
   return {
     workspaceId,
