@@ -50,6 +50,20 @@
       "when": 1778375080125,
       "tag": "0006_fix_rls_empty_setting",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778376579415,
+      "tag": "0007_breezy_wasp",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778376589146,
+      "tag": "0008_rls_signing_keys",
+      "breakpoints": true
     }
   ]
 }

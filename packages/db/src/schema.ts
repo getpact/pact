@@ -272,3 +272,24 @@ export type AuditEvent = typeof auditEvents.$inferSelect;
 export type NewAuditEvent = typeof auditEvents.$inferInsert;
 export type AuditChainState = typeof auditChainState.$inferSelect;
 export type NewAuditChainState = typeof auditChainState.$inferInsert;
+
+export const workspaceSigningKeys = pgTable(
+  "workspace_signing_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    alg: text("alg").notNull().default("EdDSA"),
+    publicKeySpki: text("public_key_spki").notNull(),
+    privateKeyWrapped: text("private_key_wrapped").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    validForSigningUntil: timestamp("valid_for_signing_until", { withTimezone: true }),
+    validForVerificationUntil: timestamp("valid_for_verification_until", { withTimezone: true }),
+  },
+  (t) => [index("workspace_signing_keys_workspace_kind_idx").on(t.workspaceId, t.kind)],
+);
+
+export type WorkspaceSigningKey = typeof workspaceSigningKeys.$inferSelect;
+export type NewWorkspaceSigningKey = typeof workspaceSigningKeys.$inferInsert;
