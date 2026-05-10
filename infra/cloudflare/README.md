@@ -13,6 +13,25 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 - Queues: `pact-audit-archive`, `pact-oauth-refresh`
 - Secrets per environment: `MEK`, `RESEND_API_KEY`, `SENTRY_DSN`, `BETTERSTACK_TOKEN`, `GOOGLE_OAUTH_CLIENT_SECRET`
 
+## Deploy
+
+Run `pnpm deploy:cloudflare` from the repository root after bootstrap. The script
+validates Worker manifests, runs `pnpm typecheck`, runs `pnpm build`, then deploys
+issuer, verifier, MCP server, admin API, audit API, and proxy in order.
+
+After deploy, run a health smoke test:
+
+```sh
+PACT_ISSUER_URL=https://pact-issuer.<subdomain>.workers.dev \
+PACT_VERIFIER_URL=https://pact-verifier.<subdomain>.workers.dev \
+PACT_MCP_URL=https://pact-mcp-server.<subdomain>.workers.dev \
+pnpm smoke:cloudflare
+```
+
+Set `PACT_SMOKE_DEV_FLOW=true` plus `PACT_SMOKE_WORKSPACE_ID` and
+`PACT_SMOKE_WORKSPACE_SLUG` to exercise dev issue, verifier, and MCP initialize
+against a non-production environment.
+
 ## Bootstrap
 
 The bootstrap is manual until we move to Terraform. Steps:
