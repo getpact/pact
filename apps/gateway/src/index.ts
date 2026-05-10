@@ -224,6 +224,9 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
       : c.json({ error: "bad_gateway", message: "upstream request failed" }, 502);
   }
   clearTimeout(timer);
+  if (upstream.status >= 300 && upstream.status < 400) {
+    return c.json({ error: "bad_gateway", message: "upstream returned redirect" }, 502);
+  }
   return new Response(upstream.body, {
     status: upstream.status,
     headers: forwardedHeaders(upstream.headers),
