@@ -168,4 +168,33 @@ describe("Slack adapter", () => {
     expect(noToken?.isError).toBe(true);
     expect(noToken?.content[0]?.text).toBe("Slack bot token not found");
   });
+
+  it("adapter channel listing rejects non-public Slack surfaces", async () => {
+    const adapter = createSlackAdapter({
+      loadBotToken: async () => "xoxb-test",
+      createClient: () => ({
+        authTest: async () => ({ ok: true }),
+        conversationsList: async () => {
+          throw new Error("should not call Slack");
+        },
+      }),
+    });
+    const ctx = {
+      workspaceId: "ws1",
+      userId: "u1",
+      email: "alice@example.com",
+      groups: [],
+      roles: ["admin"],
+    };
+
+    const channels = await adapter.tools
+      .find((tool) => tool.descriptor.name === "pact.slack.channels.list")
+      ?.handler({ types: "private_channel,im" }, ctx, {
+        databaseUrl: "postgres://unused",
+        rawMek: new Uint8Array([1]),
+      });
+
+    expect(channels?.isError).toBe(true);
+    expect(channels?.content[0]?.text).toBe("Slack channel types are restricted to public_channel");
+  });
 });

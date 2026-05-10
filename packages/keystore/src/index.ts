@@ -75,6 +75,28 @@ export type ActiveSigningKey = {
   publicKey: CryptoKey;
 };
 
+const decryptPrivateKey = async (
+  tx: Tx,
+  row: typeof schema.workspaceSigningKeys.$inferSelect,
+  mek: CryptoKey,
+  workspaceId: string,
+  kind: SigningKeyKind,
+): Promise<Uint8Array> => {
+  const envelope = parse(row.privateKeyWrapped);
+  const aad = aadFor(workspaceId, kind);
+  try {
+    return await decryptAesGcm(mek, envelope, aad);
+  } catch {
+    const privBytes = await decryptAesGcm(mek, envelope);
+    const rewrapped = await encryptAesGcm(mek, privBytes, aad);
+    await tx
+      .update(schema.workspaceSigningKeys)
+      .set({ privateKeyWrapped: serialize(rewrapped) })
+      .where(eq(schema.workspaceSigningKeys.id, row.id));
+    return privBytes;
+  }
+};
+
 export const loadActiveSigningKey = async (
   tx: Tx,
   workspaceId: string,
@@ -101,11 +123,7 @@ export const loadActiveSigningKey = async (
   if (!row) throw new Error(`no active ${kind} signing key for workspace ${workspaceId}`);
 
   const mek = await importMek(rawMek);
-  const privBytes = await decryptAesGcm(
-    mek,
-    parse(row.privateKeyWrapped),
-    aadFor(workspaceId, kind),
-  );
+  const privBytes = await decryptPrivateKey(tx, row, mek, workspaceId, kind);
   const pubBytes = fromBase64(row.publicKeySpki);
   const privateKey = await importPrivatePkcs8(privBytes);
   const publicKey = await importPublicSpki(pubBytes);

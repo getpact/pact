@@ -1,5 +1,16 @@
-import { exportAesKey, generateAesKey, signEd25519, verifyEd25519 } from "@getpact/crypto";
-import { createClient, type DbClient, withWorkspace } from "@getpact/db";
+import {
+  encryptAesGcm,
+  exportAesKey,
+  exportPrivatePkcs8,
+  exportPublicSpki,
+  generateAesKey,
+  generateEd25519Keypair,
+  importAesKey,
+  signEd25519,
+  toBase64,
+  verifyEd25519,
+} from "@getpact/crypto";
+import { createClient, type DbClient, schema, withWorkspace } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -71,6 +82,44 @@ run("keystore", () => {
       loadActiveSigningKey(tx, workspaceId, "audit", rawMek),
     );
     expect(jwt.id).not.toBe(audit.id);
+  });
+
+  it("loads and rewraps legacy keys encrypted without AAD", async () => {
+    const pair = await generateEd25519Keypair();
+    const privBytes = await exportPrivatePkcs8(pair.privateKey);
+    const pubBytes = await exportPublicSpki(pair.publicKey);
+    const mek = await importAesKey(rawMek);
+    const wrapped = await encryptAesGcm(mek, privBytes);
+    const merged = new Uint8Array(wrapped.iv.length + wrapped.ciphertext.length);
+    merged.set(wrapped.iv, 0);
+    merged.set(wrapped.ciphertext, wrapped.iv.length);
+
+    const [legacy] = await withWorkspace(db, workspaceId, (tx) =>
+      tx
+        .insert(schema.workspaceSigningKeys)
+        .values({
+          workspaceId,
+          kind: "jwt",
+          publicKeySpki: toBase64(pubBytes),
+          privateKeyWrapped: toBase64(merged),
+        })
+        .returning({ id: schema.workspaceSigningKeys.id }),
+    );
+    if (!legacy) throw new Error("legacy key insert failed");
+
+    const active = await withWorkspace(db, workspaceId, (tx) =>
+      loadActiveSigningKey(tx, workspaceId, "jwt", rawMek),
+    );
+    expect(active.id).toBe(legacy.id);
+
+    await withWorkspace(db, workspaceId, async (tx) => {
+      const [row] = await tx
+        .select({ wrapped: schema.workspaceSigningKeys.privateKeyWrapped })
+        .from(schema.workspaceSigningKeys)
+        .where(eq(schema.workspaceSigningKeys.id, legacy.id))
+        .limit(1);
+      expect(row?.wrapped).not.toBe(toBase64(merged));
+    });
   });
 });
 

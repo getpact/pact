@@ -103,7 +103,7 @@ const parseLimit = (value: unknown): number | undefined =>
 const parseString = (value: unknown): string | undefined =>
   typeof value === "string" && value.length > 0 ? value : undefined;
 
-const parseSafeChannelTypes = (value: unknown): string | undefined => {
+const parseSafeChannelTypes = (value: unknown): string => {
   const parsed = parseString(value) ?? "public_channel";
   const types = parsed.split(",").map((v) => v.trim());
   if (types.every((type) => allowedChannelTypes.has(type))) return parsed;
