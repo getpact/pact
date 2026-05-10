@@ -1,5 +1,7 @@
+import { createSlackClient } from "@getpact/adapter-slack";
 import { createClient, withWorkspace } from "@getpact/db";
 import { auditEvents, policies, workspaces } from "@getpact/db/schema";
+import { loadSecretString } from "@getpact/vault";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { AuthContext } from "./auth.js";
 
@@ -16,6 +18,7 @@ export type ToolResult = {
 
 export type ToolDeps = {
   databaseUrl: string;
+  rawMek?: Uint8Array;
 };
 
 export type ToolHandler = (
@@ -159,11 +162,38 @@ const policyActive: Tool = {
   },
 };
 
+const slackAuthTest: Tool = {
+  descriptor: {
+    name: "pact.slack.auth.test",
+    description: "Verify the workspace Slack bot token stored in Pact Vault.",
+    inputSchema: { type: "object" },
+  },
+  handler: async (_args, ctx, deps) => {
+    if (!deps.rawMek) {
+      return { content: [{ type: "text", text: "MEK is not configured" }], isError: true };
+    }
+    const db = createClient(deps.databaseUrl);
+    const token = await withWorkspace(db, ctx.workspaceId, (tx) =>
+      loadSecretString(tx, deps.rawMek as Uint8Array, {
+        workspaceId: ctx.workspaceId,
+        kind: "slack",
+        target: "bot-token",
+      }),
+    );
+    if (!token) {
+      return { content: [{ type: "text", text: "Slack bot token not found" }], isError: true };
+    }
+    const result = await createSlackClient({ token }).authTest();
+    return json(result);
+  },
+};
+
 export const registry: Map<string, Tool> = new Map([
   [whoami.descriptor.name, whoami],
   [workspaceInfo.descriptor.name, workspaceInfo],
   [auditRecent.descriptor.name, auditRecent],
   [policyActive.descriptor.name, policyActive],
+  [slackAuthTest.descriptor.name, slackAuthTest],
 ]);
 
 export const listTools = (): ToolDescriptor[] => [...registry.values()].map((t) => t.descriptor);

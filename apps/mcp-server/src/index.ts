@@ -1,4 +1,5 @@
 import { PactError } from "@getpact/core";
+import { fromBase64 } from "@getpact/crypto";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -9,6 +10,7 @@ import { httpVerifyClient } from "./verify-client.js";
 type Env = {
   DATABASE_URL: string;
   ISSUER_BASE_URL: string;
+  MEK?: string;
   MCP_AUDIENCE?: string;
   VERIFIER_URL?: string;
 };
@@ -46,7 +48,10 @@ app.post("/:workspace/mcp", async (c) => {
   const verify = c.env.VERIFIER_URL ? httpVerifyClient(c.env.VERIFIER_URL) : undefined;
   const response = await handleMcp(body, ctx, {
     audience,
-    deps: { databaseUrl: c.env.DATABASE_URL },
+    deps: {
+      databaseUrl: c.env.DATABASE_URL,
+      ...(c.env.MEK ? { rawMek: fromBase64(c.env.MEK) } : {}),
+    },
     ...(verify ? { verify } : {}),
   });
   return c.json(response);
