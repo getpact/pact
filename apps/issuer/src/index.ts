@@ -2,6 +2,7 @@ import type { Email } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
 import { exchangeGoogleCode } from "./google.js";
 import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
@@ -9,6 +10,8 @@ import { buildWorkspaceJwks } from "./jwks.js";
 import { createWorkspace } from "./workspace.js";
 
 export const app = new Hono<{ Bindings: Env }>();
+
+app.use("/v1/*", bodyLimit({ maxSize: 32 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
 

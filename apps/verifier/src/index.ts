@@ -1,5 +1,6 @@
 import { fromBase64 } from "@getpact/crypto";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { type KVNamespace, kvRevocationCache } from "./cache.js";
 import { verifyAction } from "./verify.js";
 
@@ -11,6 +12,8 @@ type Env = {
 };
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.use("/v1/*", bodyLimit({ maxSize: 16 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
 
