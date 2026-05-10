@@ -1,8 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { policies, workspaces } from "@getpact/db/schema";
+import {
+  buildTestEnv,
+  createTestWorkspace,
+  issueTestToken,
+  uniqueSlug,
+} from "@getpact/test-helpers";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
@@ -46,20 +51,6 @@ describe("mcp server auth hardening", () => {
   });
 });
 
-const buildEnv = async () => {
-  const mek = await generateAesKey();
-  return {
-    DATABASE_URL: url as string,
-    MEK: toBase64(await exportAesKey(mek)),
-    GOOGLE_OAUTH_CLIENT_ID: "test",
-    GOOGLE_OAUTH_CLIENT_SECRET: "test",
-    ISSUER_BASE_URL: "https://issuer.test/acme",
-    ENVIRONMENT: "test",
-    ENABLE_DEV_ISSUE: "true",
-    MCP_AUDIENCE: "pact-mcp",
-  };
-};
-
 run("mcp server", () => {
   const adminDb = createClient(url as string);
   const cleanup: string[] = [];
@@ -77,34 +68,18 @@ run("mcp server", () => {
   });
 
   const setup = async () => {
-    const env = await buildEnv();
-    const slug = `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const createRes = await issuer.request(
-      "/v1/workspaces",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slug, name: "MCP", adminEmail: "alice@example.com" }),
-      },
-      env,
-    );
-    const created = (await createRes.json()) as { workspaceId: string };
+    const env = await buildTestEnv(url as string);
+    const slug = uniqueSlug("mcp");
+    const created = await createTestWorkspace(issuer, env, {
+      slug,
+      adminEmail: "alice@example.com",
+    });
     cleanup.push(created.workspaceId);
-
-    const issueRes = await issuer.request(
-      "/v1/dev/issue",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId: created.workspaceId,
-          email: "alice@example.com",
-          audience: "pact-mcp",
-        }),
-      },
-      env,
-    );
-    const issued = (await issueRes.json()) as { token: string };
+    const issued = await issueTestToken(issuer, env, {
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: env.MCP_AUDIENCE,
+    });
     return { env, slug, created, token: issued.token };
   };
 
@@ -303,18 +278,12 @@ run("mcp server with verifier", () => {
   });
 
   const setupWithPolicy = async (policyBody: unknown) => {
-    const env = await buildEnv();
-    const slug = `mcpv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const createRes = await issuer.request(
-      "/v1/workspaces",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slug, name: "MCPV", adminEmail: "alice@example.com" }),
-      },
-      env,
-    );
-    const created = (await createRes.json()) as { workspaceId: string; adminUserId: string };
+    const env = await buildTestEnv(url as string);
+    const slug = uniqueSlug("mcpv");
+    const created = await createTestWorkspace(issuer, env, {
+      slug,
+      adminEmail: "alice@example.com",
+    });
     cleanup.push(created.workspaceId);
 
     await withWorkspace(adminDb, created.workspaceId, (tx) =>
@@ -326,20 +295,11 @@ run("mcp server with verifier", () => {
       }),
     );
 
-    const issueRes = await issuer.request(
-      "/v1/dev/issue",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId: created.workspaceId,
-          email: "alice@example.com",
-          audience: "pact-mcp",
-        }),
-      },
-      env,
-    );
-    const issued = (await issueRes.json()) as { token: string };
+    const issued = await issueTestToken(issuer, env, {
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: env.MCP_AUDIENCE,
+    });
     return { env, slug, created, token: issued.token };
   };
 

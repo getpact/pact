@@ -1,6 +1,11 @@
-import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
 import { createClient } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
+import {
+  buildTestEnv,
+  createTestWorkspace,
+  issueTestToken,
+  uniqueSlug,
+} from "@getpact/test-helpers";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import adminApp from "../../../../apps/admin-api/src/index.js";
@@ -38,21 +43,6 @@ describe("audit api auth hardening", () => {
   });
 });
 
-const buildEnv = async () => {
-  const mek = await generateAesKey();
-  return {
-    DATABASE_URL: url as string,
-    MEK: toBase64(await exportAesKey(mek)),
-    GOOGLE_OAUTH_CLIENT_ID: "test",
-    GOOGLE_OAUTH_CLIENT_SECRET: "test",
-    ISSUER_BASE_URL: "https://issuer.test/acme",
-    ENVIRONMENT: "test",
-    ENABLE_DEV_ISSUE: "true",
-    ADMIN_AUDIENCE: "pact-admin",
-    AUDIT_AUDIENCE: "pact-audit",
-  };
-};
-
 run("audit api", () => {
   const adminDb = createClient(url as string);
   const cleanup: string[] = [];
@@ -70,48 +60,25 @@ run("audit api", () => {
   });
 
   const setup = async () => {
-    const env = await buildEnv();
-    const slug = `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const createRes = await issuer.request(
-      "/v1/workspaces",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slug, name: "Aud", adminEmail: "alice@example.com" }),
-      },
-      env,
-    );
-    const created = (await createRes.json()) as { workspaceId: string };
+    const env = await buildTestEnv(url as string);
+    const created = await createTestWorkspace(issuer, env, {
+      slug: uniqueSlug("aud"),
+      adminEmail: "alice@example.com",
+    });
     cleanup.push(created.workspaceId);
 
-    const adminTokenRes = await issuer.request(
-      "/v1/dev/issue",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId: created.workspaceId,
-          email: "alice@example.com",
-          audience: "pact-admin",
-        }),
-      },
-      env,
-    );
-    const auditTokenRes = await issuer.request(
-      "/v1/dev/issue",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId: created.workspaceId,
-          email: "alice@example.com",
-          audience: "pact-audit",
-        }),
-      },
-      env,
-    );
-    const adminToken = ((await adminTokenRes.json()) as { token: string }).token;
-    const auditToken = ((await auditTokenRes.json()) as { token: string }).token;
+    const admin = await issueTestToken(issuer, env, {
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: env.ADMIN_AUDIENCE,
+    });
+    const audit = await issueTestToken(issuer, env, {
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: env.AUDIT_AUDIENCE,
+    });
+    const adminToken = admin.token;
+    const auditToken = audit.token;
 
     // Generate a few audit events via admin user.created.
     for (const email of ["a@example.com", "b@example.com", "c@example.com"]) {

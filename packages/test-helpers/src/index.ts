@@ -84,8 +84,10 @@ export type IssueTestTokenInput = {
 
 export type IssuedTestToken = {
   token: string;
-  refreshToken: string;
+  jti: string;
   exp: number;
+  userId: string;
+  refreshToken: string;
   refreshExpiresAt: string;
 };
 
