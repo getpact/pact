@@ -1,4 +1,5 @@
 import {
+  assertAllowedUpstreamHost,
   assertSafeUpstreamUrl,
   ConflictError,
   canonicalizeEmail,
@@ -33,6 +34,7 @@ type Env = {
   ISSUER_BASE_URL: string;
   ENVIRONMENT?: string;
   ADMIN_AUDIENCE?: string;
+  UPSTREAM_HOST_ALLOWLIST?: string;
   REVOCATION_CACHE?: KVNamespace;
 };
 type AppCtx = Context<{ Bindings: Env }>;
@@ -333,7 +335,10 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
       throw new ValidationError("invalid kind");
     }
     if (typeof body.baseUrl !== "string") throw new ValidationError("baseUrl required");
-    assertSafeUpstreamUrl(body.baseUrl);
+    const upstreamUrl = assertSafeUpstreamUrl(body.baseUrl);
+    assertAllowedUpstreamHost(upstreamUrl, c.env.UPSTREAM_HOST_ALLOWLIST, {
+      required: c.env.ENVIRONMENT === "production",
+    });
     const authScheme = body.authScheme ?? "none";
     if (authScheme !== "none") throw new ValidationError("only authScheme=none supported");
     const scopeTemplate = body.scopeInjectionTemplate ?? {};

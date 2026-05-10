@@ -64,6 +64,12 @@ describe("gateway", () => {
     expect(() => buildGatewayTarget("https://service.local", "v1/pages", "")).toThrow(
       "upstream host not allowed",
     );
+    expect(() =>
+      buildGatewayTarget("https://api.example.com", "v1/pages", "", "other.example.com"),
+    ).toThrow("upstream host not allowed by allowlist");
+    expect(() => buildGatewayTarget("https://api.example.com", "v1/pages", "", "", true)).toThrow(
+      "upstream host allowlist required",
+    );
   });
 
   it("rejects paths that escape the upstream base", () => {

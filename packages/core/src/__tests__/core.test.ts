@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertSafeUpstreamUrl, isPrivateHost } from "../index.js";
+import { assertAllowedUpstreamHost, assertSafeUpstreamUrl, isPrivateHost } from "../index.js";
 
 describe("upstream URL validation", () => {
   it("allows public HTTPS upstream URLs", () => {
@@ -27,5 +27,17 @@ describe("upstream URL validation", () => {
       "upstream credentials forbidden",
     );
     expect(() => assertSafeUpstreamUrl("https://127.0.0.1")).toThrow("upstream host not allowed");
+  });
+
+  it("enforces upstream host allowlists", () => {
+    const url = assertSafeUpstreamUrl("https://api.example.com/base");
+    expect(() => assertAllowedUpstreamHost(url, "api.example.com")).not.toThrow();
+    expect(() => assertAllowedUpstreamHost(url, "*.example.com")).not.toThrow();
+    expect(() => assertAllowedUpstreamHost(url, "other.example.com")).toThrow(
+      "upstream host not allowed by allowlist",
+    );
+    expect(() => assertAllowedUpstreamHost(url, undefined, { required: true })).toThrow(
+      "upstream host allowlist required",
+    );
   });
 });

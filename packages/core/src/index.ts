@@ -87,6 +87,36 @@ export const assertSafeUpstreamUrl = (raw: string): URL => {
   return url;
 };
 
+const allowlistPatterns = (raw: string | undefined): string[] =>
+  raw
+    ?.split(",")
+    .map((v) => v.trim().toLowerCase())
+    .filter((v) => v.length > 0) ?? [];
+
+const hostMatchesPattern = (host: string, pattern: string): boolean => {
+  if (pattern.startsWith("*.")) {
+    const suffix = pattern.slice(2);
+    return host.endsWith(`.${suffix}`);
+  }
+  return host === pattern;
+};
+
+export const assertAllowedUpstreamHost = (
+  url: URL,
+  rawAllowlist: string | undefined,
+  opts: { required?: boolean } = {},
+): void => {
+  const patterns = allowlistPatterns(rawAllowlist);
+  if (patterns.length === 0) {
+    if (opts.required) throw new ValidationError("upstream host allowlist required");
+    return;
+  }
+  const host = url.hostname.toLowerCase();
+  if (!patterns.some((pattern) => hostMatchesPattern(host, pattern))) {
+    throw new ValidationError("upstream host not allowed by allowlist");
+  }
+};
+
 export const securityHeaders = (opts: SecurityHeaderOptions = {}): Record<string, string> => ({
   "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
   "cross-origin-resource-policy": "same-origin",

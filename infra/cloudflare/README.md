@@ -11,6 +11,8 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 - Durable Object class: `WorkspaceChainLock` (registered in `apps/audit-api/wrangler.toml`)
 - R2 buckets: `pact-audit-prod`, `pact-audit-staging`
 - Queues: `pact-audit-archive`, `pact-oauth-refresh`
+- Vars on admin API and gateway: `UPSTREAM_HOST_ALLOWLIST` with comma-separated
+  exact hosts or wildcard suffixes, for example `httpbin.org,*.slack.com`
 - Secrets per environment: `MEK`, `RESEND_API_KEY`, `SENTRY_DSN`, `BETTERSTACK_TOKEN`, `GOOGLE_OAUTH_CLIENT_SECRET`
 
 ## Deploy
@@ -38,7 +40,9 @@ against a non-production environment.
 Set `PACT_SMOKE_GATEWAY_FLOW=true` to also exercise Mode B gateway traffic. The
 workspace must already have an active policy that allows `gateway.get` on the
 configured gateway resource. To seed the brain during smoke, also set
-`PACT_ADMIN_API_URL` and `PACT_SMOKE_GATEWAY_BASE_URL`, for example:
+`PACT_ADMIN_API_URL` and `PACT_SMOKE_GATEWAY_BASE_URL`; the smoke upstream host
+must be present in `UPSTREAM_HOST_ALLOWLIST` for both admin API and gateway. For
+example:
 
 ```sh
 PACT_SMOKE_DEV_FLOW=true \

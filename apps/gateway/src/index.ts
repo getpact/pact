@@ -1,4 +1,9 @@
-import { assertSafeUpstreamUrl, isUuid, securityHeaders } from "@getpact/core";
+import {
+  assertAllowedUpstreamHost,
+  assertSafeUpstreamUrl,
+  isUuid,
+  securityHeaders,
+} from "@getpact/core";
 import { createClient, schema, withWorkspace } from "@getpact/db";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { and, eq } from "drizzle-orm";
@@ -17,6 +22,7 @@ type Env = {
   GATEWAY_UPSTREAM_TIMEOUT_MS?: string;
   GATEWAY_RATE_LIMIT?: string;
   GATEWAY_RATE_WINDOW_SECONDS?: string;
+  UPSTREAM_HOST_ALLOWLIST?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -49,8 +55,15 @@ type VerifyOutput = {
   reasons: string[];
 };
 
-export const buildGatewayTarget = (baseUrl: string, path: string, search: string): URL => {
+export const buildGatewayTarget = (
+  baseUrl: string,
+  path: string,
+  search: string,
+  allowlist?: string,
+  requireAllowlist = false,
+): URL => {
   const target = assertSafeUpstreamUrl(baseUrl);
+  assertAllowedUpstreamHost(target, allowlist, { required: requireAllowlist });
   const basePath = target.pathname.endsWith("/") ? target.pathname : `${target.pathname}/`;
   const cleanPath = path.replace(/^\/+/, "");
   for (const segment of cleanPath.split("/")) {
@@ -295,7 +308,13 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   let target: URL;
   try {
     const requestUrl = new URL(c.req.url);
-    target = buildGatewayTarget(brain.baseUrl, path, requestUrl.search);
+    target = buildGatewayTarget(
+      brain.baseUrl,
+      path,
+      requestUrl.search,
+      c.env.UPSTREAM_HOST_ALLOWLIST,
+      c.env.ENVIRONMENT === "production",
+    );
   } catch (e) {
     const message = e instanceof Error ? e.message : "invalid gateway upstream";
     await audit({ decision: "deny", outcome: "invalid_upstream", reasons: [message] });
