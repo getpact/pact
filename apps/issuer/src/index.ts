@@ -1,4 +1,6 @@
 import type { Email } from "@getpact/core";
+import { createClient } from "@getpact/db";
+import { rotateStaleKeys } from "@getpact/keystore";
 import { Hono } from "hono";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
 import { exchangeGoogleCode } from "./google.js";
@@ -6,7 +8,7 @@ import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
 import { createWorkspace } from "./workspace.js";
 
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
 
 app.get("/health", (c) => c.json({ ok: true }));
 
@@ -108,5 +110,34 @@ app.get("/v1/workspaces/:id/.well-known/audit-jwks.json", async (c) => {
   const jwks = await buildWorkspaceJwks(c.env.DATABASE_URL, id, "audit");
   return c.json(jwks, 200, { "cache-control": "public, max-age=300" });
 });
+
+const JWT_KEY_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
+const AUDIT_KEY_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+const VERIFICATION_GRACE_SECONDS = 7 * 24 * 60 * 60;
+
+export const rotateAllStale = async (
+  env: Env,
+): Promise<{
+  jwt: { rotated: number; errors: number };
+  audit: { rotated: number; errors: number };
+}> => {
+  const rawMek = decodeMek(env);
+  const db = createClient(env.DATABASE_URL);
+  const jwt = await rotateStaleKeys(
+    db,
+    rawMek,
+    "jwt",
+    JWT_KEY_MAX_AGE_SECONDS,
+    VERIFICATION_GRACE_SECONDS,
+  );
+  const audit = await rotateStaleKeys(
+    db,
+    rawMek,
+    "audit",
+    AUDIT_KEY_MAX_AGE_SECONDS,
+    VERIFICATION_GRACE_SECONDS,
+  );
+  return { jwt, audit };
+};
 
 export default app;
