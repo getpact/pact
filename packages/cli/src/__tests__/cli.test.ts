@@ -56,3 +56,39 @@ describe("cli config", () => {
     expect(mode).toBe(0o600);
   });
 });
+
+describe("oauth helpers", () => {
+  it("generatePkce returns base64url verifier and sha256 challenge", async () => {
+    const { generatePkce } = await import("../oauth.js");
+    const pair = await generatePkce();
+    expect(pair.codeVerifier).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(pair.codeChallenge).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(pair.codeChallenge.length).toBe(43);
+  });
+
+  it("newState produces unique values", async () => {
+    const { newState } = await import("../oauth.js");
+    const a = newState();
+    const b = newState();
+    expect(a).not.toBe(b);
+    expect(a.length).toBeGreaterThan(0);
+  });
+
+  it("buildGoogleAuthorizeUrl includes pkce and scopes", async () => {
+    const { buildGoogleAuthorizeUrl } = await import("../oauth.js");
+    const url = new URL(
+      buildGoogleAuthorizeUrl({
+        clientId: "abc.apps.googleusercontent.com",
+        redirectUri: "http://127.0.0.1:9999/callback",
+        codeChallenge: "challenge",
+        state: "stateval",
+      }),
+    );
+    expect(url.host).toBe("accounts.google.com");
+    expect(url.searchParams.get("client_id")).toBe("abc.apps.googleusercontent.com");
+    expect(url.searchParams.get("code_challenge")).toBe("challenge");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("state")).toBe("stateval");
+    expect(url.searchParams.get("scope")).toContain("openid");
+  });
+});
