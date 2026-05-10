@@ -217,11 +217,12 @@ run("mcp server with verifier", () => {
       });
       req.on("end", async () => {
         try {
+          const method = req.method ?? "POST";
           const init: RequestInit = {
-            method: req.method,
+            method,
             headers: { "content-type": "application/json" },
           };
-          if (req.method !== "GET" && req.method !== "HEAD") init.body = body;
+          if (method !== "GET" && method !== "HEAD") init.body = body;
           const upstreamRes = await verifier.request(req.url ?? "/", init, proxyEnv);
           const text = await upstreamRes.text();
           res.writeHead(upstreamRes.status, {
