@@ -69,6 +69,7 @@ const tryAudit = async (
 export type VerifyDeps = {
   databaseUrl: string;
   rawMek: Uint8Array;
+  issuer: string;
   cache?: RevocationCache;
 };
 
@@ -82,9 +83,8 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
   }
   const workspaceId = claims.org as string | undefined;
   const jti = claims.jti as string | undefined;
-  const issuer = claims.iss as string | undefined;
   const sub = claims.sub;
-  if (!workspaceId || !jti || !issuer) {
+  if (!workspaceId || !jti) {
     return result(false, ["malformed token"], sub);
   }
 
@@ -111,7 +111,7 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
   try {
     await verifyJwt(input.token, {
       publicKey: matched.publicKey,
-      issuer,
+      issuer: deps.issuer,
       audience: input.audience,
     });
   } catch {

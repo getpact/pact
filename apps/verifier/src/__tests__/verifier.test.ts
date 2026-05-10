@@ -41,6 +41,7 @@ const buildEnv = async () => {
     GOOGLE_OAUTH_CLIENT_SECRET: "test",
     ISSUER_BASE_URL: "https://issuer.test/acme",
     ENVIRONMENT: "test",
+    ENABLE_DEV_ISSUE: "true",
   };
 };
 
@@ -119,7 +120,7 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ISSUER_BASE_URL: env.ISSUER_BASE_URL },
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { allow: boolean; reasons: string[] };
@@ -145,7 +146,7 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ISSUER_BASE_URL: env.ISSUER_BASE_URL },
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { allow: boolean };
@@ -178,7 +179,7 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ISSUER_BASE_URL: env.ISSUER_BASE_URL },
     );
     expect(res.status).toBe(403);
     const body = (await res.json()) as { allow: boolean; reasons: string[] };
@@ -203,7 +204,7 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ISSUER_BASE_URL: env.ISSUER_BASE_URL },
     );
 
     const events = await withWorkspace(db, created.workspaceId, (tx) =>
@@ -246,7 +247,7 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ISSUER_BASE_URL: env.ISSUER_BASE_URL },
     );
 
     const events = await withWorkspace(db, created.workspaceId, (tx) =>
@@ -281,7 +282,7 @@ run("verifier", () => {
           audience: "pact-mcp",
         }),
       },
-      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ISSUER_BASE_URL: env.ISSUER_BASE_URL },
     );
 
     const events = await withWorkspace(db, created.workspaceId, (tx) =>
@@ -310,6 +311,7 @@ run("verifier", () => {
     const envWithKv = {
       DATABASE_URL: env.DATABASE_URL,
       MEK: env.MEK,
+      ISSUER_BASE_URL: env.ISSUER_BASE_URL,
       REVOCATION_CACHE: kv.binding,
     };
 
@@ -341,7 +343,11 @@ run("verifier", () => {
   });
 
   it("rejects malformed token", async () => {
-    const env = { DATABASE_URL: url as string, MEK: "" };
+    const env = {
+      DATABASE_URL: url as string,
+      MEK: "",
+      ISSUER_BASE_URL: "https://issuer.test/acme",
+    };
     const res = await app.request(
       "/v1/verify",
       {

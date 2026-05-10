@@ -6,6 +6,7 @@ import { verifyAction } from "./verify.js";
 type Env = {
   DATABASE_URL: string;
   MEK: string;
+  ISSUER_BASE_URL: string;
   REVOCATION_CACHE?: KVNamespace;
 };
 
@@ -23,7 +24,12 @@ app.post("/v1/verify", async (c) => {
   const rawMek = fromBase64(c.env.MEK);
   const cache = c.env.REVOCATION_CACHE ? kvRevocationCache(c.env.REVOCATION_CACHE) : undefined;
   const result = await verifyAction(
-    { databaseUrl: c.env.DATABASE_URL, rawMek, ...(cache ? { cache } : {}) },
+    {
+      databaseUrl: c.env.DATABASE_URL,
+      rawMek,
+      issuer: c.env.ISSUER_BASE_URL,
+      ...(cache ? { cache } : {}),
+    },
     body,
   );
   return c.json(result, result.allow ? 200 : 403);
