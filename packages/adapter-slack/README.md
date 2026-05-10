@@ -11,8 +11,8 @@ const slack = createSlackClient({ token: process.env.SLACK_BOT_TOKEN ?? "" });
 const result = await slack.authTest();
 ```
 
-The first implemented call is `auth.test`, used by the MCP tool
-`pact.slack.auth.test` to verify the workspace bot token stored in Pact Vault.
+Implemented calls include `auth.test` and `conversations.list`, exposed through
+the `pact.slack.auth.test` and `pact.slack.channels.list` MCP tools.
 
 ## Development
 

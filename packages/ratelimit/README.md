@@ -1,6 +1,6 @@
 # @getpact/ratelimit
 
-Hono middleware for fixed-window rate limiting. Two backends: in-memory (per-instance, cheap) and KV (eventually consistent, shared). For distributed Cloudflare deployments, use a database-backed limiter (the issuer ships one in `apps/issuer/src/rate-limit.ts`) for atomicity across edge nodes.
+Hono middleware for fixed-window rate limiting. The package currently exports an in-memory backend for tests and local development. For distributed Cloudflare deployments, use a database-backed limiter for atomicity across edge nodes.
 
 ```ts
 import { memoryRateLimiter, rateLimit } from "@getpact/ratelimit";

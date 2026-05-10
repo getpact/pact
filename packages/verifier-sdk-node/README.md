@@ -1,4 +1,4 @@
-# @getpact/verifier-sdk-node
+# @getpact/verifier-sdk
 
 Verify pact JWTs and audit chains in Node.js and edge runtimes.
 
