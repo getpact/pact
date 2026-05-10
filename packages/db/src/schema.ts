@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   index,
   integer,
   jsonb,
@@ -122,11 +123,17 @@ export const refreshTokens = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     ciphertext: text("ciphertext").notNull(),
+    audience: text("audience").notNull().default("pact-mcp"),
+    accessJti: text("access_jti"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("refresh_tokens_user_idx").on(t.userId)],
+  (t) => [
+    index("refresh_tokens_user_idx").on(t.userId),
+    index("refresh_tokens_access_jti_idx").on(t.workspaceId, t.accessJti),
+  ],
 );
 
 export const revokedJtis = pgTable(
@@ -246,6 +253,7 @@ export const auditEvents = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    auditSeq: bigint("audit_seq", { mode: "number" }).notNull(),
     ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
     actorKind: text("actor_kind").notNull(),
     actorId: text("actor_id"),
@@ -259,6 +267,7 @@ export const auditEvents = pgTable(
     signature: text("signature").notNull(),
   },
   (t) => [
+    uniqueIndex("audit_events_workspace_seq_idx").on(t.workspaceId, t.auditSeq),
     index("audit_events_workspace_ts_idx").on(t.workspaceId, t.ts),
     index("audit_events_workspace_action_idx").on(t.workspaceId, t.action),
   ],

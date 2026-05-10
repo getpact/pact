@@ -1,6 +1,6 @@
 import type { Tx } from "@getpact/db";
 import { auditEvents } from "@getpact/db/schema";
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, lt, lte } from "drizzle-orm";
 
 export type QueryOrder = "asc" | "desc";
 
@@ -11,12 +11,13 @@ export type QueryInput = {
   until?: Date;
   limit: number;
   order?: QueryOrder;
-  cursor?: { ts: Date; thisHash: string };
+  cursor?: { auditSeq: number };
 };
 
 export type QueryRow = {
   id: string;
   workspaceId: string;
+  auditSeq: number;
   ts: Date;
   actorKind: string;
   actorId: string | null;
@@ -37,15 +38,13 @@ export type QueryOutput = {
 
 export const parseCursor = (raw: string | undefined): QueryInput["cursor"] => {
   if (!raw) return undefined;
-  const idx = raw.lastIndexOf(":");
-  if (idx <= 0) return undefined;
-  const ts = new Date(raw.slice(0, idx));
-  const thisHash = raw.slice(idx + 1);
-  if (Number.isNaN(ts.valueOf()) || !thisHash) return undefined;
-  return { ts, thisHash };
+  if (!/^[1-9]\d*$/.test(raw)) return undefined;
+  const auditSeq = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(auditSeq)) return undefined;
+  return { auditSeq };
 };
 
-export const formatCursor = (row: QueryRow): string => `${row.ts.toISOString()}:${row.thisHash}`;
+export const formatCursor = (row: QueryRow): string => String(row.auditSeq);
 
 export const queryEvents = async (tx: Tx, input: QueryInput): Promise<QueryOutput> => {
   const conditions = [eq(auditEvents.workspaceId, input.workspaceId)];
@@ -54,16 +53,14 @@ export const queryEvents = async (tx: Tx, input: QueryInput): Promise<QueryOutpu
   if (input.until) conditions.push(lte(auditEvents.ts, input.until));
   const order = input.order ?? "desc";
   if (input.cursor) {
-    const cmp = order === "asc" ? sql`>` : sql`<`;
     conditions.push(
-      sql`(${auditEvents.ts}, ${auditEvents.thisHash}) ${cmp} (${input.cursor.ts.toISOString()}, ${input.cursor.thisHash})`,
+      order === "asc"
+        ? gt(auditEvents.auditSeq, input.cursor.auditSeq)
+        : lt(auditEvents.auditSeq, input.cursor.auditSeq),
     );
   }
 
-  const orderClauses =
-    order === "asc"
-      ? [asc(auditEvents.ts), asc(auditEvents.thisHash)]
-      : [desc(auditEvents.ts), desc(auditEvents.thisHash)];
+  const orderClauses = order === "asc" ? [asc(auditEvents.auditSeq)] : [desc(auditEvents.auditSeq)];
 
   const rows = await tx
     .select()
@@ -80,6 +77,7 @@ export const queryEvents = async (tx: Tx, input: QueryInput): Promise<QueryOutpu
     events: trimmed.map((r) => ({
       id: r.id,
       workspaceId: r.workspaceId,
+      auditSeq: r.auditSeq,
       ts: r.ts,
       actorKind: r.actorKind,
       actorId: r.actorId,

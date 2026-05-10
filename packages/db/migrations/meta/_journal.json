@@ -85,6 +85,20 @@
       "when": 1778460000000,
       "tag": "0011_signing_keys_with_check",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778465000000,
+      "tag": "0012_refresh_token_audience",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778466000000,
+      "tag": "0013_audit_event_sequence",
+      "breakpoints": true
     }
   ]
 }

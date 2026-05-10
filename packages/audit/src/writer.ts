@@ -32,6 +32,12 @@ export const writeEvent = async (tx: Tx, opts: WriteEventOptions): Promise<Write
   const lockedRows = (await tx.execute(
     sql`SELECT last_hash FROM audit_chain_state WHERE workspace_id = ${opts.workspaceId} FOR UPDATE`,
   )) as unknown as Array<{ last_hash: string }>;
+  const seqRows = (await tx.execute(
+    sql`SELECT COALESCE(MAX(audit_seq), 0) + 1 AS audit_seq
+        FROM audit_events
+        WHERE workspace_id = ${opts.workspaceId}`,
+  )) as unknown as Array<{ audit_seq: number | string }>;
+  const auditSeq = Number(seqRows[0]?.audit_seq ?? 1);
 
   const prevHash =
     lockedRows[0]?.last_hash ??
@@ -59,10 +65,10 @@ export const writeEvent = async (tx: Tx, opts: WriteEventOptions): Promise<Write
 
   const inserted = (await tx.execute(
     sql`INSERT INTO audit_events (
-      workspace_id, ts, actor_kind, actor_id, action, target,
+      workspace_id, audit_seq, ts, actor_kind, actor_id, action, target,
       decision, supporting, signing_key_id, prev_hash, this_hash, signature
     ) VALUES (
-      ${opts.workspaceId}, ${ts.toISOString()}, ${opts.event.actorKind}, ${opts.event.actorId ?? null},
+      ${opts.workspaceId}, ${auditSeq}, ${ts.toISOString()}, ${opts.event.actorKind}, ${opts.event.actorId ?? null},
       ${opts.event.action}, ${JSON.stringify(opts.event.target)},
       ${opts.event.decision}, ${opts.event.supporting === undefined ? null : JSON.stringify(opts.event.supporting)},
       ${opts.signingKeyId}, ${prevHash}, ${thisHash}, ${signature}

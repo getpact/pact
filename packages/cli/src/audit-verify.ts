@@ -19,6 +19,10 @@ type WorkspaceResponse = {
   createdAt: string;
 };
 
+type ChainResponse = {
+  head: { lastHash: string; lastEventId: string | null; updatedAt?: string } | null;
+};
+
 const requireConfig = (cfg: CliConfig | null): CliConfig & { workspaceId: string } => {
   if (!cfg) throw new Error("not signed in. run pact init or pact login first.");
   if (!cfg.workspaceId) throw new Error("config missing workspaceId");
@@ -37,11 +41,16 @@ const getAuditToken = async (cfg: CliConfig & { workspaceId: string }): Promise<
   if (!cfg.refreshToken) {
     throw new Error("config missing refreshToken; run pact login again.");
   }
-  const issued = await refresh(issuerBase(cfg), {
-    workspaceId: cfg.workspaceId,
-    refreshToken: cfg.refreshToken,
-    audience: auditAudience(),
-  });
+  let issued: Awaited<ReturnType<typeof refresh>>;
+  try {
+    issued = await refresh(issuerBase(cfg), {
+      workspaceId: cfg.workspaceId,
+      refreshToken: cfg.refreshToken,
+      audience: auditAudience(),
+    });
+  } catch {
+    throw new Error("could not mint audit token; run pact login with PACT_AUDIENCE=pact-audit");
+  }
   await saveConfig({
     ...cfg,
     refreshToken: issued.refreshToken,
@@ -73,6 +82,7 @@ export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyRepor
     `${base}/v1/workspaces/${workspaceId}/audit/workspace`,
     token,
   );
+  const chain = await get<ChainResponse>(`${base}/v1/workspaces/${workspaceId}/audit/chain`, token);
   const keysRes = await get<KeysResponse>(`${base}/v1/workspaces/${workspaceId}/audit/keys`, token);
   const jwks: AuditJwks = {};
   for (const k of keysRes.keys) {
@@ -111,6 +121,12 @@ export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyRepor
   const result = await verifyChain(all, jwks, genesis);
   if (result.ok) {
     const head = all[all.length - 1]?.thisHash ?? genesis;
+    if (chain.head && chain.head.lastHash !== head) {
+      return { ok: false, brokenAt: { index: all.length, reason: "chain head mismatch" } };
+    }
+    if (!chain.head && all.length > 0) {
+      return { ok: false, brokenAt: { index: all.length - 1, reason: "missing chain head" } };
+    }
     return { ok: true, eventsChecked: all.length, head };
   }
   return result;

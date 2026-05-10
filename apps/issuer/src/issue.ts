@@ -101,6 +101,8 @@ export const issueTokenForEmail = async (
     const refresh: IssuedRefresh = await issueRefresh(tx, {
       workspaceId: input.workspaceId,
       userId: user.id,
+      audience: input.audience,
+      accessJti: access.jti,
       ttlSeconds: input.refreshTtlSeconds ?? DEFAULT_REFRESH_TTL,
     });
 
@@ -130,7 +132,7 @@ export const redeemRefreshAndIssue = async (
   const { redeemRefresh } = await import("./refresh.js");
   const db = createClient(databaseUrl);
   return withWorkspace(db, input.workspaceId, async (tx) => {
-    const redeemed = await redeemRefresh(tx, input.workspaceId, input.refreshToken);
+    const redeemed = await redeemRefresh(tx, input.workspaceId, input.refreshToken, input.audience);
     if (!redeemed) return null;
 
     const [user] = await tx.select().from(users).where(eq(users.id, redeemed.userId)).limit(1);
@@ -149,6 +151,8 @@ export const redeemRefreshAndIssue = async (
     const refresh = await issueRefresh(tx, {
       workspaceId: input.workspaceId,
       userId: user.id,
+      audience: input.audience,
+      accessJti: access.jti,
       ttlSeconds: input.refreshTtlSeconds ?? DEFAULT_REFRESH_TTL,
     });
 
