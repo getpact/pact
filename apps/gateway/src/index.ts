@@ -262,6 +262,49 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     return c.json({ error: "unauthorized", message: "workspace mismatch" }, 401);
   }
 
+  const auditTarget = {
+    resource: authz.resource,
+    brain: brainKind,
+    path: `/${path.replace(/^\/+/, "")}`,
+    query: canonicalGatewaySearch(requestUrl.search),
+    method: c.req.method,
+  };
+  let verdictRef: VerifyOutput | null = null;
+  const audit = async (input: {
+    action?: string;
+    decision: "allow" | "deny";
+    outcome: string;
+    upstreamStatus?: number;
+    reasons?: string[];
+  }) => {
+    const result = await emitGatewayAudit({
+      db,
+      mek: c.env.MEK,
+      workspaceId,
+      actorId: typeof claims.sub === "string" ? claims.sub : undefined,
+      action: input.action ?? authz.action,
+      decision: input.decision,
+      target: auditTarget,
+      supporting: {
+        outcome: input.outcome,
+        ...(verdictRef ? { verifierReasons: verdictRef.reasons } : {}),
+        ...(input.reasons ? { reasons: input.reasons } : {}),
+        ...(input.upstreamStatus !== undefined ? { upstreamStatus: input.upstreamStatus } : {}),
+      },
+    });
+    return result.ok || !gatewayAuditRequired(c.env) ? { ok: true as const } : result;
+  };
+  const auditFailure = (result: Awaited<ReturnType<typeof audit>>): Response | null =>
+    result.ok
+      ? null
+      : c.json(
+          {
+            error: "audit_unavailable",
+            message: `gateway audit is required (${result.reason})`,
+          },
+          503,
+        );
+
   const [brain] = await withWorkspace(db, workspaceId, (tx) =>
     tx
       .select({
@@ -279,6 +322,8 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
       .limit(1),
   );
   if (!brain) {
+    const failed = auditFailure(await audit({ decision: "deny", outcome: "brain_not_found" }));
+    if (failed) return failed;
     return c.json({ error: "not_found", message: "brain not found" }, 404);
   }
 
@@ -299,6 +344,8 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     c.header("x-ratelimit-remaining", String(verdictRate.remaining));
     c.header("x-ratelimit-reset", String(Math.ceil(verdictRate.resetAt / 1000)));
     if (!verdictRate.allowed) {
+      const failed = auditFailure(await audit({ decision: "deny", outcome: "rate_limited" }));
+      if (failed) return failed;
       const retry = Math.max(1, Math.ceil((verdictRate.resetAt - Date.now()) / 1000));
       c.header("retry-after", String(retry));
       return c.json({ error: "rate_limited", message: "too many requests" }, 429);
@@ -315,51 +362,12 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     },
     c.env.VERIFIER_SERVICE_TOKEN,
   );
+  verdictRef = verdict;
   if (!verdict.allow) {
+    const failed = auditFailure(await audit({ decision: "deny", outcome: "denied" }));
+    if (failed) return failed;
     return c.json({ error: "denied", reasons: verdict.reasons }, 403);
   }
-
-  const auditTarget = {
-    resource: authz.resource,
-    brain: brainKind,
-    path: `/${path.replace(/^\/+/, "")}`,
-    query: canonicalGatewaySearch(requestUrl.search),
-    method: c.req.method,
-  };
-  const audit = async (input: {
-    action?: string;
-    decision: "allow" | "deny";
-    outcome: string;
-    upstreamStatus?: number;
-    reasons?: string[];
-  }) => {
-    const result = await emitGatewayAudit({
-      db,
-      mek: c.env.MEK,
-      workspaceId,
-      actorId: typeof claims.sub === "string" ? claims.sub : undefined,
-      action: input.action ?? authz.action,
-      decision: input.decision,
-      target: auditTarget,
-      supporting: {
-        outcome: input.outcome,
-        verifierReasons: verdict.reasons,
-        ...(input.reasons ? { reasons: input.reasons } : {}),
-        ...(input.upstreamStatus !== undefined ? { upstreamStatus: input.upstreamStatus } : {}),
-      },
-    });
-    return result.ok || !gatewayAuditRequired(c.env) ? { ok: true as const } : result;
-  };
-  const auditFailure = (result: Awaited<ReturnType<typeof audit>>): Response | null =>
-    result.ok
-      ? null
-      : c.json(
-          {
-            error: "audit_unavailable",
-            message: `gateway audit is required (${result.reason})`,
-          },
-          503,
-        );
 
   let brainBearerToken: string | null = null;
   if (brain.authScheme === "bearer") {
