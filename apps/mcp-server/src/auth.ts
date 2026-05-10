@@ -1,4 +1,4 @@
-import { AuthError, isUuid, NotFoundError, ValidationError } from "@getpact/core";
+import { AuthError, isUuid, NotFoundError } from "@getpact/core";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { revokedJtis, workspaces } from "@getpact/db/schema";
@@ -47,7 +47,7 @@ export const authenticate = async (
     throw new AuthError("missing required claims");
   }
   if (!isUuid(workspaceId)) {
-    throw new ValidationError("malformed workspace id");
+    throw new AuthError("malformed workspace id");
   }
 
   let kid: string | undefined;

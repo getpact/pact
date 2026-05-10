@@ -1,4 +1,4 @@
-import { AuthError, AuthzError, isUuid, ValidationError } from "@getpact/core";
+import { AuthError, AuthzError, isUuid } from "@getpact/core";
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { revokedJtis } from "@getpact/db/schema";
@@ -47,7 +47,7 @@ export const authenticateAuditReader = async (
     throw new AuthError("token workspace mismatch");
   }
   if (!isUuid(workspaceId)) {
-    throw new ValidationError("malformed workspace id");
+    throw new AuthError("malformed workspace id");
   }
 
   let kid: string | undefined;
