@@ -82,18 +82,27 @@ const decryptPrivateKey = async (
   workspaceId: string,
   kind: SigningKeyKind,
 ): Promise<Uint8Array> => {
-  const envelope = parse(row.privateKeyWrapped);
   const aad = aadFor(workspaceId, kind);
   try {
-    return await decryptAesGcm(mek, envelope, aad);
+    return await decryptAesGcm(mek, parse(row.privateKeyWrapped), aad);
   } catch {
-    const privBytes = await decryptAesGcm(mek, envelope);
-    const rewrapped = await encryptAesGcm(mek, privBytes, aad);
-    await tx
-      .update(schema.workspaceSigningKeys)
-      .set({ privateKeyWrapped: serialize(rewrapped) })
-      .where(eq(schema.workspaceSigningKeys.id, row.id));
-    return privBytes;
+    const locked = (await tx.execute(
+      sql`SELECT private_key_wrapped FROM workspace_signing_keys
+          WHERE id = ${row.id}
+          FOR UPDATE`,
+    )) as Array<{ private_key_wrapped: string }>;
+    const current = locked[0]?.private_key_wrapped ?? row.privateKeyWrapped;
+    try {
+      return await decryptAesGcm(mek, parse(current), aad);
+    } catch {
+      const privBytes = await decryptAesGcm(mek, parse(current));
+      const rewrapped = await encryptAesGcm(mek, privBytes, aad);
+      await tx
+        .update(schema.workspaceSigningKeys)
+        .set({ privateKeyWrapped: serialize(rewrapped) })
+        .where(eq(schema.workspaceSigningKeys.id, row.id));
+      return privBytes;
+    }
   }
 };
 
