@@ -296,7 +296,7 @@ const isUniqueViolation = (value: unknown): boolean => pgErrorCode(value) === "2
 
 const isConstraintViolation = (value: unknown): boolean => {
   const code = pgErrorCode(value);
-  return code !== null && code.startsWith("23");
+  return code?.startsWith("23") ?? false;
 };
 
 const ensureSafeJsonKeys = (value: unknown, path = ""): void => {
@@ -319,13 +319,18 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
   if (!isContext(ctx)) return ctx;
 
   try {
-    const body = await c.req.json<{
+    let body: {
       kind: string;
       baseUrl: string;
       authScheme?: string;
       scopeInjectionTemplate?: unknown;
       responseFilter?: unknown;
-    }>();
+    };
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new ValidationError("invalid json body");
+    }
     if (!body || typeof body !== "object") {
       throw new ValidationError("request body must be an object");
     }

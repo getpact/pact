@@ -330,6 +330,39 @@ run("admin api", () => {
     expect(unsafeJson.status).toBe(400);
   });
 
+  it("rejects http brain baseUrl", async () => {
+    const { env, created, token } = await setup();
+    const res = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      token,
+      "POST",
+      { kind: "insecure", baseUrl: "http://api.example.com" },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects brain delete from a different workspace", async () => {
+    const a = await setup();
+    const b = await setup();
+    const create = await callAdmin(
+      `/v1/workspaces/${a.created.workspaceId}/brains`,
+      a.token,
+      "POST",
+      { kind: "victim", baseUrl: "https://api.example.com" },
+      { DATABASE_URL: a.env.DATABASE_URL, MEK: a.env.MEK, ADMIN_AUDIENCE: a.env.ADMIN_AUDIENCE },
+    );
+    const brain = (await create.json()) as { brain: { id: string } };
+    const del = await callAdmin(
+      `/v1/workspaces/${b.created.workspaceId}/brains/${brain.brain.id}`,
+      b.token,
+      "DELETE",
+      undefined,
+      { DATABASE_URL: b.env.DATABASE_URL, MEK: b.env.MEK, ADMIN_AUDIENCE: b.env.ADMIN_AUDIENCE },
+    );
+    expect(del.status).toBe(404);
+  });
+
   it("rejects malformed gateway brain request bodies", async () => {
     const { env, created, token } = await setup();
     const runtime = {
