@@ -1,6 +1,6 @@
 import { exportPublicSpki } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { listVerifyingKeys } from "@getpact/keystore";
+import { listVerifyingKeys, type SigningKeyKind } from "@getpact/keystore";
 
 type Jwk = {
   kty: "OKP";
@@ -22,10 +22,11 @@ const base64url = (bytes: Uint8Array): string => {
 export const buildWorkspaceJwks = async (
   databaseUrl: string,
   workspaceId: string,
+  kind: SigningKeyKind = "jwt",
 ): Promise<{ keys: Jwk[] }> => {
   const db = createClient(databaseUrl);
   return withWorkspace(db, workspaceId, async (tx) => {
-    const verifying = await listVerifyingKeys(tx, workspaceId, "jwt");
+    const verifying = await listVerifyingKeys(tx, workspaceId, kind);
     const keys = await Promise.all(
       verifying.map(async (k) => {
         const spki = await exportPublicSpki(k.publicKey);
