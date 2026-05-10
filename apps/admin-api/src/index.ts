@@ -1,5 +1,6 @@
 import {
   assertSafeUpstreamUrl,
+  ConflictError,
   canonicalizeEmail,
   type Email,
   PactError,
@@ -285,6 +286,11 @@ app.post("/v1/workspaces/:id/invites", async (c) => {
 
 const KIND_RE = /^[a-z][a-z0-9-]{0,32}$/;
 const UNSAFE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const isUniqueViolation = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  "code" in value &&
+  (value as { code?: unknown }).code === "23505";
 
 const ensureSafeJsonKeys = (value: unknown, path = ""): void => {
   if (!value || typeof value !== "object") return;
@@ -305,14 +311,17 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
   const ctx = await auth(c, workspaceId);
   if (!isContext(ctx)) return ctx;
 
-  const body = await c.req.json<{
-    kind: string;
-    baseUrl: string;
-    authScheme?: string;
-    scopeInjectionTemplate?: unknown;
-    responseFilter?: unknown;
-  }>();
   try {
+    const body = await c.req.json<{
+      kind: string;
+      baseUrl: string;
+      authScheme?: string;
+      scopeInjectionTemplate?: unknown;
+      responseFilter?: unknown;
+    }>();
+    if (!body || typeof body !== "object") {
+      throw new ValidationError("request body must be an object");
+    }
     if (typeof body.kind !== "string" || !KIND_RE.test(body.kind)) {
       throw new ValidationError("invalid kind");
     }
@@ -325,19 +334,24 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
     if (body.responseFilter !== undefined) ensureSafeJsonKeys(body.responseFilter);
 
     const db = createClient(c.env.DATABASE_URL);
-    const inserted = await withWorkspace(db, workspaceId, (tx) =>
-      tx
-        .insert(brains)
-        .values({
-          workspaceId,
-          kind: body.kind,
-          baseUrl: body.baseUrl,
-          authScheme,
-          scopeInjectionTemplate: scopeTemplate,
-          responseFilter: body.responseFilter ?? null,
-        })
-        .returning({ id: brains.id, kind: brains.kind, baseUrl: brains.baseUrl }),
-    );
+    const inserted = await withWorkspace(db, workspaceId, async (tx) => {
+      try {
+        return await tx
+          .insert(brains)
+          .values({
+            workspaceId,
+            kind: body.kind,
+            baseUrl: body.baseUrl,
+            authScheme,
+            scopeInjectionTemplate: scopeTemplate,
+            responseFilter: body.responseFilter ?? null,
+          })
+          .returning({ id: brains.id, kind: brains.kind, baseUrl: brains.baseUrl });
+      } catch (e) {
+        if (isUniqueViolation(e)) throw new ConflictError("brain kind already exists");
+        throw e;
+      }
+    });
     await audit(c, ctx, "admin.brain.created", {
       brainId: inserted[0]?.id,
       kind: body.kind,

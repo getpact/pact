@@ -50,6 +50,9 @@ export const buildGatewayTarget = (baseUrl: string, path: string, search: string
     if (decoded === "." || decoded === "..") {
       throw new Error("gateway path escapes upstream base");
     }
+    if (decoded.includes("/") || decoded.includes("\\")) {
+      throw new Error("gateway path escapes upstream base");
+    }
   }
   target.pathname = `${basePath}${cleanPath}`;
   if (!target.pathname.startsWith(basePath)) {
@@ -78,19 +81,23 @@ const verify = async (
   verifierUrl: string,
   input: { token: string; action: string; resource: string; audience: string },
 ): Promise<VerifyOutput> => {
-  const res = await fetch(`${verifierUrl.replace(/\/+$/, "")}/v1/verify`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const body = (await res.json()) as Partial<VerifyOutput>;
-  if (typeof body.allow === "boolean" && Array.isArray(body.reasons)) {
-    return { allow: body.allow, reasons: body.reasons };
+  try {
+    const res = await fetch(`${verifierUrl.replace(/\/+$/, "")}/v1/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const body = (await res.json()) as Partial<VerifyOutput>;
+    if (typeof body.allow === "boolean" && Array.isArray(body.reasons)) {
+      return { allow: body.allow, reasons: body.reasons };
+    }
+    return { allow: false, reasons: [`verifier returned ${res.status}`] };
+  } catch {
+    return { allow: false, reasons: ["verifier unavailable"] };
   }
-  return { allow: false, reasons: [`verifier returned ${res.status}`] };
 };
 
-const forwardedRequestHeaders = (headers: Headers): Headers => {
+export const forwardedRequestHeaders = (headers: Headers): Headers => {
   const out = new Headers();
   const blocked = new Set([
     "authorization",
@@ -112,6 +119,9 @@ const forwardedRequestHeaders = (headers: Headers): Headers => {
     "x-forwarded-for",
     "x-forwarded-host",
     "x-forwarded-proto",
+    "x-http-method",
+    "x-http-method-override",
+    "x-method-override",
     "x-real-ip",
   ]);
   headers.forEach((value, key) => {

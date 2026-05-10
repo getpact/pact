@@ -1,5 +1,5 @@
 import { createClient, withWorkspace } from "@getpact/db";
-import { auditEvents, workspaces } from "@getpact/db/schema";
+import { auditEvents, brains, workspaces } from "@getpact/db/schema";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -78,7 +78,7 @@ run("admin api", () => {
   const callAdmin = async (
     path: string,
     token: string,
-    method: "GET" | "POST",
+    method: "DELETE" | "GET" | "POST",
     body: unknown,
     env: Record<string, unknown>,
   ) => {
@@ -86,7 +86,7 @@ run("admin api", () => {
       method,
       headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
     };
-    if (method === "POST") init.body = JSON.stringify(body);
+    if (body !== undefined) init.body = JSON.stringify(body);
     return app.request(path, init, {
       ISSUER_BASE_URL: "https://issuer.test/acme",
       ...env,
@@ -246,6 +246,121 @@ run("admin api", () => {
       { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     expect(res.status).toBe(201);
+  });
+
+  it("creates, lists, and deletes a gateway brain", async () => {
+    const { env, created, token } = await setup();
+    const runtime = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+    };
+    const create = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      token,
+      "POST",
+      { kind: "notion", baseUrl: "https://api.example.com/base" },
+      runtime,
+    );
+    expect(create.status).toBe(201);
+    const createdBrain = (await create.json()) as { brain: { id: string; kind: string } };
+    expect(createdBrain.brain.kind).toBe("notion");
+
+    const duplicate = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      token,
+      "POST",
+      { kind: "notion", baseUrl: "https://api.example.com/other" },
+      runtime,
+    );
+    expect(duplicate.status).toBe(409);
+
+    const list = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      token,
+      "GET",
+      undefined,
+      runtime,
+    );
+    const listed = (await list.json()) as { brains: Array<{ id: string; kind: string }> };
+    expect(listed.brains.map((brain) => brain.kind)).toContain("notion");
+
+    const del = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains/${createdBrain.brain.id}`,
+      token,
+      "DELETE",
+      undefined,
+      runtime,
+    );
+    expect(del.status).toBe(200);
+
+    const rows = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx.select().from(brains).where(eq(brains.workspaceId, created.workspaceId)),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects unsafe gateway brain configuration", async () => {
+    const { env, created, token } = await setup();
+    const runtime = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+    };
+    const unsafeHost = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      token,
+      "POST",
+      { kind: "local", baseUrl: "https://127.0.0.1:8443" },
+      runtime,
+    );
+    expect(unsafeHost.status).toBe(400);
+
+    const unsafeJson = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      token,
+      "POST",
+      {
+        kind: "unsafe",
+        baseUrl: "https://api.example.com",
+        scopeInjectionTemplate: { constructor: { polluted: true } },
+      },
+      runtime,
+    );
+    expect(unsafeJson.status).toBe(400);
+  });
+
+  it("rejects malformed gateway brain request bodies", async () => {
+    const { env, created, token } = await setup();
+    const runtime = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+    };
+    const nullBody = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      token,
+      "POST",
+      null,
+      runtime,
+    );
+    expect(nullBody.status).toBe(400);
+
+    const invalidJson = await app.request(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+        body: "{",
+      },
+      {
+        ISSUER_BASE_URL: "https://issuer.test/acme",
+        DATABASE_URL: env.DATABASE_URL,
+        MEK: env.MEK,
+        ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+      },
+    );
+    expect(invalidJson.status).toBe(400);
   });
 
   it("emits an audit event when a user is created", async () => {
