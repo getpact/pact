@@ -171,3 +171,88 @@ describe("mcp install", () => {
     expect(cfg.otherSetting).toBe(42);
   });
 });
+
+describe("audit verify", () => {
+  let tmp: string;
+  let originalHome: string | undefined;
+  let originalAuditEndpoint: string | undefined;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    originalAuditEndpoint = process.env.PACT_AUDIT_ENDPOINT;
+    tmp = mkdtempSync(join(tmpdir(), "pact-cli-audit-"));
+    process.env.HOME = tmp;
+    process.env.PACT_AUDIT_ENDPOINT = "https://audit.test";
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (originalHome) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    if (originalAuditEndpoint) {
+      process.env.PACT_AUDIT_ENDPOINT = originalAuditEndpoint;
+    } else {
+      delete process.env.PACT_AUDIT_ENDPOINT;
+    }
+    vi.unstubAllGlobals();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("fetches audit JWKS from issuer, not audit-api", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = input.toString();
+        requests.push(url);
+        if (url === "https://issuer.test/v1/refresh") {
+          expect(init?.method).toBe("POST");
+          return Response.json({
+            token: "audit-token",
+            jti: "jti-1",
+            exp: 1,
+            userId: "user-1",
+            refreshToken: "refresh-2",
+            refreshExpiresAt: "2026-05-10T00:00:00Z",
+          });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/workspace") {
+          return Response.json({
+            id: "ws-1",
+            slug: "acme",
+            createdAt: "2026-05-10T00:00:00.000Z",
+          });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/chain") {
+          return Response.json({ head: null });
+        }
+        if (url === "https://issuer.test/v1/workspaces/ws-1/.well-known/audit-jwks.json") {
+          return Response.json({ keys: [] });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/events?order=asc&limit=200") {
+          return Response.json({ events: [], nextCursor: null });
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+
+    const { runAuditVerify } = await import("../audit-verify.js");
+    await expect(
+      runAuditVerify({
+        endpoint: "https://issuer.test",
+        workspaceId: "ws-1",
+        refreshToken: "refresh-1",
+      }),
+    ).resolves.toMatchObject({ ok: true, eventsChecked: 0 });
+
+    expect(requests).toContain(
+      "https://issuer.test/v1/workspaces/ws-1/.well-known/audit-jwks.json",
+    );
+    expect(requests).not.toContain(
+      "https://audit.test/v1/workspaces/ws-1/.well-known/audit-jwks.json",
+    );
+  });
+});
