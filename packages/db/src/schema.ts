@@ -233,3 +233,42 @@ export type AdapterConfig = typeof adapterConfigs.$inferSelect;
 export type NewAdapterConfig = typeof adapterConfigs.$inferInsert;
 export type Brain = typeof brains.$inferSelect;
 export type NewBrain = typeof brains.$inferInsert;
+
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    actorKind: text("actor_kind").notNull(),
+    actorId: text("actor_id"),
+    action: text("action").notNull(),
+    target: jsonb("target").notNull(),
+    decision: text("decision").notNull(),
+    supporting: jsonb("supporting"),
+    signingKeyId: text("signing_key_id").notNull(),
+    prevHash: text("prev_hash").notNull(),
+    thisHash: text("this_hash").notNull(),
+    signature: text("signature").notNull(),
+  },
+  (t) => [
+    index("audit_events_workspace_ts_idx").on(t.workspaceId, t.ts),
+    index("audit_events_workspace_action_idx").on(t.workspaceId, t.action),
+  ],
+);
+
+export const auditChainState = pgTable("audit_chain_state", {
+  workspaceId: uuid("workspace_id")
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  lastHash: text("last_hash").notNull(),
+  lastEventId: uuid("last_event_id"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AuditEvent = typeof auditEvents.$inferSelect;
+export type NewAuditEvent = typeof auditEvents.$inferInsert;
+export type AuditChainState = typeof auditChainState.$inferSelect;
+export type NewAuditChainState = typeof auditChainState.$inferInsert;
