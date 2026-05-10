@@ -1,5 +1,5 @@
 import { createClient, withWorkspace } from "@getpact/db";
-import { auditEvents, brains, workspaces } from "@getpact/db/schema";
+import { auditEvents, brains, vaultSecrets, workspaces } from "@getpact/db/schema";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -78,7 +78,7 @@ run("admin api", () => {
   const callAdmin = async (
     path: string,
     token: string,
-    method: "DELETE" | "GET" | "POST",
+    method: "DELETE" | "GET" | "POST" | "PUT",
     body: unknown,
     env: Record<string, unknown>,
   ) => {
@@ -259,7 +259,7 @@ run("admin api", () => {
       `/v1/workspaces/${created.workspaceId}/brains`,
       token,
       "POST",
-      { kind: "notion", baseUrl: "https://api.example.com/base" },
+      { kind: "notion", baseUrl: "https://api.example.com/base", authScheme: "bearer" },
       runtime,
     );
     expect(create.status).toBe(201);
@@ -285,6 +285,15 @@ run("admin api", () => {
     const listed = (await list.json()) as { brains: Array<{ id: string; kind: string }> };
     expect(listed.brains.map((brain) => brain.kind)).toContain("notion");
 
+    const credential = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains/${createdBrain.brain.id}/credential`,
+      token,
+      "PUT",
+      { token: "xoxb-test" },
+      runtime,
+    );
+    expect(credential.status).toBe(200);
+
     const del = await callAdmin(
       `/v1/workspaces/${created.workspaceId}/brains/${createdBrain.brain.id}`,
       token,
@@ -298,6 +307,10 @@ run("admin api", () => {
       tx.select().from(brains).where(eq(brains.workspaceId, created.workspaceId)),
     );
     expect(rows).toHaveLength(0);
+    const secrets = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx.select().from(vaultSecrets).where(eq(vaultSecrets.workspaceId, created.workspaceId)),
+    );
+    expect(secrets).toHaveLength(0);
   });
 
   it("rejects unsafe gateway brain configuration", async () => {
@@ -328,6 +341,19 @@ run("admin api", () => {
       runtime,
     );
     expect(unsafeJson.status).toBe(400);
+
+    const inertFilter = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/brains`,
+      token,
+      "POST",
+      {
+        kind: "filtered",
+        baseUrl: "https://api.example.com",
+        responseFilter: { allow: ["id"] },
+      },
+      runtime,
+    );
+    expect(inertFilter.status).toBe(400);
   });
 
   it("rejects http brain baseUrl", async () => {

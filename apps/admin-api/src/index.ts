@@ -21,7 +21,7 @@ import {
 } from "@getpact/db/schema";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { tryParsePolicy } from "@getpact/policy";
-import { storeSecret } from "@getpact/vault";
+import { deleteSecret, storeSecret } from "@getpact/vault";
 import { and, desc, eq, max, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -312,6 +312,9 @@ const ensureSafeJsonKeys = (value: unknown, path = ""): void => {
   }
 };
 
+const isEmptyObject = (value: unknown): boolean =>
+  !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+
 app.post("/v1/workspaces/:id/brains", async (c) => {
   const workspaceId = c.req.param("id");
   const ctx = await auth(c, workspaceId);
@@ -345,9 +348,14 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
     if (authScheme !== "none" && authScheme !== "bearer") {
       throw new ValidationError("authScheme must be none or bearer");
     }
+    if (body.scopeInjectionTemplate !== undefined && !isEmptyObject(body.scopeInjectionTemplate)) {
+      throw new ValidationError("scopeInjectionTemplate is not implemented");
+    }
+    if (body.responseFilter !== undefined) {
+      throw new ValidationError("responseFilter is not implemented");
+    }
     const scopeTemplate = body.scopeInjectionTemplate ?? {};
     ensureSafeJsonKeys(scopeTemplate);
-    if (body.responseFilter !== undefined) ensureSafeJsonKeys(body.responseFilter);
 
     const db = createClient(c.env.DATABASE_URL);
     const inserted = await withWorkspace(db, workspaceId, async (tx) => {
@@ -410,12 +418,21 @@ app.delete("/v1/workspaces/:id/brains/:brainId", async (c) => {
   if (!isContext(ctx)) return ctx;
 
   const db = createClient(c.env.DATABASE_URL);
-  const removed = await withWorkspace(db, workspaceId, (tx) =>
-    tx
+  const removed = await withWorkspace(db, workspaceId, async (tx) => {
+    const rows = await tx
       .delete(brains)
       .where(and(eq(brains.workspaceId, workspaceId), eq(brains.id, brainId)))
-      .returning({ id: brains.id, kind: brains.kind }),
-  );
+      .returning({ id: brains.id, kind: brains.kind });
+    const kind = rows[0]?.kind;
+    if (kind) {
+      await deleteSecret(tx, {
+        workspaceId,
+        kind: "brain_credential",
+        target: kind,
+      });
+    }
+    return rows;
+  });
   if (removed.length === 0) {
     return c.json({ error: "not_found", message: "brain not found" }, 404);
   }
