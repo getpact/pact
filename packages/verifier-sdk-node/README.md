@@ -1,6 +1,6 @@
 # @getpact/verifier-sdk
 
-Verify pact JWTs and audit chains in Node.js and edge runtimes.
+Verify pact JWTs in Node.js and edge runtimes. Audit-chain verification is a separate concern handled by `@getpact/cli` (see `audit verify`).
 
 ## Status
 

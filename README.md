@@ -41,7 +41,7 @@ Without those env vars, DB-gated suites silently skip (with `describe.skip`). CI
 OSS (MIT):
 
 - `@getpact/cli`
-- `@getpact/verifier-sdk-node`
+- `@getpact/verifier-sdk` (Node.js + edge JWT verifier)
 - `@getpact/adapter-sdk`
 - `@getpact/adapter-slack`
 - `getpact-verifier` (Python)
