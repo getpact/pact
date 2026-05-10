@@ -5,9 +5,16 @@ import { tryParsePolicy } from "@getpact/policy";
 import { and, desc, eq, max } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { emitAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
+import { bustRevocationCache, type KVNamespace } from "./cache.js";
 
-type Env = { DATABASE_URL: string; ADMIN_AUDIENCE?: string };
+type Env = {
+  DATABASE_URL: string;
+  MEK: string;
+  ADMIN_AUDIENCE?: string;
+  REVOCATION_CACHE?: KVNamespace;
+};
 type AppCtx = Context<{ Bindings: Env }>;
 
 const app = new Hono<{ Bindings: Env }>();
@@ -31,6 +38,23 @@ const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Resp
 
 const isContext = (v: unknown): v is AdminContext =>
   typeof v === "object" && v !== null && "userId" in v;
+
+const audit = (
+  c: AppCtx,
+  ctx: AdminContext,
+  action: string,
+  target: unknown,
+  decision: "allow" | "deny" = "allow",
+): Promise<void> =>
+  emitAdminAudit({
+    databaseUrl: c.env.DATABASE_URL,
+    mek: c.env.MEK,
+    workspaceId: ctx.workspaceId,
+    actorUserId: ctx.userId,
+    action,
+    target,
+    decision,
+  });
 
 app.get("/v1/workspaces/:id/users", async (c) => {
   const workspaceId = c.req.param("id");
@@ -61,6 +85,7 @@ app.post("/v1/workspaces/:id/users", async (c) => {
       .values({ workspaceId, email, name: body.name ?? null })
       .returning({ id: users.id, email: users.email }),
   );
+  await audit(c, ctx, "admin.user.created", { userId: inserted[0]?.id, email });
   return c.json({ user: inserted[0] }, 201);
 });
 
@@ -77,6 +102,7 @@ app.post("/v1/workspaces/:id/groups", async (c) => {
       .values({ workspaceId, name: body.name, description: body.description ?? null })
       .returning({ id: groups.id, name: groups.name }),
   );
+  await audit(c, ctx, "admin.group.created", { groupId: inserted[0]?.id, name: body.name });
   return c.json({ group: inserted[0] }, 201);
 });
 
@@ -91,6 +117,7 @@ app.post("/v1/workspaces/:id/groups/:groupId/members", async (c) => {
   await withWorkspace(db, workspaceId, (tx) =>
     tx.insert(groupMembers).values({ groupId, userId: body.userId }),
   );
+  await audit(c, ctx, "admin.group_member.added", { groupId, userId: body.userId });
   return c.json({ ok: true }, 201);
 });
 
@@ -101,7 +128,10 @@ app.post("/v1/workspaces/:id/policies", async (c) => {
 
   const body = await c.req.json<{ body: unknown }>();
   const parsed = tryParsePolicy(body.body);
-  if (!parsed) return c.json({ error: "invalid policy" }, 400);
+  if (!parsed) {
+    await audit(c, ctx, "admin.policy.rejected", { reason: "invalid" }, "deny");
+    return c.json({ error: "invalid policy" }, 400);
+  }
 
   const db = createClient(c.env.DATABASE_URL);
   const created = await withWorkspace(db, workspaceId, async (tx) => {
@@ -129,6 +159,10 @@ app.post("/v1/workspaces/:id/policies", async (c) => {
       })
       .returning({ id: policies.id, version: policies.version });
     return row;
+  });
+  await audit(c, ctx, "admin.policy.created", {
+    policyId: created?.id,
+    version: created?.version,
   });
   return c.json({ policy: created }, 201);
 });
@@ -169,6 +203,8 @@ app.post("/v1/workspaces/:id/revocations", async (c) => {
       reason: body.reason ?? null,
     }),
   );
+  await bustRevocationCache(c.env.REVOCATION_CACHE, workspaceId, body.jti);
+  await audit(c, ctx, "admin.revocation.created", { jti: body.jti, reason: body.reason });
   return c.json({ ok: true }, 201);
 });
 
@@ -198,6 +234,11 @@ app.post("/v1/workspaces/:id/invites", async (c) => {
       })
       .returning({ id: invites.id, email: invites.email, expiresAt: invites.expiresAt }),
   );
+  await audit(c, ctx, "admin.invite.created", {
+    inviteId: inserted[0]?.id,
+    email: inserted[0]?.email,
+    ttl: body.ttl,
+  });
   return c.json({ invite: inserted[0] }, 201);
 });
 
