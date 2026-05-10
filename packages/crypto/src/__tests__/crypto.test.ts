@@ -10,8 +10,8 @@ import {
   importAesKey,
   importPrivatePkcs8,
   importPublicSpki,
+  issueJwt,
   jcsCanonicalize,
-  mintJwt,
   sha256,
   signEd25519,
   toHex,
@@ -124,10 +124,10 @@ describe("envelope encryption (mek wraps dek wraps secret)", () => {
   });
 });
 
-describe("jwt mint and verify", () => {
+describe("jwt issue and verify", () => {
   it("round-trips an EdDSA jwt", async () => {
     const { privateKey, publicKey } = await generateEd25519Keypair();
-    const token = await mintJwt(
+    const token = await issueJwt(
       { sub: "user-123", email: "alice@example.com" },
       {
         privateKey,
@@ -150,7 +150,7 @@ describe("jwt mint and verify", () => {
 
   it("rejects an expired token", async () => {
     const { privateKey, publicKey } = await generateEd25519Keypair();
-    const token = await mintJwt(
+    const token = await issueJwt(
       { sub: "user-1" },
       {
         privateKey,
@@ -172,7 +172,7 @@ describe("jwt mint and verify", () => {
 
   it("rejects a tampered audience", async () => {
     const { privateKey, publicKey } = await generateEd25519Keypair();
-    const token = await mintJwt(
+    const token = await issueJwt(
       { sub: "user-1" },
       {
         privateKey,

@@ -1,6 +1,6 @@
 import { type JWTPayload, type JWTVerifyResult, jwtVerify, SignJWT } from "jose";
 
-export type MintOptions = {
+export type IssueOptions = {
   privateKey: CryptoKey;
   kid: string;
   issuer: string;
@@ -9,7 +9,7 @@ export type MintOptions = {
   jti: string;
 };
 
-export const mintJwt = async (claims: JWTPayload, opts: MintOptions): Promise<string> => {
+export const issueJwt = async (claims: JWTPayload, opts: IssueOptions): Promise<string> => {
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT(claims)
     .setProtectedHeader({ alg: "EdDSA", kid: opts.kid })

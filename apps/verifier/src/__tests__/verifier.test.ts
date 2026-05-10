@@ -59,8 +59,8 @@ run("verifier", () => {
     };
     cleanup.push(created.workspaceId);
 
-    const mintRes = await issuer.request(
-      "/v1/dev/mint",
+    const issueRes = await issuer.request(
+      "/v1/dev/issue",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -72,8 +72,8 @@ run("verifier", () => {
       },
       env,
     );
-    const minted = (await mintRes.json()) as { token: string; jti: string };
-    return { env, created, minted };
+    const issued = (await issueRes.json()) as { token: string; jti: string };
+    return { env, created, issued };
   };
 
   const insertPolicy = async (workspaceId: string, adminUserId: string, body: unknown) => {
@@ -83,14 +83,14 @@ run("verifier", () => {
   };
 
   it("denies when no policy exists", async () => {
-    const { env, minted } = await setupWorkspace();
+    const { env, issued } = await setupWorkspace();
     const res = await app.request(
       "/v1/verify",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          token: minted.token,
+          token: issued.token,
           action: "read",
           resource: "doc:any",
           audience: "pact-mcp",
@@ -105,7 +105,7 @@ run("verifier", () => {
   });
 
   it("allows when policy grants admin access", async () => {
-    const { env, created, minted } = await setupWorkspace();
+    const { env, created, issued } = await setupWorkspace();
     await insertPolicy(created.workspaceId, created.adminUserId, {
       rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
     });
@@ -116,7 +116,7 @@ run("verifier", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          token: minted.token,
+          token: issued.token,
           action: "read",
           resource: "doc:any",
           audience: "pact-mcp",
@@ -130,7 +130,7 @@ run("verifier", () => {
   });
 
   it("denies revoked tokens", async () => {
-    const { env, created, minted } = await setupWorkspace();
+    const { env, created, issued } = await setupWorkspace();
     await insertPolicy(created.workspaceId, created.adminUserId, {
       rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
     });
@@ -138,7 +138,7 @@ run("verifier", () => {
     await withWorkspace(db, created.workspaceId, (tx) =>
       tx.insert(revokedJtis).values({
         workspaceId: created.workspaceId,
-        jti: minted.jti,
+        jti: issued.jti,
         reason: "test",
       }),
     );
@@ -149,7 +149,7 @@ run("verifier", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          token: minted.token,
+          token: issued.token,
           action: "read",
           resource: "doc:any",
           audience: "pact-mcp",
@@ -163,7 +163,7 @@ run("verifier", () => {
   });
 
   it("emits an audit event for an allowed decision", async () => {
-    const { env, created, minted } = await setupWorkspace();
+    const { env, created, issued } = await setupWorkspace();
     await insertPolicy(created.workspaceId, created.adminUserId, {
       rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
     });
@@ -174,7 +174,7 @@ run("verifier", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          token: minted.token,
+          token: issued.token,
           action: "read",
           resource: "doc:abc",
           audience: "pact-mcp",

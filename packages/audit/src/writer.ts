@@ -1,5 +1,5 @@
 import { fromBase64, jcsBytes, sha256, signEd25519, toBase64 } from "@getpact/crypto";
-import { schema } from "@getpact/db";
+import type { schema } from "@getpact/db";
 import { sql } from "drizzle-orm";
 import { computeGenesisHash } from "./genesis.js";
 

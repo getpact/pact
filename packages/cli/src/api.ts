@@ -5,7 +5,7 @@ type CreateWorkspaceResponse = {
   auditKeyId: string;
 };
 
-type MintResponse = {
+type IssueResponse = {
   token: string;
   jti: string;
   exp: number;
@@ -32,12 +32,12 @@ export const createWorkspace = (
   body: { slug: string; name: string; adminEmail: string; adminName?: string },
 ): Promise<CreateWorkspaceResponse> => post(endpoint, "/v1/workspaces", body);
 
-export const devMint = (
+export const devIssue = (
   endpoint: string,
   body: { workspaceId: string; email: string; audience: string },
-): Promise<MintResponse> => post(endpoint, "/v1/dev/mint", body);
+): Promise<IssueResponse> => post(endpoint, "/v1/dev/issue", body);
 
 export const refresh = (
   endpoint: string,
   body: { workspaceId: string; refreshToken: string; audience: string },
-): Promise<MintResponse> => post(endpoint, "/v1/refresh", body);
+): Promise<IssueResponse> => post(endpoint, "/v1/refresh", body);

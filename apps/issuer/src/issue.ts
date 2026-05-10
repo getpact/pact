@@ -1,12 +1,12 @@
 import type { Email } from "@getpact/core";
-import { mintJwt } from "@getpact/crypto";
+import { issueJwt } from "@getpact/crypto";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, roles, userRoles, users } from "@getpact/db/schema";
 import { loadActiveSigningKey } from "@getpact/keystore";
 import { and, eq } from "drizzle-orm";
 import { type IssuedRefresh, issueRefresh } from "./refresh.js";
 
-export type MintTokenInput = {
+export type IssueTokenInput = {
   workspaceId: string;
   email: Email;
   audience: string;
@@ -15,7 +15,7 @@ export type MintTokenInput = {
   issuerUrl: string;
 };
 
-export type MintTokenResult = {
+export type IssueTokenResult = {
   token: string;
   jti: string;
   exp: number;
@@ -27,7 +27,7 @@ export type MintTokenResult = {
 const newJti = () => crypto.randomUUID();
 const DEFAULT_REFRESH_TTL = 24 * 60 * 60;
 
-const mintAccessToken = async (
+const issueAccessToken = async (
   tx: Tx,
   input: {
     workspaceId: string;
@@ -53,7 +53,7 @@ const mintAccessToken = async (
 
   const key = await loadActiveSigningKey(tx, input.workspaceId, "jwt", input.rawMek);
   const jti = newJti();
-  const token = await mintJwt(
+  const token = await issueJwt(
     {
       sub: input.userId,
       email: input.email,
@@ -74,11 +74,11 @@ const mintAccessToken = async (
   return { token, jti, exp: Math.floor(Date.now() / 1000) + input.ttlSeconds };
 };
 
-export const mintTokenForEmail = async (
+export const issueTokenForEmail = async (
   databaseUrl: string,
   rawMek: Uint8Array,
-  input: MintTokenInput,
-): Promise<MintTokenResult> => {
+  input: IssueTokenInput,
+): Promise<IssueTokenResult> => {
   const db = createClient(databaseUrl);
   return withWorkspace(db, input.workspaceId, async (tx) => {
     const [user] = await tx
@@ -88,7 +88,7 @@ export const mintTokenForEmail = async (
       .limit(1);
     if (!user) throw new Error("user not found in workspace");
 
-    const access = await mintAccessToken(tx, {
+    const access = await issueAccessToken(tx, {
       workspaceId: input.workspaceId,
       userId: user.id,
       email: user.email,
@@ -122,11 +122,11 @@ export type RedeemTokenInput = {
   issuerUrl: string;
 };
 
-export const redeemRefreshAndMint = async (
+export const redeemRefreshAndIssue = async (
   databaseUrl: string,
   rawMek: Uint8Array,
   input: RedeemTokenInput,
-): Promise<MintTokenResult | null> => {
+): Promise<IssueTokenResult | null> => {
   const { redeemRefresh } = await import("./refresh.js");
   const db = createClient(databaseUrl);
   return withWorkspace(db, input.workspaceId, async (tx) => {
@@ -136,7 +136,7 @@ export const redeemRefreshAndMint = async (
     const [user] = await tx.select().from(users).where(eq(users.id, redeemed.userId)).limit(1);
     if (!user) return null;
 
-    const access = await mintAccessToken(tx, {
+    const access = await issueAccessToken(tx, {
       workspaceId: input.workspaceId,
       userId: user.id,
       email: user.email,

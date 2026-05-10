@@ -1,8 +1,8 @@
 import type { Email } from "@getpact/core";
 import { Hono } from "hono";
 import { decodeMek, type Env, tokenTtlSeconds } from "./env.js";
+import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
-import { mintTokenForEmail, redeemRefreshAndMint } from "./mint.js";
 import { createWorkspace } from "./workspace.js";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -21,9 +21,9 @@ app.post("/v1/workspaces", async (c) => {
   return c.json(result, 201);
 });
 
-app.post("/v1/dev/mint", async (c) => {
+app.post("/v1/dev/issue", async (c) => {
   const body = await c.req.json<{ workspaceId: string; email: string; audience: string }>();
-  const result = await mintTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
+  const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
     workspaceId: body.workspaceId,
     email: body.email as Email,
     audience: body.audience,
@@ -39,7 +39,7 @@ app.post("/v1/refresh", async (c) => {
     refreshToken: string;
     audience: string;
   }>();
-  const result = await redeemRefreshAndMint(c.env.DATABASE_URL, decodeMek(c.env), {
+  const result = await redeemRefreshAndIssue(c.env.DATABASE_URL, decodeMek(c.env), {
     workspaceId: body.workspaceId,
     refreshToken: body.refreshToken,
     audience: body.audience,

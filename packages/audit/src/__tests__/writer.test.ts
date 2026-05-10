@@ -109,7 +109,7 @@ run("audit writer", () => {
 
     expect(rows.length).toBe(100);
 
-    let prevExpected = (await withWorkspace(db, workspaceId, (tx) =>
+    const prevExpected = (await withWorkspace(db, workspaceId, (tx) =>
       tx.execute(
         sql`SELECT this_hash FROM audit_events WHERE workspace_id = ${workspaceId} AND action = 'test.event' ORDER BY ts DESC LIMIT 1`,
       ),

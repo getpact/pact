@@ -3,13 +3,13 @@
   "files": {
     "includes": [
       "**",
-      "!**/dist/**",
-      "!**/node_modules/**",
-      "!**/.turbo/**",
-      "!**/.wrangler/**",
-      "!**/migrations/**",
-      "!_bmad/**",
-      "!_bmad-output/**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/.turbo",
+      "!**/.wrangler",
+      "!**/migrations",
+      "!_bmad",
+      "!_bmad-output",
       "!pnpm-lock.yaml"
     ]
   },

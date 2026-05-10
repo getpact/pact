@@ -38,7 +38,7 @@ run("issuer end-to-end", () => {
     }
   });
 
-  it("creates workspace and mints a verifiable jwt", async () => {
+  it("creates workspace and issues a verifiable jwt", async () => {
     const env = await buildEnv();
     const slug = `iss-${Date.now()}`;
 
@@ -66,8 +66,8 @@ run("issuer end-to-end", () => {
     expect(created.jwtKeyId).toBeDefined();
     expect(created.auditKeyId).toBeDefined();
 
-    const mintRes = await app.request(
-      "/v1/dev/mint",
+    const issueRes = await app.request(
+      "/v1/dev/issue",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -79,13 +79,13 @@ run("issuer end-to-end", () => {
       },
       env,
     );
-    expect(mintRes.status).toBe(200);
-    const minted = (await mintRes.json()) as {
+    expect(issueRes.status).toBe(200);
+    const issued = (await issueRes.json()) as {
       token: string;
       jti: string;
       exp: number;
     };
-    expect(minted.token.split(".").length).toBe(3);
+    expect(issued.token.split(".").length).toBe(3);
 
     const verifying = await withWorkspace(adminDb, created.workspaceId, (tx) =>
       listVerifyingKeys(tx, created.workspaceId, "jwt"),
@@ -94,7 +94,7 @@ run("issuer end-to-end", () => {
     const publicKey = verifying[0]?.publicKey;
     if (!publicKey) throw new Error("missing public key");
 
-    const result = await verifyJwt(minted.token, {
+    const result = await verifyJwt(issued.token, {
       publicKey,
       issuer: env.ISSUER_BASE_URL,
       audience: "pact-mcp",
@@ -157,8 +157,8 @@ run("issuer end-to-end", () => {
     const created = (await createRes.json()) as { workspaceId: string };
     cleanup.push(created.workspaceId);
 
-    const mintRes = await app.request(
-      "/v1/dev/mint",
+    const issueRes = await app.request(
+      "/v1/dev/issue",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -170,8 +170,8 @@ run("issuer end-to-end", () => {
       },
       env,
     );
-    const minted = (await mintRes.json()) as { token: string; refreshToken: string };
-    expect(minted.refreshToken.length).toBeGreaterThan(20);
+    const issued = (await issueRes.json()) as { token: string; refreshToken: string };
+    expect(issued.refreshToken.length).toBeGreaterThan(20);
 
     const refreshRes = await app.request(
       "/v1/refresh",
@@ -180,7 +180,7 @@ run("issuer end-to-end", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workspaceId: created.workspaceId,
-          refreshToken: minted.refreshToken,
+          refreshToken: issued.refreshToken,
           audience: "pact-mcp",
         }),
       },
@@ -188,8 +188,8 @@ run("issuer end-to-end", () => {
     );
     expect(refreshRes.status).toBe(200);
     const rotated = (await refreshRes.json()) as { token: string; refreshToken: string };
-    expect(rotated.refreshToken).not.toBe(minted.refreshToken);
-    expect(rotated.token).not.toBe(minted.token);
+    expect(rotated.refreshToken).not.toBe(issued.refreshToken);
+    expect(rotated.token).not.toBe(issued.token);
 
     const reuseRes = await app.request(
       "/v1/refresh",
@@ -198,7 +198,7 @@ run("issuer end-to-end", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workspaceId: created.workspaceId,
-          refreshToken: minted.refreshToken,
+          refreshToken: issued.refreshToken,
           audience: "pact-mcp",
         }),
       },
@@ -237,7 +237,7 @@ run("issuer end-to-end", () => {
     expect(res.status).toBe(401);
   });
 
-  it("rejects mint for unknown email", async () => {
+  it("rejects issue for unknown email", async () => {
     const env = await buildEnv();
     const slug = `iss-err-${Date.now()}`;
     const createRes = await app.request(
@@ -252,8 +252,8 @@ run("issuer end-to-end", () => {
     const created = (await createRes.json()) as { workspaceId: string };
     cleanup.push(created.workspaceId);
 
-    const mintRes = await app.request(
-      "/v1/dev/mint",
+    const issueRes = await app.request(
+      "/v1/dev/issue",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -265,6 +265,6 @@ run("issuer end-to-end", () => {
       },
       env,
     );
-    expect(mintRes.status).toBeGreaterThanOrEqual(400);
+    expect(issueRes.status).toBeGreaterThanOrEqual(400);
   });
 });

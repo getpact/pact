@@ -5,7 +5,7 @@ import { createStaticVerifier } from "../index.js";
 const ISSUER = "https://issuer.test/acme";
 const AUDIENCE = "pact-mcp";
 
-const mintToken = async (
+const issueToken = async (
   privateKey: CryptoKey,
   kid: string,
   ttlSeconds = 60,
@@ -27,7 +27,7 @@ describe("verifier sdk", () => {
     const pair = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
     const privateKey = pair.privateKey as CryptoKey;
     const publicKey = pair.publicKey as CryptoKey;
-    const token = await mintToken(privateKey, "ws-jwt-1");
+    const token = await issueToken(privateKey, "ws-jwt-1");
     const verifier = createStaticVerifier({ publicKey, issuer: ISSUER, audience: AUDIENCE });
     const result = await verifier.verify(token);
     expect(result.payload.sub).toBe("user-1");
@@ -36,7 +36,7 @@ describe("verifier sdk", () => {
   it("rejects a token signed by a different key", async () => {
     const a = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
     const b = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
-    const token = await mintToken(a.privateKey as CryptoKey, "ws-jwt-1");
+    const token = await issueToken(a.privateKey as CryptoKey, "ws-jwt-1");
     const verifier = createStaticVerifier({
       publicKey: b.publicKey as CryptoKey,
       issuer: ISSUER,
@@ -49,7 +49,7 @@ describe("verifier sdk", () => {
     const pair = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
     const privateKey = pair.privateKey as CryptoKey;
     const publicKey = pair.publicKey as CryptoKey;
-    const token = await mintToken(privateKey, "ws-jwt-1", -10);
+    const token = await issueToken(privateKey, "ws-jwt-1", -10);
     const verifier = createStaticVerifier({ publicKey, issuer: ISSUER, audience: AUDIENCE });
     await expect(verifier.verify(token)).rejects.toThrow();
   });
@@ -58,7 +58,7 @@ describe("verifier sdk", () => {
     const pair = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
     const privateKey = pair.privateKey as CryptoKey;
     const publicKey = pair.publicKey as CryptoKey;
-    const token = await mintToken(privateKey, "ws-jwt-1");
+    const token = await issueToken(privateKey, "ws-jwt-1");
     const verifier = createStaticVerifier({
       publicKey,
       issuer: ISSUER,
@@ -71,7 +71,7 @@ describe("verifier sdk", () => {
     const pair = await generateKeyPair("EdDSA", { crv: "Ed25519", extractable: true });
     const privateKey = pair.privateKey as CryptoKey;
     const publicKey = pair.publicKey as CryptoKey;
-    const token = await mintToken(privateKey, "ws-jwt-1", 60, { groups: ["eng"] });
+    const token = await issueToken(privateKey, "ws-jwt-1", 60, { groups: ["eng"] });
     const verifier = createStaticVerifier({ publicKey, issuer: ISSUER, audience: AUDIENCE });
     const claims = await verifier.decodeClaims(token);
     expect(claims.email).toBe("alice@example.com");

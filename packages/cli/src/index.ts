@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createWorkspace, devMint, refresh } from "./api.js";
+import { createWorkspace, devIssue, refresh } from "./api.js";
 import { loadConfig, saveConfig } from "./config.js";
 
 const env = (key: string, fallback?: string): string => {
@@ -42,7 +42,7 @@ const init = async () => {
     adminEmail,
     ...(adminName ? { adminName } : {}),
   });
-  const minted = await devMint(endpoint(), {
+  const issued = await devIssue(endpoint(), {
     workspaceId: created.workspaceId,
     email: adminEmail,
     audience: audience(),
@@ -52,10 +52,10 @@ const init = async () => {
     workspaceId: created.workspaceId,
     workspaceSlug: slug,
     email: adminEmail,
-    accessToken: minted.token,
-    accessExpiresAt: minted.exp,
-    refreshToken: minted.refreshToken,
-    refreshExpiresAt: minted.refreshExpiresAt,
+    accessToken: issued.token,
+    accessExpiresAt: issued.exp,
+    refreshToken: issued.refreshToken,
+    refreshExpiresAt: issued.refreshExpiresAt,
   });
   process.stdout.write(`workspace ${slug} created (${created.workspaceId})\n`);
   process.stdout.write(`signed in as ${adminEmail}\n`);
@@ -67,20 +67,20 @@ const login = async () => {
     process.stderr.write("no stored credentials. run pact init first.\n");
     process.exit(1);
   }
-  const minted = await refresh(endpoint(), {
+  const issued = await refresh(endpoint(), {
     workspaceId: cfg.workspaceId,
     refreshToken: cfg.refreshToken,
     audience: audience(),
   });
   await saveConfig({
     ...cfg,
-    accessToken: minted.token,
-    accessExpiresAt: minted.exp,
-    refreshToken: minted.refreshToken,
-    refreshExpiresAt: minted.refreshExpiresAt,
+    accessToken: issued.token,
+    accessExpiresAt: issued.exp,
+    refreshToken: issued.refreshToken,
+    refreshExpiresAt: issued.refreshExpiresAt,
   });
   process.stdout.write(
-    `refreshed. token expires at ${new Date(minted.exp * 1000).toISOString()}\n`,
+    `refreshed. token expires at ${new Date(issued.exp * 1000).toISOString()}\n`,
   );
 };
 
