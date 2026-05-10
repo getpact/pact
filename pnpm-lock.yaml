@@ -237,7 +237,11 @@ importers:
         specifier: workspace:*
         version: link:../crypto
 
-  packages/verifier-sdk-node: {}
+  packages/verifier-sdk-node:
+    dependencies:
+      jose:
+        specifier: ^5.9.0
+        version: 5.10.0
 
 packages:
 

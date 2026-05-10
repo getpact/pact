@@ -1,5 +1,5 @@
 {
-  "name": "@getpact/verifier-sdk-node",
+  "name": "@getpact/verifier-sdk",
   "version": "0.0.0",
   "type": "module",
   "license": "MIT",
@@ -15,6 +15,9 @@
     "build": "tsc -b",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jose": "^5.9.0"
   },
   "files": [
     "dist",
