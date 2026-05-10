@@ -9,7 +9,11 @@ import {
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
-import app, { buildGatewayTarget, gatewayAuthorization } from "../index.js";
+import app, {
+  buildGatewayTarget,
+  forwardedRequestHeaders,
+  gatewayAuthorization,
+} from "../index.js";
 
 const env = { ENVIRONMENT: "test" };
 const url = process.env.DATABASE_URL;
@@ -69,6 +73,52 @@ describe("gateway", () => {
     expect(() => buildGatewayTarget("https://api.example.com/root", "%2e%2e/admin", "")).toThrow(
       "gateway path escapes upstream base",
     );
+    expect(() => buildGatewayTarget("https://api.example.com/root", "%2f..%2fadmin", "")).toThrow(
+      "gateway path escapes upstream base",
+    );
+    expect(() =>
+      buildGatewayTarget("https://api.example.com/root", "safe%5c..%5cadmin", ""),
+    ).toThrow("gateway path escapes upstream base");
+  });
+
+  it("strips method override and credential forwarding headers", () => {
+    const headers = forwardedRequestHeaders(
+      new Headers({
+        authorization: "Bearer secret",
+        cookie: "session=secret",
+        "x-api-key": "secret",
+        "x-client": "test",
+        "x-forwarded-for": "10.0.0.1",
+        "x-http-method": "DELETE",
+        "x-http-method-override": "DELETE",
+        "x-method-override": "PATCH",
+      }),
+    );
+    expect(headers.get("x-client")).toBe("test");
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("cookie")).toBeNull();
+    expect(headers.get("x-api-key")).toBeNull();
+    expect(headers.get("x-forwarded-for")).toBeNull();
+    expect(headers.get("x-http-method")).toBeNull();
+    expect(headers.get("x-http-method-override")).toBeNull();
+    expect(headers.get("x-method-override")).toBeNull();
+  });
+
+  it("fails closed when verifier is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    );
+    const res = await app.request(
+      "/acme/gateway/notion/v1/pages",
+      { headers: { authorization: "Bearer not-a-jwt" } },
+      { ENVIRONMENT: "test", VERIFIER_URL: "https://verifier.test" },
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "denied", reasons: ["verifier unavailable"] });
+    vi.unstubAllGlobals();
   });
 });
 
