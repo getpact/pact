@@ -8,6 +8,13 @@
       "when": 1778374119572,
       "tag": "0000_aspiring_phalanx",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778374688124,
+      "tag": "0001_wild_black_crow",
+      "breakpoints": true
     }
   ]
 }
