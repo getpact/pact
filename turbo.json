@@ -16,7 +16,8 @@
         "ADMIN_AUDIENCE",
         "AUDIT_AUDIENCE",
         "MCP_AUDIENCE",
-        "GATEWAY_AUDIENCE"
+        "GATEWAY_AUDIENCE",
+        "PG_POOL_MAX"
       ]
     },
     "typecheck": {

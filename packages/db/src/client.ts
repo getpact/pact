@@ -5,7 +5,8 @@ import postgres, { type Options } from "postgres";
 export type DbClient = ReturnType<typeof createClient>;
 
 export const createClient = (url: string, options?: Partial<Options<Record<string, never>>>) => {
-  const client = postgres(url, { max: 10, ...options });
+  const defaultMax = process.env.PG_POOL_MAX ? Number.parseInt(process.env.PG_POOL_MAX, 10) : 5;
+  const client = postgres(url, { max: defaultMax, ...options });
   return drizzle(client);
 };
 

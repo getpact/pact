@@ -25,6 +25,7 @@ jobs:
     env:
       DATABASE_URL: postgres://pact:pact@localhost:5432/pact
       RLS_TEST_DB: postgres://pact_app:pact_app@localhost:5432/pact
+      PG_POOL_MAX: "2"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -39,7 +40,7 @@ jobs:
       - name: run tests with capture
         run: |
           set -o pipefail
-          pnpm test 2>&1 | tee /tmp/vitest.log
+          pnpm exec turbo run test --concurrency=1 2>&1 | tee /tmp/vitest.log
       - name: ensure DB-gated tests actually ran
         run: node scripts/check-db-tests-ran.mjs /tmp/vitest.log
       - run: pnpm build
