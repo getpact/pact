@@ -15,11 +15,12 @@ Pre-v1.0.
 
 ## Local development
 
-Requirements: Node 22, pnpm 10, Docker.
+Requirements: Node 22, pnpm 9, Docker.
 
 ```
 pnpm install
 docker compose -f infra/compose/docker-compose.yml up -d
+pnpm --filter @getpact/db db:migrate
 pnpm dev
 ```
 

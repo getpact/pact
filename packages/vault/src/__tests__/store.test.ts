@@ -11,7 +11,7 @@ import {
   storeSecret,
 } from "../index.js";
 
-const url = process.env.DATABASE_URL;
+const url = process.env.RLS_TEST_DB;
 const run = url ? describe : describe.skip;
 
 run("vault store", () => {

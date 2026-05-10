@@ -303,17 +303,22 @@ run("mcp server with verifier", () => {
     return { env, slug, created, token: issued.token };
   };
 
-  it("calls verifier and runs tool when policy allows", async () => {
-    const { env, slug, token } = await setupWithPolicy({
-      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
-    });
-
+  const setVerifierEnv = (env: Awaited<ReturnType<typeof buildTestEnv>>) => {
     proxyEnv = {
       DATABASE_URL: env.DATABASE_URL,
       MEK: env.MEK,
       ISSUER_BASE_URL: env.ISSUER_BASE_URL,
     };
-    const res = await app.request(
+  };
+
+  const callTool = async (
+    slug: string,
+    token: string,
+    env: Awaited<ReturnType<typeof buildTestEnv>>,
+    name: string,
+    args: Record<string, unknown> = {},
+  ) =>
+    app.request(
       `/${slug}/mcp`,
       {
         method: "POST",
@@ -325,16 +330,35 @@ run("mcp server with verifier", () => {
           jsonrpc: "2.0",
           id: 1,
           method: "tools/call",
-          params: { name: "pact.whoami", arguments: {} },
+          params: { name, arguments: args },
         }),
       },
       {
         DATABASE_URL: env.DATABASE_URL,
         ISSUER_BASE_URL: env.ISSUER_BASE_URL,
         VERIFIER_URL: verifierUrl,
-        MCP_AUDIENCE: "pact-mcp",
+        MCP_AUDIENCE: env.MCP_AUDIENCE,
       },
     );
+
+  const parseToolResult = async <T>(res: Response): Promise<T> => {
+    const body = (await res.json()) as {
+      result?: { content: Array<{ text: string }> };
+      error?: unknown;
+    };
+    expect(body.error).toBeUndefined();
+    const text = body.result?.content[0]?.text;
+    if (!text) throw new Error("missing tool result text");
+    return JSON.parse(text) as T;
+  };
+
+  it("calls verifier and runs tool when policy allows", async () => {
+    const { env, slug, token } = await setupWithPolicy({
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+
+    setVerifierEnv(env);
+    const res = await callTool(slug, token, env, "pact.whoami");
     const body = (await res.json()) as {
       result?: { content: Array<{ text: string }> };
       error?: unknown;
@@ -343,38 +367,54 @@ run("mcp server with verifier", () => {
     expect(body.result?.content[0]?.text).toContain("alice@example.com");
   });
 
+  it("returns workspace metadata through pact.workspace.info", async () => {
+    const { env, slug, created, token } = await setupWithPolicy({
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+
+    setVerifierEnv(env);
+    const res = await callTool(slug, token, env, "pact.workspace.info");
+    const body = await parseToolResult<{ id: string; slug: string }>(res);
+    expect(body.id).toBe(created.workspaceId);
+    expect(body.slug).toBe(slug);
+  });
+
+  it("returns active policy through pact.policy.active", async () => {
+    const policy = { rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }] };
+    const { env, slug, token } = await setupWithPolicy(policy);
+
+    setVerifierEnv(env);
+    const res = await callTool(slug, token, env, "pact.policy.active");
+    const body = await parseToolResult<{ version: number; body: unknown }>(res);
+    expect(body.version).toBe(1);
+    expect(body.body).toEqual(policy);
+  });
+
+  it("filters recent audit events through pact.audit.recent", async () => {
+    const { env, slug, token } = await setupWithPolicy({
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+
+    setVerifierEnv(env);
+    await callTool(slug, token, env, "pact.whoami");
+    await callTool(slug, token, env, "pact.whoami");
+
+    const res = await callTool(slug, token, env, "pact.audit.recent", {
+      action: "verify.tool:pact.whoami",
+      limit: 1,
+    });
+    const body = await parseToolResult<{ events: Array<{ action: string }> }>(res);
+    expect(body.events.length).toBe(1);
+    expect(body.events[0]?.action).toBe("verify.tool:pact.whoami");
+  });
+
   it("denies tool when policy denies", async () => {
     const { env, slug, token } = await setupWithPolicy({
       rules: [{ subject: { kind: "role", value: "admin" }, effect: "deny" }],
     });
 
-    proxyEnv = {
-      DATABASE_URL: env.DATABASE_URL,
-      MEK: env.MEK,
-      ISSUER_BASE_URL: env.ISSUER_BASE_URL,
-    };
-    const res = await app.request(
-      `/${slug}/mcp`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 2,
-          method: "tools/call",
-          params: { name: "pact.whoami", arguments: {} },
-        }),
-      },
-      {
-        DATABASE_URL: env.DATABASE_URL,
-        ISSUER_BASE_URL: env.ISSUER_BASE_URL,
-        VERIFIER_URL: verifierUrl,
-        MCP_AUDIENCE: "pact-mcp",
-      },
-    );
+    setVerifierEnv(env);
+    const res = await callTool(slug, token, env, "pact.whoami");
     const body = (await res.json()) as { error?: { code: number; data?: { reasons: string[] } } };
     expect(body.error?.code).toBe(-32001);
     expect(body.error?.data?.reasons).toBeDefined();
