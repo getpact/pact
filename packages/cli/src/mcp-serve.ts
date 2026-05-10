@@ -87,19 +87,30 @@ export const serveStdio = async (): Promise<void> => {
 
   process.stdin.setEncoding("utf8");
   let buffer = "";
-  process.stdin.on("data", async (chunk) => {
+  let pump: Promise<void> = Promise.resolve();
+
+  const enqueue = (line: string): void => {
+    pump = pump
+      .then(() => handleLine(cfg, line))
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : "proxy error";
+        process.stderr.write(`pact mcp serve: ${message}\n`);
+      });
+  };
+
+  process.stdin.on("data", (chunk) => {
     buffer += chunk;
     let nl = buffer.indexOf("\n");
     while (nl !== -1) {
       const line = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
-      if (line) await handleLine(cfg, line);
+      if (line) enqueue(line);
       nl = buffer.indexOf("\n");
     }
   });
 
   process.stdin.on("end", () => {
-    if (buffer.trim()) handleLine(cfg, buffer.trim()).finally(() => process.exit(0));
-    else process.exit(0);
+    if (buffer.trim()) enqueue(buffer.trim());
+    pump.finally(() => process.exit(0));
   });
 };
