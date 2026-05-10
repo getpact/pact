@@ -1,7 +1,8 @@
 import { computeGenesisHash } from "@getpact/audit/genesis";
 import { type AuditJwks, type StoredEvent, verifyChain } from "@getpact/audit/verifier";
 import { fromBase64, importPublicSpki } from "@getpact/crypto";
-import type { CliConfig } from "./config.js";
+import { refresh } from "./api.js";
+import { type CliConfig, saveConfig } from "./config.js";
 
 type EventsResponse = {
   events: Array<StoredEvent & { id: string }>;
@@ -18,14 +19,36 @@ type WorkspaceResponse = {
   createdAt: string;
 };
 
-const requireToken = (cfg: CliConfig | null): { token: string; workspaceId: string } => {
-  if (!cfg?.accessToken) throw new Error("not signed in. run pact init or pact login first.");
+const requireConfig = (cfg: CliConfig | null): CliConfig & { workspaceId: string } => {
+  if (!cfg) throw new Error("not signed in. run pact init or pact login first.");
   if (!cfg.workspaceId) throw new Error("config missing workspaceId");
-  return { token: cfg.accessToken, workspaceId: cfg.workspaceId };
+  return { ...cfg, workspaceId: cfg.workspaceId };
 };
 
-const auditBase = (): string =>
-  process.env.PACT_AUDIT_ENDPOINT ?? process.env.PACT_ENDPOINT ?? "http://localhost:8787";
+const issuerBase = (cfg: CliConfig): string =>
+  cfg.endpoint ?? process.env.PACT_ENDPOINT ?? "http://localhost:8787";
+
+const auditBase = (cfg: CliConfig): string =>
+  process.env.PACT_AUDIT_ENDPOINT ?? process.env.PACT_ENDPOINT ?? cfg.endpoint;
+
+const auditAudience = (): string => process.env.PACT_AUDIT_AUDIENCE ?? "pact-audit";
+
+const getAuditToken = async (cfg: CliConfig & { workspaceId: string }): Promise<string> => {
+  if (!cfg.refreshToken) {
+    throw new Error("config missing refreshToken; run pact login again.");
+  }
+  const issued = await refresh(issuerBase(cfg), {
+    workspaceId: cfg.workspaceId,
+    refreshToken: cfg.refreshToken,
+    audience: auditAudience(),
+  });
+  await saveConfig({
+    ...cfg,
+    refreshToken: issued.refreshToken,
+    refreshExpiresAt: issued.refreshExpiresAt,
+  });
+  return issued.token;
+};
 
 const get = async <T>(url: string, token: string): Promise<T> => {
   const res = await fetch(url, {
@@ -41,8 +64,10 @@ export type VerifyReport =
   | { ok: false; brokenAt: { index: number; reason: string } };
 
 export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyReport> => {
-  const { token, workspaceId } = requireToken(cfg);
-  const base = auditBase().replace(/\/+$/, "");
+  const config = requireConfig(cfg);
+  const workspaceId = config.workspaceId;
+  const token = await getAuditToken(config);
+  const base = auditBase(config).replace(/\/+$/, "");
 
   const ws = await get<WorkspaceResponse>(
     `${base}/v1/workspaces/${workspaceId}/audit/workspace`,

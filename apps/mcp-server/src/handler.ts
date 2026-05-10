@@ -63,7 +63,7 @@ export const handleMcp = async (
       const tool = registry.get(name);
       if (!tool) return err(id, -32601, `unknown tool: ${name}`);
 
-      const resource = typeof args.resource === "string" ? args.resource : `tool:${name}`;
+      const resource = `tool:${name}`;
       if (!opts.verify) {
         return err(id, -32002, "verifier unavailable");
       }

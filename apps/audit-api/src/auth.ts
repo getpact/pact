@@ -1,6 +1,8 @@
 import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
+import { revokedJtis } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
+import { and, eq } from "drizzle-orm";
 import { decodeJwt, decodeProtectedHeader } from "jose";
 
 export type AuditAuthContext = {
@@ -9,6 +11,14 @@ export type AuditAuthContext = {
   email: string;
   roles: string[];
 };
+
+const stringArrayClaim = (value: unknown, name: string): string[] => {
+  if (value === undefined) return [];
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;
+  throw new Error(`invalid ${name} claim`);
+};
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export const authenticateAuditReader = async (
   databaseUrl: string,
@@ -30,11 +40,15 @@ export const authenticateAuditReader = async (
   }
   const tokenWorkspace = claims.org as string | undefined;
   const sub = claims.sub;
-  if (!tokenWorkspace || !sub) {
+  const jti = claims.jti as string | undefined;
+  if (!tokenWorkspace || !sub || !jti) {
     throw new Error("missing required claims");
   }
   if (tokenWorkspace !== workspaceId) {
     throw new Error("token workspace mismatch");
+  }
+  if (!UUID_RE.test(workspaceId)) {
+    throw new Error("malformed workspace id");
   }
 
   let kid: string | undefined;
@@ -58,7 +72,18 @@ export const authenticateAuditReader = async (
     audience,
   });
 
-  const roles = (claims.scopes as string[] | undefined) ?? [];
+  const revoked = await withWorkspace(db, workspaceId, (tx) =>
+    tx
+      .select({ jti: revokedJtis.jti })
+      .from(revokedJtis)
+      .where(and(eq(revokedJtis.workspaceId, workspaceId), eq(revokedJtis.jti, jti)))
+      .limit(1),
+  );
+  if (revoked.length > 0) {
+    throw new Error("token revoked");
+  }
+
+  const roles = stringArrayClaim(claims.scopes, "scopes");
   if (!roles.includes("admin") && !roles.includes("auditor")) {
     throw new Error("admin or auditor role required");
   }

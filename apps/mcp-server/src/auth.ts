@@ -15,6 +15,14 @@ export type AuthContext = {
   token: string;
 };
 
+const stringArrayClaim = (value: unknown, name: string): string[] => {
+  if (value === undefined) return [];
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;
+  throw new Error(`invalid ${name} claim`);
+};
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export const authenticate = async (
   databaseUrl: string,
   workspaceSlug: string,
@@ -38,6 +46,9 @@ export const authenticate = async (
   const jti = claims.jti as string | undefined;
   if (!workspaceId || !sub || !jti) {
     throw new Error("missing required claims");
+  }
+  if (!UUID_RE.test(workspaceId)) {
+    throw new Error("malformed workspace id");
   }
 
   let kid: string | undefined;
@@ -75,8 +86,8 @@ export const authenticate = async (
     workspaceId,
     userId: sub,
     email: (claims.email as string | undefined) ?? "",
-    groups: (claims.groups as string[] | undefined) ?? [],
-    roles: (claims.scopes as string[] | undefined) ?? [],
+    groups: stringArrayClaim(claims.groups, "groups"),
+    roles: stringArrayClaim(claims.scopes, "scopes"),
     jti,
     token,
   };

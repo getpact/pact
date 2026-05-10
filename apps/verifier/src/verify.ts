@@ -26,6 +26,14 @@ export type VerifyOutput = {
 const result = (allow: boolean, reasons: string[], sub: string | undefined): VerifyOutput =>
   sub ? { allow, reasons, sub } : { allow, reasons };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const stringArrayClaim = (value: unknown): string[] | null => {
+  if (value === undefined) return [];
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;
+  return null;
+};
+
 const tryAudit = async (
   databaseUrl: string,
   rawMek: Uint8Array,
@@ -87,6 +95,9 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
   if (!workspaceId || !jti) {
     return result(false, ["malformed token"], sub);
   }
+  if (!UUID_RE.test(workspaceId)) {
+    return result(false, ["malformed token"], sub);
+  }
 
   const db = createClient(databaseUrl);
 
@@ -105,7 +116,6 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
   );
   const matched = keys.find((k) => k.id === kid);
   if (!matched) {
-    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["unknown kid"], sub, input);
     return result(false, ["unknown kid"], sub);
   }
   try {
@@ -115,7 +125,6 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
       audience: input.audience,
     });
   } catch {
-    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["signature invalid"], sub, input);
     return result(false, ["signature invalid"], sub);
   }
 
@@ -156,11 +165,26 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
     return result(false, ["no active policy"], sub);
   }
 
+  const groups = stringArrayClaim(claims.groups);
+  const roles = stringArrayClaim(claims.scopes);
+  if (!groups || !roles) {
+    await tryAudit(
+      databaseUrl,
+      rawMek,
+      workspaceId,
+      "deny",
+      ["malformed token claims"],
+      sub,
+      input,
+    );
+    return result(false, ["malformed token claims"], sub);
+  }
+
   const tokenClaims: TokenClaims = {
     sub: claims.sub ?? "",
     email: (claims.email as string | undefined) ?? "",
-    groups: (claims.groups as string[] | undefined) ?? [],
-    roles: (claims.scopes as string[] | undefined) ?? [],
+    groups,
+    roles,
   };
 
   const policy = tryParsePolicy(policyRow[0]?.body);

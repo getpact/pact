@@ -52,7 +52,8 @@ app.get("/v1/workspaces/:id/audit/events", async (c) => {
   const sinceRaw = url.searchParams.get("since");
   const untilRaw = url.searchParams.get("until");
   const limitRaw = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
-  const cursor = parseCursor(url.searchParams.get("cursor") ?? undefined);
+  const cursorRaw = url.searchParams.get("cursor") ?? undefined;
+  const cursor = parseCursor(cursorRaw);
   const orderRaw = url.searchParams.get("order");
   const order = orderRaw === "asc" ? "asc" : "desc";
 
@@ -60,6 +61,7 @@ app.get("/v1/workspaces/:id/audit/events", async (c) => {
   const until = untilRaw ? new Date(untilRaw) : undefined;
   if (since && Number.isNaN(since.valueOf())) return c.json({ error: "invalid since" }, 400);
   if (until && Number.isNaN(until.valueOf())) return c.json({ error: "invalid until" }, 400);
+  if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400);
 
   const limit =
     Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, MAX_LIMIT) : DEFAULT_LIMIT;

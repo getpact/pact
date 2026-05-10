@@ -16,6 +16,7 @@ export type QueryInput = {
 
 export type QueryRow = {
   id: string;
+  workspaceId: string;
   ts: Date;
   actorKind: string;
   actorId: string | null;
@@ -36,7 +37,7 @@ export type QueryOutput = {
 
 export const parseCursor = (raw: string | undefined): QueryInput["cursor"] => {
   if (!raw) return undefined;
-  const idx = raw.indexOf(":");
+  const idx = raw.lastIndexOf(":");
   if (idx <= 0) return undefined;
   const ts = new Date(raw.slice(0, idx));
   const thisHash = raw.slice(idx + 1);
@@ -78,6 +79,7 @@ export const queryEvents = async (tx: Tx, input: QueryInput): Promise<QueryOutpu
   return {
     events: trimmed.map((r) => ({
       id: r.id,
+      workspaceId: r.workspaceId,
       ts: r.ts,
       actorKind: r.actorKind,
       actorId: r.actorId,

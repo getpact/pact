@@ -8,6 +8,7 @@ type Env = {
   DATABASE_URL: string;
   MEK: string;
   ISSUER_BASE_URL: string;
+  VERIFIER_AUDIENCE?: string;
   REVOCATION_CACHE?: KVNamespace;
 };
 
@@ -22,7 +23,6 @@ app.post("/v1/verify", async (c) => {
     token: string;
     action: string;
     resource: string;
-    audience: string;
   }>();
   const rawMek = fromBase64(c.env.MEK);
   const cache = c.env.REVOCATION_CACHE ? kvRevocationCache(c.env.REVOCATION_CACHE) : undefined;
@@ -33,7 +33,12 @@ app.post("/v1/verify", async (c) => {
       issuer: c.env.ISSUER_BASE_URL,
       ...(cache ? { cache } : {}),
     },
-    body,
+    {
+      token: body.token,
+      action: body.action,
+      resource: body.resource,
+      audience: c.env.VERIFIER_AUDIENCE ?? "pact-mcp",
+    },
   );
   return c.json(result, result.allow ? 200 : 403);
 });
