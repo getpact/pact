@@ -7,6 +7,7 @@
     "build": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
