@@ -167,7 +167,11 @@ importers:
 
   packages/policy: {}
 
-  packages/vault: {}
+  packages/vault:
+    dependencies:
+      '@getpact/crypto':
+        specifier: workspace:*
+        version: link:../crypto
 
   packages/verifier-sdk-node: {}
 

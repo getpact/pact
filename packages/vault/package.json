@@ -16,6 +16,9 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@getpact/crypto": "workspace:*"
+  },
   "files": [
     "dist"
   ]

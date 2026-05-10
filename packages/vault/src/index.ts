@@ -1,1 +1,1 @@
-// pact vault
+export * from "./envelope.js";
