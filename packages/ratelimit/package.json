@@ -16,6 +16,10 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@getpact/db": "workspace:*",
+    "drizzle-orm": "^0.36.0"
+  },
   "peerDependencies": {
     "hono": "^4.6.0"
   },

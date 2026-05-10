@@ -121,3 +121,5 @@ const buildOpts = (
 
 export const memoryRateLimit = (opts: FixedWindowRateLimitOptions): MiddlewareHandler =>
   rateLimit(buildOpts(memoryRateLimiter(), opts));
+
+export { databaseRateLimiter, sweepExpiredRateBuckets } from "./db.js";

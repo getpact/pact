@@ -2,14 +2,19 @@ import { type Email, PactError, securityHeaders } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
-import { memoryRateLimiter, type RateLimiter, rateLimit } from "@getpact/ratelimit";
+import {
+  databaseRateLimiter,
+  memoryRateLimiter,
+  type RateLimiter,
+  rateLimit,
+  sweepExpiredRateBuckets,
+} from "@getpact/ratelimit";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
 import { exchangeGoogleCode } from "./google.js";
 import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
-import { databaseRateLimiter, sweepExpiredRateBuckets } from "./rate-limit.js";
 import { createWorkspace } from "./workspace.js";
 
 export const app = new Hono<{ Bindings: Env }>();

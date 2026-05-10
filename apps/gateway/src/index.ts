@@ -7,13 +7,13 @@ import {
 import { fromBase64 } from "@getpact/crypto";
 import { createClient, schema, withWorkspace } from "@getpact/db";
 import { createLogger, requestLogger } from "@getpact/logger";
+import { databaseRateLimiter } from "@getpact/ratelimit";
 import { loadSecretString } from "@getpact/vault";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeJwt } from "jose";
 import { emitGatewayAudit } from "./audit.js";
-import { databaseRateLimiter } from "./rate-limit.js";
 
 type Env = {
   DATABASE_URL: string;

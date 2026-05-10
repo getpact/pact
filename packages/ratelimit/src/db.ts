@@ -1,6 +1,6 @@
 import { createClient, type DbClient } from "@getpact/db";
-import type { RateLimiter, RateLimitResult } from "@getpact/ratelimit";
 import { sql } from "drizzle-orm";
+import type { RateLimiter, RateLimitResult } from "./index.js";
 
 const dbLimiters = new Map<string, RateLimiter>();
 
@@ -15,7 +15,7 @@ export const databaseRateLimiter = (databaseUrl: string): RateLimiter => {
   const cached = dbLimiters.get(databaseUrl);
   if (cached) return cached;
 
-  const db = createClient(databaseUrl);
+  const db: DbClient = createClient(databaseUrl);
   const limiter: RateLimiter = {
     async hit(key, limit, windowSeconds): Promise<RateLimitResult> {
       const rows = (await db.execute(
