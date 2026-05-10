@@ -156,10 +156,6 @@ run("google oidc exchange", () => {
       },
       env,
     );
-    if (res.status !== 200) {
-      const text = await res.clone().text();
-      console.error("debug body:", text);
-    }
     expect(res.status).toBe(200);
     const body = (await res.json()) as { token: string; refreshToken: string };
     expect(body.token.split(".").length).toBe(3);
