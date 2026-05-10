@@ -6,7 +6,9 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 
 - Cloudflare account with `getpact.dev` zone active
 - Workers Paid plan
-- Hyperdrive binding pointing to a Neon Postgres connection string
+- `DATABASE_URL` secret pointing to Neon/Postgres. Hyperdrive is not wired into
+  the current Workers yet; do not claim Hyperdrive production support until the
+  Worker envs accept `HYPERDRIVE.connectionString`.
 - KV namespaces: `pact-revocation`, `pact-jwks-cache`
 - Durable Object class: `WorkspaceChainLock` (registered in `apps/audit-api/wrangler.toml`)
 - R2 buckets: `pact-audit-prod`, `pact-audit-staging`
@@ -35,17 +37,21 @@ validates Worker manifests, runs `pnpm typecheck`, runs `pnpm build`, then deplo
 issuer, verifier, MCP server, admin API, and audit API in order.
 
 The gateway Worker is opt-in while Mode B is being hardened. Deploy it only
-after configuring both the runtime host allowlist and platform egress controls:
+after configuring both the runtime host allowlist and platform egress controls.
+The deploy validator requires a concrete Cloudflare Zero Trust Gateway rule id
+and checks that it exists through the Cloudflare API:
 
 ```sh
 PACT_DEPLOY_GATEWAY=true \
-PACT_GATEWAY_UPSTREAM_HOST_ALLOWLIST_READY=true \
-PACT_GATEWAY_EGRESS_POLICY_READY=true \
+PACT_GATEWAY_EGRESS_POLICY_ID=<cloudflare-gateway-rule-id> \
+CLOUDFLARE_ACCOUNT_ID=<account-id> \
+CLOUDFLARE_API_TOKEN=<api-token> \
 pnpm deploy:cloudflare
 ```
 
-The two `*_READY` variables are intentional deployment gates. They assert that
-Cloudflare-side settings already exist; they do not replace runtime checks.
+This still does not prove DNS rebinding safety by itself; it prevents gateway
+deploys unless there is Cloudflare-side egress policy evidence and concrete
+`UPSTREAM_HOST_ALLOWLIST` values in the admin API and gateway manifests.
 
 After deploy, run a health smoke test:
 
@@ -92,7 +98,7 @@ The bootstrap is manual until we move to Terraform. Steps:
 2. Create KV namespaces and copy ids into per-app `wrangler.toml`
 3. Create R2 buckets
 4. Create queues
-5. Create Hyperdrive binding (needs Neon connection string)
+5. Upload `DATABASE_URL` as a secret for every Worker that uses Postgres
 6. Set secrets via `wrangler secret put <NAME>` per Worker that needs it
 
 The MEK is a 256-bit AES-GCM key. Generate locally with `openssl rand -base64 32` and upload via `wrangler secret put MEK`.

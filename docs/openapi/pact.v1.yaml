@@ -1,0 +1,562 @@
+openapi: 3.1.0
+info:
+  title: Pact API
+  version: 0.1.0
+  description: Pre-v1 HTTP contract for Pact Workers. This file is the source of truth until route-level runtime schemas are introduced.
+servers:
+  - url: https://api.getpact.dev
+tags:
+  - name: issuer
+  - name: verifier
+  - name: admin
+  - name: audit
+  - name: gateway
+  - name: mcp
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [issuer]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Worker is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+  /v1/dev/issue:
+    post:
+      tags: [issuer]
+      summary: Issue a development token
+      security: []
+      parameters:
+        - in: header
+          name: x-pact-dev-issue-secret
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId, email]
+              properties:
+                workspaceId:
+                  type: string
+                  format: uuid
+                email:
+                  type: string
+                  format: email
+                audience:
+                  type: string
+      responses:
+        "200":
+          description: Token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedToken"
+  /v1/workspaces:
+    post:
+      tags: [issuer]
+      summary: Create a workspace
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, name, adminEmail]
+              properties:
+                slug:
+                  type: string
+                name:
+                  type: string
+                region:
+                  type: string
+                adminEmail:
+                  type: string
+                  format: email
+                adminName:
+                  type: string
+      responses:
+        "201":
+          description: Workspace created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspaceId, adminUserId, jwtKeyId, auditKeyId]
+                properties:
+                  workspaceId:
+                    type: string
+                    format: uuid
+                  adminUserId:
+                    type: string
+                    format: uuid
+                  jwtKeyId:
+                    type: string
+                  auditKeyId:
+                    type: string
+  /v1/oauth/google/exchange:
+    post:
+      tags: [issuer]
+      summary: Exchange a Google OAuth code for Pact tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, codeVerifier, redirectUri]
+              properties:
+                code:
+                  type: string
+                codeVerifier:
+                  type: string
+                redirectUri:
+                  type: string
+                  format: uri
+                audience:
+                  type: string
+      responses:
+        "200":
+          description: Token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedToken"
+  /v1/refresh:
+    post:
+      tags: [issuer]
+      summary: Redeem a refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+                audience:
+                  type: string
+      responses:
+        "200":
+          description: Token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedToken"
+  /v1/workspaces/{workspaceId}/.well-known/jwks.json:
+    get:
+      tags: [issuer]
+      summary: Workspace JWT JWKS
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: JWKS document.
+  /v1/workspaces/{workspaceId}/.well-known/audit-jwks.json:
+    get:
+      tags: [issuer]
+      summary: Workspace audit JWKS
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: JWKS document.
+  /v1/verify:
+    post:
+      tags: [verifier]
+      summary: Verify a requested action against policy
+      security:
+        - verifierServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyRequest"
+      responses:
+        "200":
+          description: Allowed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+        "403":
+          description: Denied by policy or token validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+  /v1/workspaces/{workspaceId}/users:
+    get:
+      tags: [admin]
+      summary: List users
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Users.
+    post:
+      tags: [admin]
+      summary: Create a user
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+      responses:
+        "201":
+          description: User created.
+  /v1/workspaces/{workspaceId}/groups:
+    post:
+      tags: [admin]
+      summary: Create a group
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroupCreate"
+      responses:
+        "201":
+          description: Group created.
+  /v1/workspaces/{workspaceId}/groups/{groupId}/members:
+    post:
+      tags: [admin]
+      summary: Add a user to a group
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - in: path
+          name: groupId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Member added.
+  /v1/workspaces/{workspaceId}/policies:
+    get:
+      tags: [admin]
+      summary: List policies
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Policies.
+    post:
+      tags: [admin]
+      summary: Create a policy version
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: object
+      responses:
+        "201":
+          description: Policy created.
+  /v1/workspaces/{workspaceId}/revocations:
+    post:
+      tags: [admin]
+      summary: Revoke a token JTI
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevocationCreate"
+      responses:
+        "201":
+          description: Token revoked.
+  /v1/workspaces/{workspaceId}/invites:
+    post:
+      tags: [admin]
+      summary: Create an invite
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteCreate"
+      responses:
+        "201":
+          description: Invite created.
+  /v1/workspaces/{workspaceId}/brains:
+    get:
+      tags: [admin]
+      summary: List gateway brains
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Brains.
+    post:
+      tags: [admin]
+      summary: Create a gateway brain
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BrainCreate"
+      responses:
+        "201":
+          description: Brain created.
+  /v1/workspaces/{workspaceId}/brains/{brainId}:
+    delete:
+      tags: [admin]
+      summary: Delete a gateway brain
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - in: path
+          name: brainId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Brain deleted.
+  /v1/workspaces/{workspaceId}/brains/{brainId}/credential:
+    put:
+      tags: [admin]
+      summary: Store a gateway brain bearer credential
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - in: path
+          name: brainId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        "200":
+          description: Credential stored.
+  /v1/workspaces/{workspaceId}/audit/events:
+    get:
+      tags: [audit]
+      summary: List audit events
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Audit events.
+  /v1/workspaces/{workspaceId}/audit/workspace:
+    get:
+      tags: [audit]
+      summary: Workspace metadata for audit verification
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Workspace metadata.
+  /v1/workspaces/{workspaceId}/audit/chain:
+    get:
+      tags: [audit]
+      summary: Current audit chain head
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Chain head.
+  /{workspace}/mcp:
+    post:
+      tags: [mcp]
+      summary: JSON-RPC MCP endpoint for a workspace
+      parameters:
+        - in: path
+          name: workspace
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: JSON-RPC response.
+  /{workspace}/gateway/{brain}/{path}:
+    parameters:
+      - in: path
+        name: workspace
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: brain
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: path
+        required: true
+        schema:
+          type: string
+    x-pact-note: Gateway accepts all HTTP methods and forwards only configured request headers.
+    get:
+      tags: [gateway]
+      summary: Gateway GET to a brain upstream
+      responses:
+        "200":
+          description: Upstream response.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    verifierServiceAuth:
+      type: http
+      scheme: bearer
+      description: Shared service token used by internal callers.
+  parameters:
+    workspaceId:
+      in: path
+      name: workspaceId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    Ok:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+    IssuedToken:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+    VerifyRequest:
+      type: object
+      required: [token, action, resource]
+      properties:
+        token:
+          type: string
+        action:
+          type: string
+        resource:
+          type: string
+        audience:
+          type: string
+    VerifyResponse:
+      type: object
+      required: [allow, reasons]
+      properties:
+        allow:
+          type: boolean
+        reasons:
+          type: array
+          items:
+            type: string
+        sub:
+          type: string
+    GroupCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    RevocationCreate:
+      type: object
+      required: [jti]
+      properties:
+        jti:
+          type: string
+        reason:
+          type: string
+    InviteCreate:
+      type: object
+      required: [email, scope, ttl]
+      properties:
+        email:
+          type: string
+          format: email
+        scope:
+          type: object
+        ttl:
+          type: string
+          enum: [1d, 1w, 1m]
+    BrainCreate:
+      type: object
+      required: [kind, baseUrl]
+      properties:
+        kind:
+          type: string
+        baseUrl:
+          type: string
+          format: uri
+        authScheme:
+          type: string
+          enum: [none, bearer]

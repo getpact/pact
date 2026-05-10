@@ -44,6 +44,6 @@ OSS (MIT):
 - `@getpact/verifier-sdk` (Node.js + edge JWT verifier)
 - `@getpact/adapter-sdk`
 - `@getpact/adapter-slack`
-- `getpact-verifier` (Python)
+- `getpact-verifier` (Python placeholder; not functional yet)
 
 Internal: `@getpact/core`, `@getpact/db`, `@getpact/crypto`, `@getpact/policy`, `@getpact/audit`, `@getpact/vault`, `@getpact/keystore`, `@getpact/logger`, `@getpact/ratelimit`, `@getpact/test-helpers`.
