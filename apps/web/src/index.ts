@@ -853,8 +853,12 @@ async function handleDriveCallback(c: AppContext) {
   ).catch(() => null);
   clearDriveOAuthAttempt(c);
   if (!response?.ok) {
+    const body = await response
+      ?.json<{ error?: string; message?: string }>()
+      .catch((): { error?: string; message?: string } => ({}));
+    const message = body?.message ?? "Google Drive could not be connected for this workspace user.";
     return c.html(
-      loginFailedHtml("Google Drive could not be connected for this workspace user."),
+      loginFailedHtml(message),
       response?.status === 400 || response?.status === 401 || response?.status === 403
         ? response.status
         : 502,

@@ -365,6 +365,35 @@ describe("web dashboard auth", () => {
     expect(res.status).toBe(401);
   });
 
+  it("renders the admin-api Drive rejection message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          { error: "invalid_request", message: "google drive readonly scope was not granted" },
+          { status: 400 },
+        ),
+      ),
+    );
+    const res = await app.request(
+      "/v1/connections/google-drive/callback?code=drive-code&state=state-1",
+      {
+        headers: {
+          cookie: [
+            "__Host-pact-drive-state=state-1",
+            "__Host-pact-drive-verifier=verifier-1",
+            `__Host-pact-drive-workspace=${workspaceId}`,
+            "__Host-pact-drive-nonce=nonce-1",
+            "__Secure-pact-drive-admin-access=bridge-token",
+          ].join(";"),
+        },
+      },
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("google drive readonly scope was not granted");
+  });
+
   it("supports sharing the local login callback path for Drive OAuth", async () => {
     const res = await app.request(
       "http://127.0.0.1:19147/v1/connections/google-drive/start",
