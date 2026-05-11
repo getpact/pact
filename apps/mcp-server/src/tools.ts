@@ -21,7 +21,7 @@ const whoami: AdapterTool = {
     inputSchema: { type: "object" },
   },
   authorize: (_args, ctx) => ({
-    action: "pact.whoami",
+    action: "tool:pact.whoami",
     resource: `workspace:${ctx.workspaceId}:identity`,
   }),
   handler: async (_args, ctx) =>
@@ -41,7 +41,7 @@ const workspaceInfo: AdapterTool = {
     inputSchema: { type: "object" },
   },
   authorize: (_args, ctx) => ({
-    action: "pact.workspace.info",
+    action: "tool:pact.workspace.info",
     resource: `workspace:${ctx.workspaceId}:info`,
   }),
   handler: async (_args, ctx, deps) => {
@@ -83,7 +83,7 @@ const auditRecent: AdapterTool = {
     },
   },
   authorize: (_args, ctx) => ({
-    action: "pact.audit.recent",
+    action: "tool:pact.audit.recent",
     resource: `workspace:${ctx.workspaceId}:audit`,
   }),
   handler: async (args, ctx, deps) => {
@@ -131,7 +131,7 @@ const policyActive: AdapterTool = {
     inputSchema: { type: "object" },
   },
   authorize: (_args, ctx) => ({
-    action: "pact.policy.active",
+    action: "tool:pact.policy.active",
     resource: `workspace:${ctx.workspaceId}:policy`,
   }),
   handler: async (_args, ctx, deps) => {
