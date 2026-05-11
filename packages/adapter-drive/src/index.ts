@@ -159,10 +159,13 @@ export function createDriveAdapter(options: DriveAdapterOptions = {}): Adapter {
         },
       },
     },
-    authorize: (input, ctx) => ({
-      action: "drive.file.get",
-      resource: `workspace:${ctx.workspaceId}:drive:file:${stringInput(input, "fileId") ?? "unknown"}`,
-    }),
+    authorize: (input, ctx) => {
+      const fileId = stringInput(input, "fileId");
+      return {
+        action: "drive.file.get",
+        resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:file:${isSafeFileId(fileId) ? fileId : "invalid"}`,
+      };
+    },
     async handler(input, ctx, deps) {
       const fileId = stringInput(input, "fileId");
       if (!fileId) {
@@ -258,7 +261,11 @@ function trimTrailingSlash(value: string): string {
 }
 
 function assertSafeFileId(fileId: string): void {
-  if (!/^[A-Za-z0-9_-]+$/.test(fileId)) {
+  if (!isSafeFileId(fileId)) {
     throw new Error("Google Drive file id contains invalid characters");
   }
+}
+
+function isSafeFileId(fileId: string | undefined): fileId is string {
+  return !!fileId && /^[A-Za-z0-9_-]+$/.test(fileId);
 }
