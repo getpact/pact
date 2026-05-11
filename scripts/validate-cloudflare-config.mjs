@@ -104,15 +104,19 @@ const requireEnv = (name) => {
 };
 
 const PRIVATE_DESTINATION_MARKERS = [
+  "0.0.0.0/8",
   "10.0.0.0/8",
+  "100.64.0.0/10",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
   "172.16.0.0/12",
   "192.168.0.0/16",
-  "169.254.0.0/16",
-  "127.0.0.0/8",
-  "100.64.0.0/10",
+  "240.0.0.0/4",
+  "255.255.255.255/32",
+  "::1",
   "fc00::/7",
   "fe80::/10",
-  "::1",
+  "ff00::/8",
 ];
 
 const collectStrings = (value, out = []) => {
@@ -140,7 +144,7 @@ const assertGatewayEgressPolicy = (policyId, result) => {
     traffic: result?.traffic,
   });
   const destinationExpression = expressions.find((expr) =>
-    /\b(?:net\.dst\.ip|ip\.dst)\s+in\s+\{[^}]+\}/i.test(expr),
+    /\b(?:net\.dst\.ip|ip\.dst)\s+in\s+\{[^}\s][^}]*\}/i.test(expr),
   );
   if (!destinationExpression) {
     failures.push(
