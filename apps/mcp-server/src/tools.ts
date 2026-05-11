@@ -1,3 +1,4 @@
+import { createDriveAdapter, type DriveConnection } from "@getpact/adapter-drive";
 import {
   type Adapter,
   type AdapterTool,
@@ -181,7 +182,43 @@ const slackAdapter = createSlackAdapter({
   },
 });
 
-const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter];
+const driveAdapter = createDriveAdapter({
+  loadConnection: async (ctx, deps) => {
+    if (!deps.rawMek) return null;
+    const db = createClient(deps.databaseUrl);
+    const value = await withWorkspace(db, ctx.workspaceId, (tx) =>
+      loadSecretString(tx, deps.rawMek as Uint8Array, {
+        workspaceId: ctx.workspaceId,
+        kind: "google_drive_oauth",
+        target: `user:${ctx.userId}`,
+      }),
+    );
+    return parseDriveConnection(value);
+  },
+});
+
+const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter, driveAdapter];
+
+function parseDriveConnection(value: string | null): DriveConnection | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<DriveConnection>;
+    if (typeof parsed.accessToken !== "string" || parsed.accessToken.length === 0) {
+      return null;
+    }
+    const connection: DriveConnection = {
+      accessToken: parsed.accessToken,
+    };
+    if (typeof parsed.refreshToken === "string") connection.refreshToken = parsed.refreshToken;
+    if (typeof parsed.expiresAt === "string") connection.expiresAt = parsed.expiresAt;
+    if (typeof parsed.scope === "string") connection.scope = parsed.scope;
+    if (typeof parsed.googleSub === "string") connection.googleSub = parsed.googleSub;
+    if (typeof parsed.email === "string") connection.email = parsed.email;
+    return connection;
+  } catch {
+    return null;
+  }
+}
 
 export const createToolRegistry = (
   adapters: Adapter[] = defaultAdapters,

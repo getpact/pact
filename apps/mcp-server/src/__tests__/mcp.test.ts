@@ -323,6 +323,8 @@ run("mcp server", () => {
     const names = body.result.tools.map((t) => t.name);
     expect(names).toContain("pact.whoami");
     expect(names).toContain("pact.slack.auth.test");
+    expect(names).toContain("pact.drive.files.list");
+    expect(names).toContain("pact.drive.file.get");
   });
 
   it("refuses tool calls when verifier is not configured", async () => {

@@ -10,6 +10,7 @@
     { "path": "./packages/keystore" },
     { "path": "./packages/adapter-sdk" },
     { "path": "./packages/adapter-slack" },
+    { "path": "./packages/adapter-drive" },
     { "path": "./packages/verifier-sdk-node" },
     { "path": "./packages/cli" }
   ]
