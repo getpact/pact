@@ -28,6 +28,7 @@ Mode B forwarding gateway. Caller presents a Pact JWT (`aud=pact-gateway`); gate
 - `GATEWAY_RATE_LIMIT` / `GATEWAY_RATE_WINDOW_SECONDS` (defaults 60/60)
 - `GATEWAY_AUDIT_MODE` - `required` | `best_effort` (default `required` in prod)
 - `GATEWAY_FORWARD_HEADER_ALLOWLIST` - csv allowlist for headers forwarded to upstream
+- `GATEWAY_RESPONSE_HEADER_ALLOWLIST` - csv allowlist for headers returned from upstream to client
 - `UPSTREAM_HOST_ALLOWLIST` - csv pattern list (`*.example.com`); required in prod
 
 ## Audit outcomes
