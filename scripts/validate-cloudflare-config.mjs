@@ -43,6 +43,44 @@ const requireNarrowHostAllowlist = (path) => {
   }
 };
 
+const NEVER_FORWARD_REQUEST_HEADERS = new Set([
+  "authorization",
+  "cf-connecting-ip",
+  "cf-ipcountry",
+  "cf-ray",
+  "connection",
+  "content-length",
+  "cookie",
+  "forwarded",
+  "host",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "x-api-key",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-http-method",
+  "x-http-method-override",
+  "x-method-override",
+  "x-real-ip",
+]);
+
+const rejectDangerousForwardedHeaders = (path) => {
+  const raw = tomlString(path, "GATEWAY_FORWARD_HEADER_ALLOWLIST");
+  if (!raw) return;
+  const dangerous = raw
+    .split(",")
+    .map((header) => header.trim().toLowerCase())
+    .filter((header) => NEVER_FORWARD_REQUEST_HEADERS.has(header));
+  if (dangerous.length > 0) {
+    failures.push(`${path} forwards unsafe request headers: ${dangerous.join(", ")}`);
+  }
+};
+
 for (const app of apps) {
   const wrangler = `apps/${app}/wrangler.toml`;
   requireFile(wrangler);
@@ -77,28 +115,42 @@ const PRIVATE_DESTINATION_MARKERS = [
   "::1",
 ];
 
+const collectStrings = (value, out = []) => {
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) {
+    for (const item of value) collectStrings(item, out);
+  } else if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (key === "name" || key === "description") continue;
+      collectStrings(item, out);
+    }
+  }
+  return out;
+};
+
 const assertGatewayEgressPolicy = (policyId, result) => {
   const action = String(result?.action ?? "").toLowerCase();
   if (action !== "block") {
     failures.push(`Cloudflare Gateway egress policy ${policyId} action must be block`);
   }
 
-  const matchSurface = {
+  const expressions = collectStrings({
     conditions: result?.conditions,
     filters: result?.filters,
-    ruleSettings: result?.rule_settings,
     traffic: result?.traffic,
-  };
-  const serialized = JSON.stringify(matchSurface).toLowerCase();
-  if (
-    !serialized.includes("dst") &&
-    !serialized.includes("destination") &&
-    !serialized.includes("ip")
-  ) {
-    failures.push(`Cloudflare Gateway egress policy ${policyId} must match destination IP ranges`);
+  });
+  const destinationExpression = expressions.find((expr) =>
+    /\b(?:net\.dst\.ip|ip\.dst)\s+in\s+\{[^}]+\}/i.test(expr),
+  );
+  if (!destinationExpression) {
+    failures.push(
+      `Cloudflare Gateway egress policy ${policyId} must use a destination IP CIDR expression`,
+    );
+    return;
   }
+  const normalized = destinationExpression.toLowerCase();
   const missingMarkers = PRIVATE_DESTINATION_MARKERS.filter(
-    (marker) => !serialized.includes(marker.toLowerCase()),
+    (marker) => !normalized.includes(marker.toLowerCase()),
   );
   if (missingMarkers.length > 0) {
     failures.push(
@@ -114,6 +166,7 @@ if (gatewayEnabled) {
   requireEnv("CLOUDFLARE_API_TOKEN");
   requireNarrowHostAllowlist("apps/admin-api/wrangler.toml");
   requireNarrowHostAllowlist("apps/gateway/wrangler.toml");
+  rejectDangerousForwardedHeaders("apps/gateway/wrangler.toml");
   requireTomlValue(
     "apps/gateway/wrangler.toml",
     /GATEWAY_AUDIT_MODE\s*=\s*"required"/,
