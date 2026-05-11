@@ -35,15 +35,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @getpact/db db:migrate
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: run tests with capture
-        run: |
-          set -o pipefail
-          pnpm exec turbo run test --concurrency=1 2>&1 | tee /tmp/vitest.log
-      - name: ensure DB-gated tests actually ran
-        run: node scripts/check-db-tests-ran.mjs /tmp/vitest.log
+      - run: pnpm test:db
       - run: pnpm build
 
   secret-scan:
