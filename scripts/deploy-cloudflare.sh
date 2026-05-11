@@ -24,6 +24,7 @@ for app in $apps; do
 done
 
 node scripts/validate-cloudflare-config.mjs $apps
+node scripts/validate-cloudflare-secrets.mjs $apps
 
 pnpm typecheck
 pnpm build

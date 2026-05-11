@@ -31,7 +31,7 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 ### 1. DNS rebinding against gateway upstreams
 - `assertSafeUpstreamUrl` validates the host string at parse time. `fetch` re-resolves DNS at request time.
 - Workers do not expose a DNS resolver hook, so post-DNS IP validation cannot happen inside the Worker.
-- Mitigation: deploy-time Cloudflare Zero Trust egress policy (operator responsibility). `scripts/deploy-cloudflare.sh` requires `PACT_GATEWAY_EGRESS_POLICY_READY=true` as a guardrail.
+- Mitigation: deploy-time Cloudflare Zero Trust egress policy (operator responsibility). `scripts/deploy-cloudflare.sh` requires `PACT_GATEWAY_EGRESS_POLICY_ID` and validates the referenced rule before gateway deploy.
 - Same exposure applies to the gateway-to-verifier and mcp-to-verifier fetches if `VERIFIER_URL` is ever pointed at an attacker-controlled DNS.
 
 ### 2. Verifier public oracle in non-production

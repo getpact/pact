@@ -14,6 +14,35 @@ const requireTomlValue = (path, pattern, label) => {
   if (!pattern.test(text)) failures.push(`${path} missing ${label}`);
 };
 
+const tomlString = (path, key) => {
+  const text = readFileSync(path, "utf8");
+  const match = text.match(new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "m"));
+  return match?.[1] ?? null;
+};
+
+const requireNarrowHostAllowlist = (path) => {
+  const raw = tomlString(path, "UPSTREAM_HOST_ALLOWLIST");
+  if (!raw) {
+    failures.push(`${path} missing UPSTREAM_HOST_ALLOWLIST`);
+    return;
+  }
+  const hosts = raw
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter((host) => host.length > 0);
+  const broad = hosts.filter(
+    (host) =>
+      host === "*" ||
+      host === "*.*" ||
+      /^\*\.[a-z]+$/.test(host) ||
+      host.includes("/") ||
+      host.includes(":"),
+  );
+  if (hosts.length === 0 || broad.length > 0) {
+    failures.push(`${path} has unsafe UPSTREAM_HOST_ALLOWLIST entries: ${broad.join(", ")}`);
+  }
+};
+
 for (const app of apps) {
   const wrangler = `apps/${app}/wrangler.toml`;
   requireFile(wrangler);
@@ -24,6 +53,7 @@ for (const app of apps) {
     requireTomlValue(wrangler, /^main\s*=/m, "main");
     requireTomlValue(wrangler, /^compatibility_date\s*=/m, "compatibility_date");
     requireTomlValue(wrangler, /workers_dev\s*=\s*false/, "workers_dev=false");
+    requireTomlValue(wrangler, /^routes\s*=\s*\[/m, "custom domain route");
     requireTomlValue(wrangler, /\[observability\][\s\S]*enabled\s*=\s*true/, "observability");
     requireTomlValue(wrangler, /ENVIRONMENT\s*=\s*"production"/, "production ENVIRONMENT var");
     if (/replace-with|changeme|todo/i.test(text))
@@ -35,20 +65,59 @@ const requireEnv = (name) => {
   if (!process.env[name]) failures.push(`missing ${name}`);
 };
 
+const PRIVATE_DESTINATION_MARKERS = [
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "169.254.0.0/16",
+  "127.0.0.0/8",
+  "100.64.0.0/10",
+  "fc00::/7",
+  "fe80::/10",
+  "::1",
+];
+
+const assertGatewayEgressPolicy = (policyId, result) => {
+  const action = String(result?.action ?? "").toLowerCase();
+  if (action !== "block") {
+    failures.push(`Cloudflare Gateway egress policy ${policyId} action must be block`);
+  }
+
+  const matchSurface = {
+    conditions: result?.conditions,
+    filters: result?.filters,
+    ruleSettings: result?.rule_settings,
+    traffic: result?.traffic,
+  };
+  const serialized = JSON.stringify(matchSurface).toLowerCase();
+  if (
+    !serialized.includes("dst") &&
+    !serialized.includes("destination") &&
+    !serialized.includes("ip")
+  ) {
+    failures.push(`Cloudflare Gateway egress policy ${policyId} must match destination IP ranges`);
+  }
+  const missingMarkers = PRIVATE_DESTINATION_MARKERS.filter(
+    (marker) => !serialized.includes(marker.toLowerCase()),
+  );
+  if (missingMarkers.length > 0) {
+    failures.push(
+      `Cloudflare Gateway egress policy ${policyId} does not mention: ${missingMarkers.join(", ")}`,
+    );
+  }
+};
+
 const gatewayEnabled = apps.includes("gateway");
 if (gatewayEnabled) {
   requireEnv("PACT_GATEWAY_EGRESS_POLICY_ID");
   requireEnv("CLOUDFLARE_ACCOUNT_ID");
   requireEnv("CLOUDFLARE_API_TOKEN");
-  requireTomlValue(
-    "apps/admin-api/wrangler.toml",
-    /UPSTREAM_HOST_ALLOWLIST\s*=\s*"[^"]+"/,
-    "UPSTREAM_HOST_ALLOWLIST",
-  );
+  requireNarrowHostAllowlist("apps/admin-api/wrangler.toml");
+  requireNarrowHostAllowlist("apps/gateway/wrangler.toml");
   requireTomlValue(
     "apps/gateway/wrangler.toml",
-    /UPSTREAM_HOST_ALLOWLIST\s*=\s*"[^"]+"/,
-    "UPSTREAM_HOST_ALLOWLIST",
+    /GATEWAY_AUDIT_MODE\s*=\s*"required"/,
+    'GATEWAY_AUDIT_MODE="required"',
   );
 }
 
@@ -75,8 +144,11 @@ if (gatewayEnabled) {
     exit(1);
   }
   const enabled = body.result?.enabled;
-  if (enabled === false) {
-    console.error(`Cloudflare Zero Trust Gateway policy ${policyId} is disabled`);
+  if (enabled !== true)
+    failures.push(`Cloudflare Gateway egress policy ${policyId} must be enabled`);
+  assertGatewayEgressPolicy(policyId, body.result);
+  if (failures.length > 0) {
+    for (const failure of failures) console.error(failure);
     exit(1);
   }
   console.log(`verified Cloudflare Gateway egress policy ${policyId}`);
