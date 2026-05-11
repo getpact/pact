@@ -44,6 +44,11 @@ describe("shared secret strength", () => {
     expect(isStrongSharedSecret("replace-with-real-service-token-value")).toBe(false);
     expect(isStrongSharedSecret("0123456789abcdef 0123456789abcdef")).toBe(false);
   });
+
+  it("rejects low-entropy secrets even when long enough", () => {
+    expect(isStrongSharedSecret("A".repeat(40))).toBe(false);
+    expect(isStrongSharedSecret("abababababababababababababababab")).toBe(false);
+  });
 });
 
 describe("upstream URL validation", () => {
