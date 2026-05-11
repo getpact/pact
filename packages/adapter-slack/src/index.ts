@@ -155,9 +155,9 @@ export const createSlackAdapter = (opts: SlackAdapterOptions): Adapter => {
             },
           },
         },
-        authorize: () => ({
+        authorize: (_args, ctx) => ({
           action: "slack.channels.list",
-          resource: "slack:channels:public",
+          resource: `slack:workspace:${ctx.workspaceId}:channels:public`,
         }),
         handler: async (args, ctx, deps) => {
           if (!deps.rawMek) return errorResult("MEK is not configured");
