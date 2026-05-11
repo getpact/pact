@@ -25,6 +25,25 @@ const tomlString = (path, key) => {
   return match?.[1] ?? null;
 };
 
+const requirePublicHttpsUrl = (path, key) => {
+  const raw = tomlString(path, key);
+  if (!raw) {
+    failures.push(`${path} missing ${key}`);
+    return;
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    failures.push(`${path} ${key} is not a valid URL`);
+    return;
+  }
+  if (parsed.protocol !== "https:") failures.push(`${path} ${key} must use https://`);
+  if (["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname)) {
+    failures.push(`${path} ${key} must not point at loopback in production vars`);
+  }
+};
+
 const requireNarrowHostAllowlist = (path) => {
   const raw = tomlString(path, "UPSTREAM_HOST_ALLOWLIST");
   if (!raw) {
@@ -183,6 +202,19 @@ if (apps.includes("gateway")) requireVerifierBinding("gateway");
 if (apps.includes("mcp-server")) requireVerifierBinding("mcp-server");
 if (apps.includes("web")) {
   requireTomlValue("apps/web/wrangler.toml", /^WEB_BASE_URL\s*=\s*"https:\/\//m, "WEB_BASE_URL");
+  requirePublicHttpsUrl("apps/web/wrangler.toml", "ISSUER_BASE_URL");
+  requirePublicHttpsUrl("apps/web/wrangler.toml", "ADMIN_API_BASE_URL");
+  requirePublicHttpsUrl("apps/web/wrangler.toml", "AUDIT_API_BASE_URL");
+  rejectTomlValue(
+    "apps/web/wrangler.toml",
+    /^WEB_ISSUER_SERVICE_TOKEN\s*=/m,
+    "committed WEB_ISSUER_SERVICE_TOKEN",
+  );
+  rejectTomlValue(
+    "apps/web/wrangler.toml",
+    /^GOOGLE_OAUTH_CLIENT_ID\s*=/m,
+    "committed GOOGLE_OAUTH_CLIENT_ID",
+  );
 }
 
 if (gatewayEnabled) {

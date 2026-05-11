@@ -29,6 +29,16 @@ const checkAny = async (name, url, init, statuses) => {
   return res;
 };
 
+const checkBlocked = async (name, url, init, statuses = [400, 401, 403, 405]) => {
+  const res = await fetch(url, init);
+  if (!statuses.includes(res.status)) {
+    const text = await res.text();
+    throw new Error(`${name} returned unexpected status (${res.status}): ${text.slice(0, 500)}`);
+  }
+  console.log(`${name}: ${res.status}`);
+  return res;
+};
+
 const parseJson = async (name, res) => {
   const body = await res.json();
   if (body?.error) {
@@ -58,6 +68,7 @@ const health = [
   ["admin-api", optional("PACT_ADMIN_API_URL")],
   ["audit-api", optional("PACT_AUDIT_API_URL")],
   ["gateway", optional("PACT_GATEWAY_URL")],
+  ["web", optional("PACT_WEB_URL")],
 ].filter(([, url]) => url);
 
 if (health.length === 0) {
@@ -66,6 +77,34 @@ if (health.length === 0) {
 
 for (const [name, baseUrl] of health) {
   await check(`${name} health`, `${baseUrl}/health`);
+}
+
+const webUrl = optional("PACT_WEB_URL");
+if (webUrl) {
+  await check("web dashboard", `${webUrl}/`);
+  await checkBlocked(
+    "web oauth start rejects cross-origin",
+    `${webUrl}/v1/auth/google/start`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://evil.example" },
+      body: JSON.stringify({
+        workspaceId: process.env.PACT_SMOKE_WORKSPACE_ID ?? "00000000-0000-4000-8000-000000000000",
+      }),
+    },
+    [403],
+  );
+  if (process.env.PACT_SMOKE_WORKSPACE_ID) {
+    const start = await check("web oauth start", `${webUrl}/v1/auth/google/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: webUrl },
+      body: JSON.stringify({ workspaceId: process.env.PACT_SMOKE_WORKSPACE_ID }),
+    });
+    const body = await start.json();
+    if (!String(body.location ?? "").startsWith("https://accounts.google.com/")) {
+      throw new Error("web oauth start did not return a Google authorization URL");
+    }
+  }
 }
 
 if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
