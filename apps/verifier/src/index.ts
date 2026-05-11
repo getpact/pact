@@ -1,4 +1,4 @@
-import { securityHeaders, timingSafeEqualString } from "@getpact/core";
+import { isStrongSharedSecret, securityHeaders, timingSafeEqualString } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
@@ -40,6 +40,9 @@ app.post("/v1/verify", async (c) => {
   const serviceToken = c.env.VERIFIER_SERVICE_TOKEN?.trim();
   if (!serviceToken && c.env.ENVIRONMENT === "production") {
     return c.json({ error: "misconfigured", message: "verifier service token is required" }, 503);
+  }
+  if (serviceToken && c.env.ENVIRONMENT === "production" && !isStrongSharedSecret(serviceToken)) {
+    return c.json({ error: "misconfigured", message: "verifier service token is too weak" }, 503);
   }
   if (serviceToken) {
     const expected = `Bearer ${serviceToken}`;

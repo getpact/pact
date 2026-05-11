@@ -54,9 +54,22 @@ describe("issuer dev issue access", () => {
     const res = await app.request(
       "/v1/dev/issue",
       { method: "POST", headers: { "content-type": "application/json" }, body },
-      { ...env, DEV_ISSUE_SECRET: "secret" },
+      { ...env, DEV_ISSUE_SECRET: "0123456789abcdef0123456789abcdef" },
     );
     expect(res.status).toBe(401);
+  });
+
+  it("rejects weak deployed dev issue secrets", async () => {
+    const res = await app.request(
+      "/v1/dev/issue",
+      { method: "POST", headers: { "content-type": "application/json" }, body },
+      { ...env, DEV_ISSUE_SECRET: "secret" },
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: "misconfigured",
+      message: "dev issue secret is too weak",
+    });
   });
 });
 
@@ -226,7 +239,11 @@ run("issuer end-to-end", () => {
     const created = (await createRes.json()) as { workspaceId: string };
     cleanup.push(created.workspaceId);
 
-    const stagingEnv = { ...env, ENVIRONMENT: "staging", DEV_ISSUE_SECRET: "secret".repeat(8) };
+    const stagingEnv = {
+      ...env,
+      ENVIRONMENT: "staging",
+      DEV_ISSUE_SECRET: "0123456789abcdef0123456789abcdef",
+    };
     const body = JSON.stringify({
       workspaceId: created.workspaceId,
       email: "alice@example.com",
@@ -238,7 +255,7 @@ run("issuer end-to-end", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-pact-dev-issue-secret": "Secret".repeat(8),
+          "x-pact-dev-issue-secret": "0123456789abcdef0123456789abcdee",
         },
         body,
       },

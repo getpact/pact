@@ -3,6 +3,7 @@ import {
   assertAllowedUpstreamHost,
   assertSafeUpstreamUrl,
   isPrivateHost,
+  isStrongSharedSecret,
   timingSafeEqualString,
   tokenModeForAudience,
 } from "../index.js";
@@ -29,6 +30,19 @@ describe("timing safe string comparison", () => {
   it("rejects oversized strings", () => {
     const oversized = "a".repeat(4097);
     expect(timingSafeEqualString(oversized, oversized)).toBe(false);
+  });
+});
+
+describe("shared secret strength", () => {
+  it("accepts long non-placeholder secrets", () => {
+    expect(isStrongSharedSecret("0123456789abcdef0123456789abcdef")).toBe(true);
+  });
+
+  it("rejects weak, placeholder, or whitespace secrets", () => {
+    expect(isStrongSharedSecret(undefined)).toBe(false);
+    expect(isStrongSharedSecret("short")).toBe(false);
+    expect(isStrongSharedSecret("replace-with-real-service-token-value")).toBe(false);
+    expect(isStrongSharedSecret("0123456789abcdef 0123456789abcdef")).toBe(false);
   });
 });
 
