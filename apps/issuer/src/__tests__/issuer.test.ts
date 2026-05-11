@@ -205,6 +205,62 @@ run("issuer end-to-end", () => {
     expect(result.payload.mode).toBe("A");
   });
 
+  it("requires matching dev issue secret outside test", async () => {
+    const env = await buildEnv();
+    const slug = `iss-secret-${Date.now()}`;
+
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          name: "Issuer Secret Test",
+          adminEmail: "alice@example.com",
+        }),
+      },
+      env,
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+
+    const stagingEnv = { ...env, ENVIRONMENT: "staging", DEV_ISSUE_SECRET: "secret".repeat(8) };
+    const body = JSON.stringify({
+      workspaceId: created.workspaceId,
+      email: "alice@example.com",
+      audience: "pact-mcp",
+    });
+    const wrong = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-pact-dev-issue-secret": "Secret".repeat(8),
+        },
+        body,
+      },
+      stagingEnv,
+    );
+    expect(wrong.status).toBe(401);
+
+    const issueRes = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-pact-dev-issue-secret": stagingEnv.DEV_ISSUE_SECRET,
+        },
+        body,
+      },
+      stagingEnv,
+    );
+    expect(issueRes.status).toBe(200);
+  });
+
   it("issues gateway audience tokens as Mode B", async () => {
     const env = await buildEnv();
     const slug = `iss-mode-b-${Date.now()}`;
@@ -507,6 +563,8 @@ run("issuer end-to-end", () => {
       },
       env,
     );
-    expect(issueRes.status).toBeGreaterThanOrEqual(400);
+    expect(issueRes.status).toBe(403);
+    const body = (await issueRes.json()) as { error: string };
+    expect(body.error).toBe("forbidden");
   });
 });

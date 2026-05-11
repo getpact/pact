@@ -1,4 +1,10 @@
-import { type Email, PactError, securityHeaders, timingSafeEqualString } from "@getpact/core";
+import {
+  AuthzError,
+  type Email,
+  PactError,
+  securityHeaders,
+  timingSafeEqualString,
+} from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
@@ -156,9 +162,8 @@ app.post("/v1/oauth/google/exchange", async (c) => {
       ...(c.env.GOOGLE_JWKS_URI ? { jwksUri: c.env.GOOGLE_JWKS_URI } : {}),
       ...(c.env.GOOGLE_ISSUER ? { expectedIssuer: c.env.GOOGLE_ISSUER } : {}),
     });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "google verification failed";
-    return c.json({ error: "invalid_grant", detail: msg }, 401);
+  } catch {
+    return c.json({ error: "invalid_grant" }, 401);
   }
   if (!identity.emailVerified) {
     return c.json({ error: "email_not_verified" }, 403);
@@ -174,6 +179,9 @@ app.post("/v1/oauth/google/exchange", async (c) => {
     });
     return c.json(result);
   } catch (e) {
+    if (e instanceof AuthzError) {
+      return c.json({ error: "user_not_in_workspace" }, 403);
+    }
     if (e instanceof PactError) {
       return c.json({ error: e.code, message: e.message }, e.status as 400);
     }
