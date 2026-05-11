@@ -1,16 +1,17 @@
 import { isUuid, timingSafeEqualString } from "@getpact/core";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { decodeJwt } from "jose";
+import { decodeProtectedHeader, importJWK, type JWK, jwtVerify } from "jose";
 
 type Env = {
   ENVIRONMENT?: string;
   WEB_BASE_URL?: string;
+  WEB_OAUTH_CALLBACK_PATH?: string;
+  WEB_DEV_ROUTE_ORIGIN?: string;
+  WEB_DEFAULT_WORKSPACE_ID?: string;
   ISSUER_BASE_URL: string;
   ADMIN_API_BASE_URL: string;
   AUDIT_API_BASE_URL: string;
-  ADMIN_AUDIENCE?: string;
-  AUDIT_AUDIENCE?: string;
   GOOGLE_OAUTH_CLIENT_ID: string;
   GOOGLE_OAUTH_AUTHORIZATION_ENDPOINT?: string;
   WEB_ISSUER_SERVICE_TOKEN: string;
@@ -30,8 +31,11 @@ const OAUTH_WORKSPACE_COOKIE = "__Host-pact-oauth-workspace";
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const ADMIN_AUDIENCE = "pact-admin";
+const AUDIT_AUDIENCE = "pact-audit";
 const TEN_MINUTES = 600;
 const THIRTY_DAYS = 30 * 24 * 60 * 60;
+const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
+const JWKS_KID_MISS_TTL_MS = 30 * 1000;
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -75,10 +79,18 @@ const webBaseUrl = (env: Env): string | null =>
 const callbackUrl = (env: Env): string => {
   const base = webBaseUrl(env);
   if (!base) throw new Error("WEB_BASE_URL is required");
-  return `${base}/v1/auth/google/callback`;
+  const path = env.WEB_OAUTH_CALLBACK_PATH ?? "/v1/auth/google/callback";
+  return `${base}/${path.replace(/^\/+/, "")}`;
 };
 
-const urlFor = (base: string, path: string): string => new URL(path, baseUrl(base)).toString();
+const urlFor = (base: string, path: string): string =>
+  `${baseUrl(base)}/${path.replace(/^\/+/, "")}`;
+
+const configuredSecret = (value: string | undefined): boolean =>
+  !!value && !value.startsWith("replace-with") && !value.startsWith("changeme");
+
+const configuredGoogleClient = (value: string | undefined): boolean =>
+  typeof value === "string" && configuredSecret(value) && !value.startsWith("local-dev");
 
 const fetchWithTimeout = async (
   input: RequestInfo | URL,
@@ -155,21 +167,66 @@ const appendCookie = (c: AppContext, value: string): void => {
 
 const sessionCookies = (c: AppContext) => parseCookies(c.req.header("Cookie"));
 
-const trustedOrigin = (c: AppContext): string | null => {
+const isLoopbackHost = (hostname: string): boolean =>
+  hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+
+const requestIsLoopback = (c: AppContext): boolean => {
+  const requestUrl = new URL(c.req.url);
+  if (isLoopbackHost(requestUrl.hostname)) return true;
+  const host = c.req.header("Host")?.split(":")[0] ?? "";
+  return isLoopbackHost(host);
+};
+
+const loopbackOriginAliases = (url: URL): string[] => {
+  if (!isLoopbackHost(url.hostname)) return [];
+  const port = url.port ? `:${url.port}` : "";
+  return [`${url.protocol}//localhost${port}`, `${url.protocol}//127.0.0.1${port}`];
+};
+
+const trustedOrigins = (c: AppContext): Set<string> => {
+  const origins = new Set<string>();
   const base = webBaseUrl(c.env);
-  return base ? new URL(base).origin : null;
+  if (base) {
+    const baseParsed = new URL(base);
+    origins.add(baseParsed.origin);
+    if (c.env.ENVIRONMENT !== "production") {
+      for (const alias of loopbackOriginAliases(baseParsed)) origins.add(alias);
+    }
+  }
+  if (c.env.ENVIRONMENT !== "production") {
+    if (c.env.WEB_DEV_ROUTE_ORIGIN) {
+      origins.add(new URL(c.env.WEB_DEV_ROUTE_ORIGIN).origin);
+    }
+    const requestUrl = new URL(c.req.url);
+    if (isLoopbackHost(requestUrl.hostname)) {
+      origins.add(requestUrl.origin);
+      for (const alias of loopbackOriginAliases(requestUrl)) origins.add(alias);
+    }
+  }
+  return origins;
 };
 
 const hasSameOriginSignal = (c: AppContext): boolean => {
-  const expected = trustedOrigin(c);
-  if (!expected) return false;
+  const expected = trustedOrigins(c);
+  if (expected.size === 0) return false;
+  const isLocalDevRequest = c.env.ENVIRONMENT === "development" && requestIsLoopback(c);
+  if (
+    isLocalDevRequest &&
+    c.req.header("x-pact-local-dev") === "1" &&
+    c.req.header("Sec-Fetch-Site") !== "cross-site"
+  ) {
+    return true;
+  }
   const origin = c.req.header("Origin");
-  if (origin) return origin === expected;
+  if (isLocalDevRequest && (!origin || origin === "null")) return true;
+  if (origin) return expected.has(origin);
   const referer = c.req.header("Referer");
-  if (!referer) return false;
+  if (!referer) {
+    return isLocalDevRequest;
+  }
   try {
     const actual = new URL(referer).origin;
-    return actual === expected;
+    return expected.has(actual);
   } catch {
     return false;
   }
@@ -196,6 +253,13 @@ type TokenResponse = {
 type TokenBundleResponse = {
   tokens: Record<string, TokenResponse>;
 };
+
+type JwksResponse = {
+  keys?: JWK[];
+};
+
+const jwksCache = new Map<string, { expiresAt: number; body: JwksResponse }>();
+const jwksKidMissCache = new Map<string, number>();
 
 const storeSession = (
   c: AppContext,
@@ -273,20 +337,131 @@ const clearSession = (c: AppContext): void => {
   }
 };
 
-const tokenSummaryUnverified = (
+const clearOAuthAttempt = (c: AppContext): void => {
+  for (const name of [OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, OAUTH_WORKSPACE_COOKIE]) {
+    appendCookie(c, clearCookie(name, c.env));
+  }
+};
+
+const loadWorkspaceJwks = async (
+  env: Env,
+  workspaceId: string,
+  opts: { force?: boolean } = {},
+): Promise<JwksResponse | null> => {
+  const issuer = baseUrl(env.ISSUER_BASE_URL);
+  const key = `${issuer}|${workspaceId}`;
+  const cached = jwksCache.get(key);
+  if (!opts.force && cached && cached.expiresAt > Date.now()) {
+    jwksCache.delete(key);
+    jwksCache.set(key, cached);
+    return cached.body;
+  }
+
+  try {
+    const jwksRes = await fetchWithTimeout(
+      urlFor(issuer, `/v1/workspaces/${workspaceId}/.well-known/jwks.json`),
+    );
+    if (!jwksRes.ok) return null;
+    const body = (await jwksRes.json()) as JwksResponse;
+    jwksCache.set(key, { expiresAt: Date.now() + JWKS_CACHE_TTL_MS, body });
+    if (jwksCache.size > 200) {
+      const oldest = jwksCache.keys().next().value;
+      if (oldest) jwksCache.delete(oldest);
+    }
+    return body;
+  } catch {
+    return null;
+  }
+};
+
+const tokenKid = (token: string): string | null => {
+  try {
+    return decodeProtectedHeader(token).kid ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const jwksHasKid = (kid: string | null, jwksBody: JwksResponse): boolean =>
+  !!kid && !!jwksBody.keys?.some((key) => key.kid === kid);
+
+const kidMissCacheKey = (env: Env, workspaceId: string, kid: string): string =>
+  `${baseUrl(env.ISSUER_BASE_URL)}|${workspaceId}|${kid}`;
+
+const shouldRefetchForMissingKids = (env: Env, workspaceId: string, kids: string[]): boolean => {
+  const now = Date.now();
+  for (const kid of kids) {
+    const expiresAt = jwksKidMissCache.get(kidMissCacheKey(env, workspaceId, kid));
+    if (!expiresAt || expiresAt <= now) return true;
+  }
+  return false;
+};
+
+const cacheMissingKids = (
+  env: Env,
+  workspaceId: string,
+  kids: string[],
+  jwksBody: JwksResponse,
+): void => {
+  const expiresAt = Date.now() + JWKS_KID_MISS_TTL_MS;
+  for (const kid of kids) {
+    if (!jwksHasKid(kid, jwksBody)) {
+      jwksKidMissCache.set(kidMissCacheKey(env, workspaceId, kid), expiresAt);
+    }
+  }
+  if (jwksKidMissCache.size > 500) {
+    const now = Date.now();
+    for (const [key, value] of jwksKidMissCache) {
+      if (value <= now) jwksKidMissCache.delete(key);
+    }
+    while (jwksKidMissCache.size > 500) {
+      const oldest = jwksKidMissCache.keys().next().value;
+      if (!oldest) break;
+      jwksKidMissCache.delete(oldest);
+    }
+  }
+};
+
+const stringArrayClaim = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
+
+const tokenSummaryVerified = async (
+  env: Env,
   token: string,
   workspaceId: string,
-): Record<string, unknown> | null => {
+  audience: string,
+  jwksBody: JwksResponse,
+): Promise<Record<string, unknown> | null> => {
   try {
-    const claims = decodeJwt(token);
+    const kid = decodeProtectedHeader(token).kid;
+    if (!kid) return null;
+    const jwk = jwksBody.keys?.find((key) => key.kid === kid);
+    if (!jwk) return null;
+    const publicKey = await importJWK(jwk, "EdDSA");
+    const { payload: claims } = await jwtVerify(token, publicKey, {
+      issuer: baseUrl(env.ISSUER_BASE_URL),
+      audience,
+      algorithms: ["EdDSA"],
+    });
     if (claims.org !== workspaceId) return null;
+    if (
+      typeof claims.org !== "string" ||
+      typeof claims.sub !== "string" ||
+      typeof claims.email !== "string" ||
+      typeof claims.exp !== "number"
+    ) {
+      return null;
+    }
+    const roles = stringArrayClaim(claims.roles);
+    const groups = stringArrayClaim(claims.groups);
+    if (!roles || !groups) return null;
     return {
       workspaceId: claims.org,
       userId: claims.sub,
       email: claims.email,
       exp: claims.exp,
-      roles: claims.roles,
-      groups: claims.groups,
+      roles,
+      groups,
     };
   } catch {
     return null;
@@ -303,7 +478,35 @@ const bearerFetch = async (url: string, token: string, init: RequestInit = {}): 
     },
   });
 
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
+
 app.get("/health", (c) => c.json({ ok: true }));
+
+app.get("/v1/config", (c) =>
+  c.json({
+    mode: c.env.ENVIRONMENT === "production" ? "production" : "nonproduction",
+    defaultWorkspaceId: isUuid(c.env.WEB_DEFAULT_WORKSPACE_ID ?? "")
+      ? c.env.WEB_DEFAULT_WORKSPACE_ID
+      : null,
+    oauthConfigured:
+      configuredGoogleClient(c.env.GOOGLE_OAUTH_CLIENT_ID) &&
+      configuredSecret(c.env.WEB_ISSUER_SERVICE_TOKEN),
+  }),
+);
 
 app.get("/", (c) => c.html(INDEX_HTML));
 app.get("/assets/app.css", (c) => c.text(APP_CSS, 200, { "content-type": "text/css" }));
@@ -364,7 +567,7 @@ app.post("/v1/auth/google/start", async (c) => {
   return c.json({ location: url.toString() });
 });
 
-app.get("/v1/auth/google/callback", async (c) => {
+const handleGoogleCallback = async (c: AppContext) => {
   if (!webBaseUrl(c.env)) {
     return c.json({ error: "misconfigured", message: "WEB_BASE_URL is required" }, 503);
   }
@@ -383,15 +586,16 @@ app.get("/v1/auth/google/callback", async (c) => {
     !verifier ||
     !workspaceId
   ) {
-    clearSession(c);
-    return c.html(LOGIN_FAILED_HTML, 401);
+    clearOAuthAttempt(c);
+    return c.html(
+      loginFailedHtml("The Google sign-in link expired. Start sign-in again from the dashboard."),
+      401,
+    );
   }
 
-  const adminAudience = c.env.ADMIN_AUDIENCE ?? ADMIN_AUDIENCE;
-  const auditAudience = c.env.AUDIT_AUDIENCE ?? "pact-audit";
-  const exchange = await fetchWithTimeout(
-    urlFor(c.env.ISSUER_BASE_URL, "/v1/oauth/google/session"),
-    {
+  let exchange: Response;
+  try {
+    exchange = await fetchWithTimeout(urlFor(c.env.ISSUER_BASE_URL, "/v1/oauth/google/session"), {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -403,40 +607,108 @@ app.get("/v1/auth/google/callback", async (c) => {
         code,
         codeVerifier: verifier,
         redirectUri: callbackUrl(c.env),
-        audiences: [adminAudience, auditAudience],
+        audiences: [ADMIN_AUDIENCE, AUDIT_AUDIENCE],
       }),
-    },
-  );
+    });
+  } catch (err) {
+    console.error("oauth_session_exchange_failed", err);
+    clearOAuthAttempt(c);
+    return c.html(
+      loginFailedHtml(
+        "The issuer could not complete the OAuth exchange. For local testing, make sure the local issuer is running and uses the same Google client secret, redirect URI, and service token.",
+      ),
+      502,
+    );
+  }
   if (!exchange.ok) {
-    clearSession(c);
-    return c.html(LOGIN_FAILED_HTML, 401);
+    const errorBody = await exchange
+      .json<{ error?: string; message?: string }>()
+      .catch((): { error?: string; message?: string } => ({}));
+    clearOAuthAttempt(c);
+    const message =
+      errorBody.error === "user_not_in_workspace"
+        ? "Your Google account is not a member of this workspace."
+        : errorBody.error === "google_identity_mismatch"
+          ? "This Google account is already linked to a different workspace user."
+          : errorBody.error === "google_email_not_authoritative"
+            ? "Google could not prove this email address for first-time workspace binding."
+            : errorBody.error === "invalid_grant"
+              ? "Google rejected the sign-in code. Start sign-in again from the dashboard."
+              : errorBody.message ||
+                (exchange.status === 503
+                  ? "The issuer is misconfigured or unavailable."
+                  : exchange.status === 502
+                    ? "Google sign-in is temporarily unavailable."
+                    : "The issuer rejected this Google sign-in request.");
+    const status =
+      exchange.status === 400 ||
+      exchange.status === 401 ||
+      exchange.status === 403 ||
+      exchange.status === 429 ||
+      exchange.status === 500 ||
+      exchange.status === 502 ||
+      exchange.status === 503 ||
+      exchange.status === 504
+        ? exchange.status
+        : 502;
+    return c.html(loginFailedHtml(message), status);
   }
   const body = (await exchange.json()) as TokenBundleResponse;
-  const admin = body.tokens[adminAudience];
-  const audit = body.tokens[auditAudience];
+  const admin = body.tokens[ADMIN_AUDIENCE];
+  const audit = body.tokens[AUDIT_AUDIENCE];
   if (!admin || !audit) {
-    clearSession(c);
-    return c.html(LOGIN_FAILED_HTML, 401);
+    clearOAuthAttempt(c);
+    return c.html(loginFailedHtml("The issuer returned an incomplete dashboard session."), 502);
   }
   storeSession(c, workspaceId, { admin, audit });
-  appendCookie(c, clearCookie(OAUTH_STATE_COOKIE, c.env));
-  appendCookie(c, clearCookie(OAUTH_VERIFIER_COOKIE, c.env));
-  appendCookie(c, clearCookie(OAUTH_WORKSPACE_COOKIE, c.env));
+  clearOAuthAttempt(c);
   return c.redirect("/", 302);
-});
+};
+
+app.get("/v1/auth/google/callback", handleGoogleCallback);
+app.get("/oauth/oidc/callback", handleGoogleCallback);
 
 app.get("/v1/session", async (c) => {
   const cookies = sessionCookies(c);
   const token = cookies[ADMIN_ACCESS_COOKIE];
+  const auditToken = cookies[AUDIT_ACCESS_COOKIE];
   const workspaceId = cookies[WORKSPACE_COOKIE];
-  if (!token || !workspaceId) return c.json({ authenticated: false });
+  if (!token || !auditToken || !workspaceId) return c.json({ authenticated: false });
+  if (!isUuid(workspaceId)) return c.json({ authenticated: false });
+  const jwksBody = await loadWorkspaceJwks(c.env, workspaceId);
+  if (!jwksBody) return c.json({ authenticated: false });
+  const tokenKids = [tokenKid(token), tokenKid(auditToken)];
+  const missingKids = tokenKids.filter((kid) => kid && !jwksHasKid(kid, jwksBody)) as string[];
+  const verifierJwks =
+    missingKids.length === 0 || !shouldRefetchForMissingKids(c.env, workspaceId, missingKids)
+      ? jwksBody
+      : await loadWorkspaceJwks(c.env, workspaceId, { force: true });
+  if (!verifierJwks) return c.json({ authenticated: false });
+  cacheMissingKids(c.env, workspaceId, missingKids, verifierJwks);
+  const claims = await tokenSummaryVerified(
+    c.env,
+    token,
+    workspaceId,
+    ADMIN_AUDIENCE,
+    verifierJwks,
+  );
+  if (!claims) return c.json({ authenticated: false });
+  const auditClaims = await tokenSummaryVerified(
+    c.env,
+    auditToken,
+    workspaceId,
+    AUDIT_AUDIENCE,
+    verifierJwks,
+  );
+  if (!auditClaims) return c.json({ authenticated: false });
+  if (claims.userId !== auditClaims.userId || claims.email !== auditClaims.email) {
+    return c.json({ authenticated: false });
+  }
   const authCheck = await bearerFetch(
     `${baseUrl(c.env.ADMIN_API_BASE_URL)}/v1/workspaces/${workspaceId}/users`,
     token,
   );
   if (!authCheck.ok) return c.json({ authenticated: false });
-  const claims = tokenSummaryUnverified(token, workspaceId);
-  if (!claims) return c.json({ authenticated: false });
   return c.json({ authenticated: true, workspaceId, claims, csrfToken: cookies[CSRF_COOKIE] });
 });
 
@@ -459,11 +731,9 @@ app.post("/v1/session/refresh", async (c) => {
         audience,
       }),
     });
-  const adminAudience = c.env.ADMIN_AUDIENCE ?? ADMIN_AUDIENCE;
-  const auditAudience = c.env.AUDIT_AUDIENCE ?? "pact-audit";
   const [adminRes, auditRes] = await Promise.all([
-    refresh(adminRefreshToken, adminAudience),
-    refresh(auditRefreshToken, auditAudience),
+    refresh(adminRefreshToken, ADMIN_AUDIENCE),
+    refresh(auditRefreshToken, AUDIT_AUDIENCE),
   ]);
   if (!adminRes.ok || !auditRes.ok) {
     clearSession(c);
@@ -486,7 +756,7 @@ app.get("/v1/workspace/status", async (c) => {
   const adminToken = cookies[ADMIN_ACCESS_COOKIE];
   const auditToken = cookies[AUDIT_ACCESS_COOKIE];
   const workspaceId = cookies[WORKSPACE_COOKIE];
-  if (!adminToken || !auditToken || !workspaceId) {
+  if (!adminToken || !auditToken || !workspaceId || !isUuid(workspaceId)) {
     return c.json({ error: "not_authenticated" }, 401);
   }
 
@@ -503,7 +773,7 @@ app.get("/v1/workspace/status", async (c) => {
   );
   if (!brainsRes.ok) return c.json({ error: "admin_unavailable", status: brainsRes.status }, 502);
   const brainsBody = (await brainsRes.json()) as {
-    brains?: Array<{ id: string; kind: string; status: string; authScheme: string }>;
+    brains?: Array<{ id: string; kind: string; status: string }>;
   };
 
   const chainRes = await bearerFetch(
@@ -512,16 +782,20 @@ app.get("/v1/workspace/status", async (c) => {
   );
   if (!chainRes.ok) return c.json({ error: "audit_unavailable", status: chainRes.status }, 502);
   const chainBody = (await chainRes.json()) as { head?: unknown };
-  const brains = brainsBody.brains ?? [];
+  const brains = (brainsBody.brains ?? []).map((brain) => ({
+    id: brain.id,
+    kind: brain.kind,
+    status: brain.status,
+  }));
   const drive = brains.find((brain) => brain.kind === "google-drive");
 
   return c.json({
     workspaceId,
     users: { count: usersBody.users?.length ?? 0 },
+    brains,
     connections: {
       drive: drive ? { status: drive.status, brainId: drive.id } : { status: "not_configured" },
     },
-    brains,
     audit: { head: chainBody.head ?? null },
   });
 });
@@ -538,40 +812,84 @@ const INDEX_HTML = `<!doctype html>
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Pact</p>
-          <h1>Workspace control plane</h1>
+          <p class="eyebrow">pact v0.1</p>
+          <h1>Authorization for company brains.</h1>
+          <p class="lede">Sign in, connect sources, and keep agent access tied to identity and audit proof.</p>
         </div>
         <button id="logout" class="ghost hidden" type="button">Sign out</button>
       </header>
-      <section id="login" class="panel">
-        <h2>Sign in</h2>
-        <p>Use Google to access a workspace, connect sources, and configure MCP for agents.</p>
-        <form id="login-form">
-          <label for="workspace-id">Workspace ID</label>
-          <div class="row">
-            <input id="workspace-id" name="workspaceId" autocomplete="off" required>
-            <button type="submit">Continue with Google</button>
+      <section id="loading" class="panel" aria-busy="true">
+        <div class="panel-head">
+          <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>session</span>
+          <span class="panel-meta">checking</span>
+        </div>
+        <div class="panel-body">
+          <p class="terminal-line">awaiting workspace session...</p>
+        </div>
+      </section>
+      <section id="login" class="panel hidden">
+        <div class="panel-head">
+          <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>google login</span>
+          <span class="panel-meta">workspace scoped</span>
+        </div>
+        <div class="panel-body login-grid">
+          <div>
+            <h2>Open a workspace.</h2>
+            <p>Google proves the human. Pact mints workspace-scoped tokens for admin and audit surfaces.</p>
+            <p id="oauth-help" class="notice hidden"></p>
           </div>
-        </form>
+          <form id="login-form">
+            <p id="workspace-summary" class="workspace-summary hidden"></p>
+            <div id="workspace-field">
+              <label for="workspace-id">workspace id</label>
+              <input id="workspace-id" name="workspaceId" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="text" required aria-describedby="workspace-help" placeholder="00000000-0000-4000-8000-000000000000">
+              <p id="workspace-help" class="help">Paste the UUID for the workspace you want to administer.</p>
+            </div>
+            <button id="login-submit" type="submit">Continue with Google</button>
+          </form>
+        </div>
       </section>
       <section id="dashboard" class="hidden">
+        <div class="metrics">
+          <article class="metric">
+            <span class="label">workspace</span>
+            <strong id="metric-workspace">-</strong>
+          </article>
+          <article class="metric">
+            <span class="label">users</span>
+            <strong id="metric-users">-</strong>
+          </article>
+          <article class="metric">
+            <span class="label">drive</span>
+            <strong id="metric-drive">checking</strong>
+          </article>
+          <article class="metric">
+            <span class="label">audit</span>
+            <strong id="metric-audit">checking</strong>
+          </article>
+        </div>
         <div class="grid">
           <article class="panel">
-            <h2>Session</h2>
-            <dl id="session-details"></dl>
+            <div class="panel-head"><span>identity</span><span class="panel-meta">signed session</span></div>
+            <div class="panel-body"><dl id="session-details"></dl></div>
           </article>
           <article class="panel">
-            <h2>Google Drive</h2>
-            <p id="drive-status">Checking connection...</p>
-            <button type="button" disabled>Connect Drive</button>
+            <div class="panel-head"><span>google drive</span><span class="panel-meta">source</span></div>
+            <div class="panel-body">
+              <p id="drive-status">Checking connection...</p>
+              <button type="button" disabled aria-describedby="drive-help">Connect Drive</button>
+              <p id="drive-help" class="help">Drive setup is not available in this dashboard build yet.</p>
+            </div>
           </article>
           <article class="panel">
-            <h2>MCP setup</h2>
-            <p id="mcp-status">Install instructions will appear after Drive indexing is enabled.</p>
+            <div class="panel-head"><span>agent access</span><span class="panel-meta">mcp</span></div>
+            <div class="panel-body"><p id="mcp-status">Connect Google Drive before enabling agent access.</p></div>
           </article>
           <article class="panel">
-            <h2>Audit</h2>
-            <p id="audit-status">Checking audit chain...</p>
+            <div class="panel-head"><span>audit log</span><span class="panel-meta">proof</span></div>
+            <div class="panel-body"><p id="audit-status">Checking audit log...</p></div>
           </article>
         </div>
       </section>
@@ -581,101 +899,276 @@ const INDEX_HTML = `<!doctype html>
   </body>
 </html>`;
 
-const LOGIN_FAILED_HTML = `<!doctype html>
+const loginFailedHtml = (message: string): string => `<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Pact login failed</title></head>
-  <body><p>Login failed. Return to the dashboard and try again.</p></body>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pact login failed</title>
+    <link rel="stylesheet" href="/assets/app.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel">
+        <h1>Login failed</h1>
+        <p>${escapeHtml(message)}</p>
+        <a class="button-link" href="/">Back to sign in</a>
+      </section>
+    </main>
+  </body>
 </html>`;
 
 const APP_CSS = `
 :root {
-  color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f6f7f9;
-  color: #162033;
+  color-scheme: dark;
+  --bg: #0d0d0d;
+  --panel: #161616;
+  --panel-2: #1f1f1f;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --text: #fafafa;
+  --muted: #a8a8a8;
+  --faint: #737373;
+  --accent: #fafafa;
+  --accent-fg: #0d0d0d;
+  --green: #9ab09a;
+  --amber: #c0b080;
+  --red: #d98585;
+  font-family: Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
 }
 body {
   margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(255, 255, 255, 0.05), transparent 28rem),
+    var(--bg);
+}
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 button, input {
   font: inherit;
 }
 .shell {
-  max-width: 1120px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 32px 20px;
+  padding: 30px 20px 40px;
 }
 .topbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 .eyebrow {
   margin: 0 0 4px;
-  color: #596579;
-  font-size: 13px;
+  color: var(--faint);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 h1, h2, p {
   margin-top: 0;
 }
 h1 {
-  margin-bottom: 0;
-  font-size: 32px;
+  max-width: 13ch;
+  margin-bottom: 10px;
+  font-family: ui-serif, "New York", "Iowan Old Style", Palatino, Georgia, serif;
+  font-size: clamp(34px, 6vw, 58px);
+  font-weight: 400;
+  line-height: 1.15;
 }
 h2 {
-  font-size: 18px;
+  margin-bottom: 10px;
+  font-size: 24px;
+  font-weight: 500;
+}
+.lede {
+  max-width: 520px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.55;
 }
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  gap: 12px;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.metric {
+  min-height: 86px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.metric strong {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  font-size: 20px;
+  font-weight: 750;
 }
 .panel {
-  background: #ffffff;
-  border: 1px solid #d8dde6;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22);
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
+}
+.panel-meta {
+  margin-left: auto;
+  color: var(--faint);
+}
+.panel-body {
+  padding: 18px;
+}
+.login-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 24px;
+  align-items: start;
+}
+#login-form {
+  display: grid;
+  gap: 12px;
+}
+#login-form label {
+  margin-bottom: -4px;
+}
+#login-submit {
+  margin-top: 2px;
 }
 .row {
   display: flex;
   gap: 8px;
   align-items: stretch;
 }
+.dots {
+  display: inline-flex;
+  gap: 5px;
+}
+.dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--faint);
+  opacity: 0.65;
+}
+.label {
+  color: var(--faint);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
+}
 label {
   display: block;
   margin-bottom: 8px;
-  font-weight: 600;
+  color: var(--muted);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
 }
 input {
+  width: 100%;
   min-width: 0;
-  flex: 1;
-  border: 1px solid #b8c0cc;
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
-  padding: 10px 12px;
+  padding: 10px;
+  background: #101010;
+  color: var(--text);
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
-button {
+button, .button-link {
   border: 0;
   border-radius: 6px;
   padding: 10px 14px;
-  background: #155eef;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--accent-fg);
   cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  min-width: 0;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: normal;
+  font-weight: 650;
+}
+button:hover:not(:disabled), .button-link:hover {
+  background: #ffffff;
 }
 button:disabled {
   cursor: not-allowed;
-  background: #9aa4b2;
+  background: #2a2a2a;
+  color: var(--faint);
+  border: 1px solid var(--line);
 }
 .ghost {
   background: transparent;
-  color: #25324a;
-  border: 1px solid #b8c0cc;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+}
+.ghost:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--text);
+}
+button:focus-visible,
+.button-link:focus-visible,
+input:focus-visible {
+  outline: 2px solid rgba(250, 250, 250, 0.42);
+  outline-offset: 2px;
 }
 .hidden {
   display: none;
+}
+.help {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: 12px;
+}
+.notice {
+  padding: 10px 12px;
+  border: 1px solid rgba(192, 176, 128, 0.36);
+  border-radius: 8px;
+  background: rgba(192, 176, 128, 0.08);
+  color: #dfd3a2;
+}
+.workspace-summary {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.terminal-line {
+  margin: 0;
+  color: var(--muted);
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 dl {
   display: grid;
@@ -684,7 +1177,9 @@ dl {
   margin: 0;
 }
 dt {
-  color: #596579;
+  color: var(--faint);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
 }
 dd {
   margin: 0;
@@ -693,12 +1188,30 @@ dd {
 }
 #error {
   margin-top: 16px;
-  color: #b42318;
+  padding: 10px 12px;
+  border: 1px solid rgba(217, 133, 133, 0.34);
+  border-radius: 8px;
+  background: rgba(217, 133, 133, 0.1);
+  color: #f0b0b0;
+  font-weight: 600;
+}
+#error:empty {
+  display: none;
 }
 @media (max-width: 640px) {
-  .topbar, .row {
+  .shell {
+    padding: 24px 14px;
+  }
+  .topbar, .row, .login-grid {
     align-items: stretch;
     flex-direction: column;
+    display: flex;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  button, .button-link {
+    width: 100%;
   }
 }
 `;
@@ -706,20 +1219,101 @@ dd {
 const APP_JS = `
 const $ = (id) => document.getElementById(id);
 let csrfToken = "";
+let refreshing = false;
+let appConfig = { mode: "production", oauthConfigured: false, defaultWorkspaceId: null };
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const setError = (message = "") => {
+  $("error").textContent = message;
+};
+
+const messageForError = (path, status, body) => {
+  const code = body?.error;
+  if (path.includes("/v1/auth/google/start")) {
+    if (status === 400 || code === "invalid_workspace") return "Enter a valid workspace UUID.";
+    if (status === 403 || code === "origin") return "This page was opened from an unexpected local address. Reload the dashboard and try again.";
+    if (status === 503 || code === "misconfigured") return "Dashboard login is not configured for this environment.";
+  }
+  if (status === 401) return "Your session expired. Sign in again.";
+  if (status >= 500) return "A Pact service is unavailable. Try again in a moment.";
+  return body?.message || code || path + " returned " + status;
+};
 
 const requestJson = async (path, init = {}) => {
+  const devHeaders = appConfig.mode !== "production" ? { "x-pact-local-dev": "1" } : {};
   const res = await fetch(path, {
     ...init,
     headers: {
       accept: "application/json",
+      ...devHeaders,
       ...(init.headers ?? {}),
     },
   });
-  if (!res.ok) throw new Error(path + " returned " + res.status);
+  if (!res.ok) {
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {}
+    throw new Error(messageForError(path, res.status, body));
+  }
   return res.json();
 };
 
+const showView = (name) => {
+  for (const id of ["loading", "login", "dashboard"]) {
+    $(id).classList.toggle("hidden", id !== name);
+  }
+  $("logout").classList.toggle("hidden", name !== "dashboard");
+};
+
+const refreshSession = async () => {
+  if (refreshing || !csrfToken) return false;
+  refreshing = true;
+  try {
+    const res = await fetch("/v1/session/refresh", {
+      method: "POST",
+      headers: { "x-pact-csrf": csrfToken },
+    });
+    return res.ok;
+  } finally {
+    refreshing = false;
+  }
+};
+
+const loadConfig = async () => {
+  try {
+    appConfig = await requestJson("/v1/config");
+  } catch {}
+  const workspaceInput = $("workspace-id");
+  const workspaceField = $("workspace-field");
+  const workspaceSummary = $("workspace-summary");
+  const defaultWorkspaceId = appConfig.defaultWorkspaceId;
+  if (defaultWorkspaceId && uuidPattern.test(defaultWorkspaceId)) {
+    workspaceInput.value = defaultWorkspaceId;
+    workspaceField.classList.add("hidden");
+    workspaceSummary.classList.remove("hidden");
+    workspaceSummary.textContent = "Demo workspace selected. Continue with Google to sign in.";
+  } else {
+    const lastWorkspaceId = window.localStorage.getItem("pact:lastWorkspaceId") || "";
+    if (!workspaceInput.value && uuidPattern.test(lastWorkspaceId)) {
+      workspaceInput.value = lastWorkspaceId;
+    }
+    workspaceField.classList.remove("hidden");
+    workspaceSummary.classList.add("hidden");
+  }
+  const oauthHelp = $("oauth-help");
+  if (!appConfig.oauthConfigured) {
+    oauthHelp.classList.remove("hidden");
+    oauthHelp.textContent =
+      "Google OAuth credentials are not configured for this dashboard environment.";
+  } else {
+    oauthHelp.classList.add("hidden");
+  }
+};
+
 const renderSession = (session) => {
+  $("metric-workspace").textContent = session.workspaceId ?? "-";
   const details = $("session-details");
   const claims = session.claims ?? {};
   details.innerHTML = "";
@@ -738,50 +1332,85 @@ const renderSession = (session) => {
 
 const renderStatus = (status) => {
   const drive = status.connections?.drive;
+  $("metric-users").textContent = String(status.users?.count ?? 0);
+  $("metric-drive").textContent = drive?.status === "not_configured" ? "not set" : drive?.status || "unknown";
+  $("metric-audit").textContent = status.audit?.head ? "active" : "no head";
   $("drive-status").textContent =
     drive?.status === "not_configured"
       ? "Drive is not connected yet."
       : "Drive connection status: " + drive.status;
+  $("mcp-status").textContent =
+    drive?.status === "active"
+      ? "Agent access can use this workspace once MCP credentials are issued."
+      : "Connect Google Drive before enabling agent access.";
   $("audit-status").textContent = status.audit?.head
-    ? "Audit chain has an active head."
-    : "No audit head found yet.";
+    ? "Audit log is receiving signed events."
+    : "No audit log checkpoint found yet.";
+};
+
+const renderStatusUnavailable = (message) => {
+  $("metric-users").textContent = "-";
+  $("metric-drive").textContent = "unavailable";
+  $("metric-audit").textContent = "unavailable";
+  $("drive-status").textContent = "Connection status is unavailable.";
+  $("mcp-status").textContent = "Agent access status is unavailable.";
+  $("audit-status").textContent = message || "Audit log status is unavailable.";
 };
 
 const load = async () => {
-  $("error").textContent = "";
+  setError();
+  await loadConfig();
+  showView("loading");
   const session = await requestJson("/v1/session");
   if (!session.authenticated) {
-    $("login").classList.remove("hidden");
-    $("dashboard").classList.add("hidden");
-    $("logout").classList.add("hidden");
+    showView("login");
     return;
   }
-  $("login").classList.add("hidden");
-  $("dashboard").classList.remove("hidden");
-  $("logout").classList.remove("hidden");
+  showView("dashboard");
   csrfToken = session.csrfToken ?? "";
   renderSession(session);
   try {
     renderStatus(await requestJson("/v1/workspace/status"));
   } catch (error) {
-    $("error").textContent = error instanceof Error ? error.message : "Status failed";
+    if (await refreshSession()) {
+      renderStatus(await requestJson("/v1/workspace/status"));
+      return;
+    }
+    const message = error instanceof Error ? error.message : "Workspace status failed";
+    renderStatusUnavailable(message);
+    setError(message);
   }
 };
 
-$("login-form").addEventListener("submit", (event) => {
+$("login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const workspaceId = new FormData(event.currentTarget).get("workspaceId");
-  requestJson("/v1/auth/google/start", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ workspaceId }),
-  })
-    .then((body) => {
-      window.location.href = body.location;
-    })
-    .catch((error) => {
-      $("error").textContent = error instanceof Error ? error.message : "Login failed";
+  setError();
+  const form = event.currentTarget;
+  const workspaceId = String(new FormData(form).get("workspaceId") ?? "").trim();
+  if (!uuidPattern.test(workspaceId)) {
+    setError("Enter a valid workspace UUID.");
+    $("workspace-id").focus();
+    return;
+  }
+  window.localStorage.setItem("pact:lastWorkspaceId", workspaceId);
+  const input = $("workspace-id");
+  const button = $("login-submit");
+  input.disabled = true;
+  button.disabled = true;
+  button.textContent = "Redirecting to Google...";
+  try {
+    const body = await requestJson("/v1/auth/google/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
     });
+    window.location.href = body.location;
+  } catch (error) {
+    input.disabled = false;
+    button.disabled = false;
+    button.textContent = "Continue with Google";
+    setError(error instanceof Error ? error.message : "Login failed");
+  }
 });
 
 $("logout").addEventListener("click", async () => {
@@ -790,7 +1419,8 @@ $("logout").addEventListener("click", async () => {
 });
 
 load().catch((error) => {
-  $("error").textContent = error instanceof Error ? error.message : "Dashboard failed";
+  showView("login");
+  setError(error instanceof Error ? error.message : "Dashboard failed");
 });
 `;
 
