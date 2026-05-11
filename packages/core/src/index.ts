@@ -52,7 +52,10 @@ export const isStrongSharedSecret = (value: string | undefined): boolean => {
     if (code <= 32 || code === 127) return false;
   }
   const lower = secret.toLowerCase();
-  return !weakSecretMarkers.some((marker) => lower.includes(marker));
+  if (weakSecretMarkers.some((marker) => lower.includes(marker))) return false;
+  const unique = new Set(secret).size;
+  if (unique < 16) return false;
+  return true;
 };
 
 export class PactError extends Error {
