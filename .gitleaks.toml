@@ -1,0 +1,14 @@
+title = "pact gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "ignore test fixtures and committed example secrets"
+paths = [
+    '''__tests__/.*\.test\.ts$''',
+    '''packages/test-helpers/.*''',
+]
+regexes = [
+    '''0123456789abcdef0123456789abcde[ef]''',
+]
