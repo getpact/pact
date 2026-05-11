@@ -302,6 +302,12 @@ run("admin api", () => {
       runtime,
     );
     expect(credential.status).toBe(200);
+    const stored = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx.select().from(vaultSecrets).where(eq(vaultSecrets.workspaceId, created.workspaceId)),
+    );
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.target).toBe(createdBrain.brain.id);
+    expect(stored[0]?.ciphertext).not.toContain("xoxb-test");
 
     const del = await callAdmin(
       `/v1/workspaces/${created.workspaceId}/brains/${createdBrain.brain.id}`,

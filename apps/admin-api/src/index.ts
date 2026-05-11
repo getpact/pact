@@ -445,7 +445,7 @@ app.delete("/v1/workspaces/:id/brains/:brainId", async (c) => {
       await deleteSecret(tx, {
         workspaceId,
         kind: "brain_credential",
-        target: kind,
+        target: brainId,
       });
       await auditInTx(tx, c, ctx, "admin.brain.deleted", { brainId, kind });
     }
@@ -490,7 +490,7 @@ app.put("/v1/workspaces/:id/brains/:brainId/credential", async (c) => {
       await storeSecret(tx, rawMek, {
         workspaceId,
         kind: "brain_credential",
-        target: brainRow.kind,
+        target: brainId,
         plaintext: body.token,
       });
       await auditInTx(tx, c, ctx, "admin.brain.credential.set", { brainId, kind: brainRow.kind });

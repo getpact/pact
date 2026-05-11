@@ -525,21 +525,25 @@ run("gateway integration", () => {
       email: "alice@example.com",
       audience: "pact-gateway",
     });
-    await withWorkspace(db, created.workspaceId, (tx) =>
-      tx.insert(schema.brains).values({
-        workspaceId: created.workspaceId,
-        kind: "notion",
-        baseUrl: "https://api.example.com/base",
-        authScheme: "bearer",
-        scopeInjectionTemplate: {},
-      }),
+    const [brain] = await withWorkspace(db, created.workspaceId, (tx) =>
+      tx
+        .insert(schema.brains)
+        .values({
+          workspaceId: created.workspaceId,
+          kind: "notion",
+          baseUrl: "https://api.example.com/base",
+          authScheme: "bearer",
+          scopeInjectionTemplate: {},
+        })
+        .returning({ id: schema.brains.id }),
     );
+    if (!brain) throw new Error("brain insert failed");
     const rawMek = fromBase64(testEnv.MEK);
     await withWorkspace(db, created.workspaceId, (tx) =>
       storeSecret(tx, rawMek, {
         workspaceId: created.workspaceId,
         kind: "brain_credential",
-        target: "notion",
+        target: brain.id,
         plaintext: "upstream-secret-token",
       }),
     );
