@@ -306,6 +306,83 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         default:
           $ref: "#/components/responses/Error"
+  /v1/connections/google-drive/start:
+    post:
+      tags: [dashboard]
+      summary: Start Google Drive OAuth
+      description: Same-origin BFF endpoint that requires a dashboard session and CSRF token. Returns a Google authorization URL plus HttpOnly Drive OAuth cookies.
+      security:
+        - csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Drive OAuth authorization URL returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [location]
+                properties:
+                  location:
+                    type: string
+                    format: uri
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/connections/google-drive:
+    delete:
+      tags: [dashboard]
+      summary: Disconnect Google Drive through the dashboard BFF
+      security:
+        - csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Drive connection disconnected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/connections/google-drive/callback:
+    get:
+      tags: [dashboard]
+      summary: Complete Google Drive OAuth
+      description: Browser callback that validates HttpOnly Drive state and forwards the code to the admin API. Google tokens are never exposed to browser JavaScript.
+      security: []
+      responses:
+        "302":
+          description: Drive connection stored and browser redirected to the dashboard.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
   /oauth/oidc/callback:
     get:
       tags: [dashboard]
@@ -398,6 +475,88 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "502":
           $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/connections/google-drive:
+    get:
+      tags: [admin]
+      summary: Read Google Drive connection status
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Drive connection status for the authenticated workspace user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection]
+                properties:
+                  connection:
+                    $ref: "#/components/schemas/DriveConnection"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [admin]
+      summary: Disconnect Google Drive
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Drive connection removed or already absent.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Ok"
+                  - type: object
+                    required: [connection]
+                    properties:
+                      connection:
+                        $ref: "#/components/schemas/DriveConnection"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/connections/google-drive/oauth:
+    post:
+      tags: [admin]
+      summary: Store Google Drive OAuth tokens
+      description: Exchanges a Google OAuth code server-side, verifies the Google subject matches the signed-in Pact user, stores encrypted token material, and writes connection metadata.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, codeVerifier, nonce, redirectUri]
+              properties:
+                code:
+                  type: string
+                codeVerifier:
+                  type: string
+                nonce:
+                  type: string
+                redirectUri:
+                  type: string
+                  format: uri
+      responses:
+        "200":
+          description: Drive connection stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection]
+                properties:
+                  connection:
+                    $ref: "#/components/schemas/DriveConnection"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Error"
   /v1/refresh:
@@ -1228,20 +1387,42 @@ components:
           required: [drive]
           properties:
             drive:
-              type: object
-              required: [status]
-              properties:
-                status:
-                  type: string
-                brainId:
-                  type: string
-                  format: uuid
+              $ref: "#/components/schemas/DriveConnection"
         audit:
           type: object
           properties:
             head:
               type: object
               nullable: true
+    DriveConnection:
+      type: object
+      required: [status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [not_configured, connected, expired, disconnected]
+        email:
+          type: string
+          format: email
+        scopes:
+          type: array
+          items:
+            type: string
+        expiresAt:
+          type: string
+          format: date-time
+        connectedAt:
+          type: string
+          format: date-time
+        lastRefreshAt:
+          type: string
+          format: date-time
+        lastError:
+          type: string
+          nullable: true
     Jwks:
       type: object
       required: [keys]

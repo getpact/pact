@@ -24,14 +24,16 @@ import {
   policies,
   revokedJtis,
   users,
+  workspaceOauthConnections,
 } from "@getpact/db/schema";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { tryParsePolicy } from "@getpact/policy";
-import { deleteSecret, storeSecret } from "@getpact/vault";
+import { deleteSecret, loadSecretString, storeSecret } from "@getpact/vault";
 import { and, desc, eq, max, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { writeAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
@@ -43,6 +45,13 @@ type Env = {
   ENVIRONMENT?: string;
   ADMIN_AUDIENCE?: string;
   UPSTREAM_HOST_ALLOWLIST?: string;
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+  GOOGLE_OAUTH_TOKEN_ENDPOINT?: string;
+  GOOGLE_OAUTH_JWKS_URI?: string;
+  GOOGLE_OAUTH_ISSUER?: string;
+  GOOGLE_OAUTH_REVOKE_ENDPOINT?: string;
+  GOOGLE_DRIVE_OAUTH_REDIRECT_URI?: string;
   REVOCATION_CACHE?: KVNamespace;
 };
 type AppCtx = Context<{ Bindings: Env }>;
@@ -324,6 +333,450 @@ const pgErrorCode = (value: unknown): string | null => {
 };
 
 const isUniqueViolation = (value: unknown): boolean => pgErrorCode(value) === "23505";
+
+const DRIVE_PROVIDER = "google_drive";
+const DRIVE_SECRET_KIND = "google_drive_oauth";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
+const GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs";
+const GOOGLE_ISSUER = "https://accounts.google.com";
+
+type DriveTokenPayload = {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: string;
+  scope?: string;
+  googleSub: string;
+  email: string;
+};
+
+type DriveExchangeResult = DriveTokenPayload & {
+  scopes: string[];
+};
+
+const driveVaultTarget = (userId: string): string => `user:${userId}`;
+
+const connectionStatus = (expiresAt: Date | null, status: string): string => {
+  if (status !== "connected") return status;
+  if (expiresAt && expiresAt.getTime() <= Date.now()) return "expired";
+  return "connected";
+};
+
+const parseScopes = (scope: string | undefined): string[] =>
+  scope
+    ? scope
+        .split(/\s+/)
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+
+const allowedDriveScopes = new Set(["openid", "email", "profile", DRIVE_SCOPE]);
+
+const isDriveTokenPayload = (value: unknown): value is DriveTokenPayload => {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.accessToken === "string" &&
+    typeof record.googleSub === "string" &&
+    typeof record.email === "string"
+  );
+};
+
+const requireDriveOAuthConfig = (
+  c: AppCtx,
+): {
+  clientId: string;
+  clientSecret: string;
+  tokenEndpoint: string;
+  jwksUri: string;
+  issuer: string;
+} => {
+  if (!c.env.GOOGLE_OAUTH_CLIENT_ID || !c.env.GOOGLE_OAUTH_CLIENT_SECRET) {
+    throw new ValidationError("google drive oauth is not configured");
+  }
+  return {
+    clientId: c.env.GOOGLE_OAUTH_CLIENT_ID,
+    clientSecret: c.env.GOOGLE_OAUTH_CLIENT_SECRET,
+    tokenEndpoint: c.env.GOOGLE_OAUTH_TOKEN_ENDPOINT ?? GOOGLE_TOKEN_ENDPOINT,
+    jwksUri: c.env.GOOGLE_OAUTH_JWKS_URI ?? GOOGLE_JWKS_URI,
+    issuer: c.env.GOOGLE_OAUTH_ISSUER ?? GOOGLE_ISSUER,
+  };
+};
+
+const exchangeDriveCode = async (
+  c: AppCtx,
+  input: { code: string; codeVerifier: string; redirectUri: string; nonce: string },
+): Promise<DriveExchangeResult> => {
+  const config = requireDriveOAuthConfig(c);
+  const expectedRedirect = c.env.GOOGLE_DRIVE_OAUTH_REDIRECT_URI;
+  if (c.env.ENVIRONMENT === "production" && !expectedRedirect) {
+    throw new ValidationError("google drive redirect uri is not configured");
+  }
+  if (expectedRedirect && input.redirectUri !== expectedRedirect) {
+    throw new ValidationError("redirectUri does not match configured Drive callback");
+  }
+
+  const tokenRes = await fetch(config.tokenEndpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    signal: AbortSignal.timeout(10_000),
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code: input.code,
+      code_verifier: input.codeVerifier,
+      grant_type: "authorization_code",
+      redirect_uri: input.redirectUri,
+    }),
+  });
+
+  const rawBody = await tokenRes.text();
+  if (!tokenRes.ok) {
+    throw new ValidationError("google drive token exchange failed");
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(rawBody) as Record<string, unknown>;
+  } catch {
+    throw new ValidationError("google drive token response was not json");
+  }
+  if (typeof body.access_token !== "string" || typeof body.id_token !== "string") {
+    throw new ValidationError("google drive token response missing tokens");
+  }
+
+  let payload: Awaited<ReturnType<typeof jwtVerify>>["payload"];
+  try {
+    ({ payload } = await jwtVerify(body.id_token, createRemoteJWKSet(new URL(config.jwksUri)), {
+      issuer: config.issuer,
+      audience: config.clientId,
+      algorithms: ["RS256"],
+    }));
+  } catch {
+    throw new ValidationError("google drive identity verification failed");
+  }
+  if (payload.nonce !== input.nonce) {
+    throw new ValidationError("google drive identity nonce mismatch");
+  }
+  if (typeof payload.sub !== "string" || typeof payload.email !== "string") {
+    throw new ValidationError("google drive identity missing sub or email");
+  }
+
+  const expiresAt =
+    typeof body.expires_in === "number"
+      ? new Date(Date.now() + body.expires_in * 1000).toISOString()
+      : undefined;
+  const scope = typeof body.scope === "string" ? body.scope : undefined;
+  const scopes = parseScopes(scope);
+  if (!scopes.includes(DRIVE_SCOPE)) {
+    throw new ValidationError("google drive readonly scope was not granted");
+  }
+  if (scopes.some((granted) => !allowedDriveScopes.has(granted))) {
+    throw new ValidationError("google drive granted unexpected scopes");
+  }
+
+  const result: DriveExchangeResult = {
+    accessToken: body.access_token,
+    googleSub: payload.sub,
+    email: canonicalizeEmail(payload.email) as string,
+    scopes,
+  };
+  if (typeof body.refresh_token === "string") result.refreshToken = body.refresh_token;
+  if (expiresAt) result.expiresAt = expiresAt;
+  if (scope) result.scope = scope;
+  return result;
+};
+
+const revokeGoogleToken = async (env: Env, token: string): Promise<boolean> => {
+  const response = await fetch(env.GOOGLE_OAUTH_REVOKE_ENDPOINT ?? GOOGLE_REVOKE_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    signal: AbortSignal.timeout(10_000),
+    body: new URLSearchParams({ token }),
+  });
+  return response.ok;
+};
+
+app.get("/v1/workspaces/:id/connections/google-drive", async (c) => {
+  const workspaceId = c.req.param("id");
+  const ctx = await auth(c, workspaceId);
+  if (!isContext(ctx)) return ctx;
+
+  const db = createClient(c.env.DATABASE_URL);
+  const [row] = await withWorkspace(db, workspaceId, (tx) =>
+    tx
+      .select({
+        id: workspaceOauthConnections.id,
+        email: workspaceOauthConnections.email,
+        scopes: workspaceOauthConnections.scopes,
+        status: workspaceOauthConnections.status,
+        expiresAt: workspaceOauthConnections.expiresAt,
+        connectedAt: workspaceOauthConnections.connectedAt,
+        lastRefreshAt: workspaceOauthConnections.lastRefreshAt,
+        lastError: workspaceOauthConnections.lastError,
+      })
+      .from(workspaceOauthConnections)
+      .where(
+        and(
+          eq(workspaceOauthConnections.workspaceId, workspaceId),
+          eq(workspaceOauthConnections.provider, DRIVE_PROVIDER),
+          eq(workspaceOauthConnections.userId, ctx.userId),
+          sql`${workspaceOauthConnections.disconnectedAt} IS NULL`,
+        ),
+      )
+      .limit(1),
+  );
+
+  if (!row) {
+    return c.json({ connection: { status: "not_configured" } });
+  }
+
+  return c.json({
+    connection: {
+      id: row.id,
+      status: connectionStatus(row.expiresAt, row.status),
+      email: row.email,
+      scopes: row.scopes,
+      expiresAt: row.expiresAt?.toISOString(),
+      connectedAt: row.connectedAt.toISOString(),
+      lastRefreshAt: row.lastRefreshAt?.toISOString(),
+      lastError: row.lastError,
+    },
+  });
+});
+
+app.post("/v1/workspaces/:id/connections/google-drive/oauth", async (c) => {
+  const workspaceId = c.req.param("id");
+  const ctx = await auth(c, workspaceId);
+  if (!isContext(ctx)) return ctx;
+
+  try {
+    const body = await c.req.json<{
+      code?: string;
+      codeVerifier?: string;
+      nonce?: string;
+      redirectUri?: string;
+    }>();
+    if (!body.code || !body.codeVerifier || !body.nonce || !body.redirectUri) {
+      throw new ValidationError("code, codeVerifier, nonce, and redirectUri are required");
+    }
+
+    const exchanged = await exchangeDriveCode(c, {
+      code: body.code,
+      codeVerifier: body.codeVerifier,
+      nonce: body.nonce,
+      redirectUri: body.redirectUri,
+    });
+    const db = createClient(c.env.DATABASE_URL);
+    const rawMek = fromBase64(c.env.MEK);
+    const vaultTarget = driveVaultTarget(ctx.userId);
+
+    const connection = await withWorkspace(db, workspaceId, async (tx) => {
+      const lockedUsers = (await tx.execute(sql`
+        SELECT id, email, google_sub AS "googleSub"
+        FROM users
+        WHERE workspace_id = ${workspaceId}
+          AND id = ${ctx.userId}
+        FOR UPDATE
+      `)) as Array<{ id: string; email: string; googleSub: string | null }>;
+      const user = lockedUsers[0];
+      if (!user) throw new ValidationError("user not found");
+      if (!user.googleSub || user.googleSub !== exchanged.googleSub) {
+        await auditInTx(
+          tx,
+          c,
+          ctx,
+          "admin.connection.google_drive.rejected",
+          { reason: "google_sub_mismatch", email: exchanged.email },
+          "deny",
+        );
+        throw new ValidationError("google drive identity does not match signed-in user");
+      }
+
+      const existingSecret = await loadSecretString(tx, rawMek, {
+        workspaceId,
+        kind: DRIVE_SECRET_KIND,
+        target: vaultTarget,
+      });
+      let existingRefreshToken: string | undefined;
+      if (existingSecret) {
+        try {
+          const parsed = JSON.parse(existingSecret) as unknown;
+          if (isDriveTokenPayload(parsed)) {
+            existingRefreshToken = parsed.refreshToken;
+          }
+        } catch {}
+      }
+
+      const tokenPayload: DriveTokenPayload = {
+        accessToken: exchanged.accessToken,
+        googleSub: exchanged.googleSub,
+        email: exchanged.email,
+      };
+      const refreshToken = exchanged.refreshToken ?? existingRefreshToken;
+      if (refreshToken) tokenPayload.refreshToken = refreshToken;
+      if (exchanged.expiresAt) tokenPayload.expiresAt = exchanged.expiresAt;
+      if (exchanged.scope) tokenPayload.scope = exchanged.scope;
+      await storeSecret(tx, rawMek, {
+        workspaceId,
+        kind: DRIVE_SECRET_KIND,
+        target: vaultTarget,
+        plaintext: JSON.stringify(tokenPayload),
+      });
+
+      const [active] = await tx
+        .select({ id: workspaceOauthConnections.id })
+        .from(workspaceOauthConnections)
+        .where(
+          and(
+            eq(workspaceOauthConnections.workspaceId, workspaceId),
+            eq(workspaceOauthConnections.provider, DRIVE_PROVIDER),
+            eq(workspaceOauthConnections.userId, ctx.userId),
+            sql`${workspaceOauthConnections.disconnectedAt} IS NULL`,
+          ),
+        )
+        .limit(1);
+
+      const values = {
+        workspaceId,
+        provider: DRIVE_PROVIDER,
+        userId: ctx.userId,
+        providerSubject: exchanged.googleSub,
+        email: exchanged.email,
+        scopes: exchanged.scopes,
+        status: "connected",
+        vaultTarget,
+        expiresAt: exchanged.expiresAt ? new Date(exchanged.expiresAt) : null,
+        lastError: null,
+      };
+      const rows = active
+        ? await tx
+            .update(workspaceOauthConnections)
+            .set({
+              providerSubject: values.providerSubject,
+              email: values.email,
+              scopes: values.scopes,
+              status: values.status,
+              vaultTarget: values.vaultTarget,
+              expiresAt: values.expiresAt,
+              connectedAt: new Date(),
+              lastError: null,
+            })
+            .where(eq(workspaceOauthConnections.id, active.id))
+            .returning({
+              id: workspaceOauthConnections.id,
+              email: workspaceOauthConnections.email,
+              expiresAt: workspaceOauthConnections.expiresAt,
+            })
+        : await tx.insert(workspaceOauthConnections).values(values).returning({
+            id: workspaceOauthConnections.id,
+            email: workspaceOauthConnections.email,
+            expiresAt: workspaceOauthConnections.expiresAt,
+          });
+      await auditInTx(tx, c, ctx, "admin.connection.google_drive.connected", {
+        connectionId: rows[0]?.id,
+        email: exchanged.email,
+        scopes: exchanged.scopes,
+      });
+      return rows[0];
+    });
+
+    return c.json({
+      connection: {
+        id: connection?.id,
+        status: "connected",
+        email: connection?.email,
+        expiresAt: connection?.expiresAt?.toISOString(),
+      },
+    });
+  } catch (e) {
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400 | 401 | 403 | 404);
+    }
+    throw e;
+  }
+});
+
+app.delete("/v1/workspaces/:id/connections/google-drive", async (c) => {
+  const workspaceId = c.req.param("id");
+  const ctx = await auth(c, workspaceId);
+  if (!isContext(ctx)) return ctx;
+
+  const db = createClient(c.env.DATABASE_URL);
+  const rawMek = fromBase64(c.env.MEK);
+  const vaultTarget = driveVaultTarget(ctx.userId);
+  const existingSecret = await withWorkspace(db, workspaceId, (tx) =>
+    loadSecretString(tx, rawMek, {
+      workspaceId,
+      kind: DRIVE_SECRET_KIND,
+      target: vaultTarget,
+    }),
+  );
+  if (existingSecret) {
+    let revokeToken: string | undefined;
+    try {
+      const parsed = JSON.parse(existingSecret) as unknown;
+      if (isDriveTokenPayload(parsed)) {
+        revokeToken = parsed.refreshToken ?? parsed.accessToken;
+      }
+    } catch {}
+    if (revokeToken) {
+      const revoked = await revokeGoogleToken(c.env, revokeToken).catch(() => false);
+      if (!revoked) {
+        try {
+          await withWorkspace(db, workspaceId, (tx) =>
+            auditInTx(
+              tx,
+              c,
+              ctx,
+              "admin.connection.google_drive.disconnect_rejected",
+              { reason: "google_revoke_failed" },
+              "deny",
+            ),
+          );
+        } catch {
+          return c.json({ error: "audit_unavailable" }, 503);
+        }
+        return c.json(
+          { error: "google_revoke_failed", message: "Google Drive grant could not be revoked" },
+          502,
+        );
+      }
+    }
+  }
+  const removed = await withWorkspace(db, workspaceId, async (tx) => {
+    const rows = await tx
+      .update(workspaceOauthConnections)
+      .set({ status: "disconnected", disconnectedAt: new Date() })
+      .where(
+        and(
+          eq(workspaceOauthConnections.workspaceId, workspaceId),
+          eq(workspaceOauthConnections.provider, DRIVE_PROVIDER),
+          eq(workspaceOauthConnections.userId, ctx.userId),
+          sql`${workspaceOauthConnections.disconnectedAt} IS NULL`,
+        ),
+      )
+      .returning({
+        id: workspaceOauthConnections.id,
+        vaultTarget: workspaceOauthConnections.vaultTarget,
+      });
+    if (rows[0]) {
+      await deleteSecret(tx, {
+        workspaceId,
+        kind: DRIVE_SECRET_KIND,
+        target: rows[0].vaultTarget,
+      });
+      await auditInTx(tx, c, ctx, "admin.connection.google_drive.disconnected", {
+        connectionId: rows[0].id,
+      });
+    }
+    return rows;
+  });
+  if (removed.length === 0) {
+    return c.json({ connection: { status: "not_configured" } });
+  }
+  return c.json({ ok: true });
+});
 
 app.post("/v1/workspaces/:id/brains", async (c) => {
   const workspaceId = c.req.param("id");

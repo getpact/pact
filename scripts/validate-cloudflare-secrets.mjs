@@ -4,7 +4,7 @@ import { exit } from "node:process";
 
 const apps = process.argv.slice(2);
 const required = {
-  "admin-api": ["DATABASE_URL", "MEK"],
+  "admin-api": ["DATABASE_URL", "MEK", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"],
   "audit-api": ["DATABASE_URL"],
   gateway: ["DATABASE_URL", "MEK", "VERIFIER_SERVICE_TOKEN"],
   issuer: [
