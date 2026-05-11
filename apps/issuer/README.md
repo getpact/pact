@@ -13,7 +13,7 @@ OIDC issuer. Mints Pact JWTs from Google identity, redeems refresh tokens, serve
 
 ## Env
 
-- `DATABASE_URL` - Postgres URL (Hyperdrive in prod)
+- `DATABASE_URL` - Postgres URL
 - `MEK` - workspace key-wrap master key, base64
 - `ISSUER_BASE_URL` - canonical issuer URL embedded in `iss` claim
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`
