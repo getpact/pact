@@ -19,7 +19,7 @@ import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
 import type { KVNamespace } from "../cache.js";
-import app from "../index.js";
+import app, { validateDriveScopes } from "../index.js";
 
 const url = process.env.DATABASE_URL;
 const run = url ? describe : describe.skip;
@@ -50,6 +50,25 @@ describe("admin api auth hardening", () => {
       },
     );
     expect(res.status).toBe(401);
+  });
+
+  it("accepts Google userinfo scope aliases in Drive token responses", () => {
+    expect(
+      validateDriveScopes(
+        "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/drive.readonly",
+      ),
+    ).toEqual([
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      "https://www.googleapis.com/auth/drive.readonly",
+    ]);
+    expect(() => validateDriveScopes("openid email profile")).toThrow(
+      "google drive readonly scope was not granted",
+    );
+    expect(() => validateDriveScopes("openid https://www.googleapis.com/auth/drive")).toThrow(
+      "google drive readonly scope was not granted",
+    );
   });
 });
 

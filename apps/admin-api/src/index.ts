@@ -337,6 +337,8 @@ const isUniqueViolation = (value: unknown): boolean => pgErrorCode(value) === "2
 const DRIVE_PROVIDER = "google_drive";
 const DRIVE_SECRET_KIND = "google_drive_oauth";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const GOOGLE_USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email";
+const GOOGLE_USERINFO_PROFILE_SCOPE = "https://www.googleapis.com/auth/userinfo.profile";
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 const GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs";
@@ -371,7 +373,25 @@ const parseScopes = (scope: string | undefined): string[] =>
         .filter(Boolean)
     : [];
 
-const allowedDriveScopes = new Set(["openid", "email", "profile", DRIVE_SCOPE]);
+const allowedDriveScopes = new Set([
+  "openid",
+  "email",
+  "profile",
+  GOOGLE_USERINFO_EMAIL_SCOPE,
+  GOOGLE_USERINFO_PROFILE_SCOPE,
+  DRIVE_SCOPE,
+]);
+
+export const validateDriveScopes = (scope: string | undefined): string[] => {
+  const scopes = parseScopes(scope);
+  if (!scopes.includes(DRIVE_SCOPE)) {
+    throw new ValidationError("google drive readonly scope was not granted");
+  }
+  if (scopes.some((granted) => !allowedDriveScopes.has(granted))) {
+    throw new ValidationError("google drive granted unexpected scopes");
+  }
+  return scopes;
+};
 
 const isDriveTokenPayload = (value: unknown): value is DriveTokenPayload => {
   if (!value || typeof value !== "object") return false;
@@ -467,13 +487,7 @@ const exchangeDriveCode = async (
       ? new Date(Date.now() + body.expires_in * 1000).toISOString()
       : undefined;
   const scope = typeof body.scope === "string" ? body.scope : undefined;
-  const scopes = parseScopes(scope);
-  if (!scopes.includes(DRIVE_SCOPE)) {
-    throw new ValidationError("google drive readonly scope was not granted");
-  }
-  if (scopes.some((granted) => !allowedDriveScopes.has(granted))) {
-    throw new ValidationError("google drive granted unexpected scopes");
-  }
+  const scopes = validateDriveScopes(scope);
 
   const result: DriveExchangeResult = {
     accessToken: body.access_token,
