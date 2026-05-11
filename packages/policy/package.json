@@ -21,5 +21,8 @@
   },
   "files": [
     "dist"
-  ]
+  ],
+  "devDependencies": {
+    "fast-check": "^4.7.0"
+  }
 }
