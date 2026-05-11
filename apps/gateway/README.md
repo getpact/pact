@@ -21,7 +21,9 @@ Mode B forwarding gateway. Caller presents a Pact JWT (`aud=pact-gateway`); gate
 
 ## Env
 
-- `DATABASE_URL`, `MEK`, `VERIFIER_URL` (required)
+- `DATABASE_URL`, `MEK` (required)
+- `VERIFIER_SERVICE` - Cloudflare service binding to verifier in production
+- `VERIFIER_URL` - local-dev fallback only
 - `VERIFIER_SERVICE_TOKEN` - matches verifier's expected token
 - `GATEWAY_AUDIENCE` (default `pact-gateway`)
 - `GATEWAY_UPSTREAM_TIMEOUT_MS` (default 5000, max 30000)

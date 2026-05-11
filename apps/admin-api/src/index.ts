@@ -9,7 +9,13 @@ import {
   ValidationError,
 } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
-import { createClient, type Tx, withWorkspace } from "@getpact/db";
+import {
+  assertSafeRuntimeDbRole,
+  createClient,
+  type Tx,
+  UnsafeRuntimeDbRoleError,
+  withWorkspace,
+} from "@getpact/db";
 import {
   brains,
   groupMembers,
@@ -57,6 +63,9 @@ app.get("/health", (c) => c.json({ ok: true }));
 const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Response> => {
   const audience = c.env.ADMIN_AUDIENCE ?? "pact-admin";
   try {
+    await assertSafeRuntimeDbRole(c.env.DATABASE_URL, {
+      production: c.env.ENVIRONMENT === "production",
+    });
     return await authenticateAdmin(
       c.env.DATABASE_URL,
       workspaceId,
@@ -65,6 +74,9 @@ const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Resp
       c.env.ISSUER_BASE_URL,
     );
   } catch (e) {
+    if (e instanceof UnsafeRuntimeDbRoleError) {
+      return c.json({ error: "misconfigured", message: "unsafe runtime database role" }, 503);
+    }
     if (e instanceof PactError) {
       return c.json({ error: e.code, message: e.message }, e.status as 400 | 401 | 403 | 404);
     }

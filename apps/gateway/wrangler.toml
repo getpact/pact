@@ -11,7 +11,10 @@ GATEWAY_AUDIENCE = "pact-gateway"
 GATEWAY_AUDIT_MODE = "required"
 GATEWAY_FORWARD_HEADER_ALLOWLIST = "accept,accept-encoding,accept-language,content-type,user-agent"
 UPSTREAM_HOST_ALLOWLIST = "replace-with-approved-upstream-hosts"
-VERIFIER_URL = "https://verifier.getpact.dev"
+
+[[services]]
+binding = "VERIFIER_SERVICE"
+service = "pact-verifier"
 
 [observability]
 enabled = true

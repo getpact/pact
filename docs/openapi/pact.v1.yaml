@@ -121,6 +121,8 @@ paths:
                     type: string
                   auditKeyId:
                     type: string
+        default:
+          $ref: "#/components/responses/Error"
   /v1/oauth/google/exchange:
     post:
       tags: [issuer]
@@ -221,6 +223,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Jwks"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/.well-known/audit-jwks.json:
     get:
       tags: [issuer]
@@ -240,6 +244,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Jwks"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/verify:
     post:
       tags: [verifier]
@@ -302,6 +308,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Error"
     post:
       tags: [admin]
       summary: Create a user
@@ -331,6 +339,8 @@ paths:
                 properties:
                   user:
                     $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/groups:
     post:
       tags: [admin]
@@ -354,6 +364,8 @@ paths:
                 properties:
                   group:
                     $ref: "#/components/schemas/Group"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/groups/{groupId}/members:
     post:
       tags: [admin]
@@ -384,6 +396,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ok"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/policies:
     get:
       tags: [admin]
@@ -403,6 +417,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/PolicySummary"
+        default:
+          $ref: "#/components/responses/Error"
     post:
       tags: [admin]
       summary: Create a policy version
@@ -429,6 +445,8 @@ paths:
                 properties:
                   policy:
                     $ref: "#/components/schemas/PolicySummary"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/revocations:
     post:
       tags: [admin]
@@ -448,6 +466,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ok"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/invites:
     post:
       tags: [admin]
@@ -471,6 +491,8 @@ paths:
                 properties:
                   invite:
                     $ref: "#/components/schemas/Invite"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/brains:
     get:
       tags: [admin]
@@ -490,6 +512,8 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Brain"
+        default:
+          $ref: "#/components/responses/Error"
     post:
       tags: [admin]
       summary: Create a gateway brain
@@ -512,6 +536,8 @@ paths:
                 properties:
                   brain:
                     $ref: "#/components/schemas/Brain"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/brains/{brainId}:
     delete:
       tags: [admin]
@@ -531,6 +557,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ok"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/brains/{brainId}/credential:
     put:
       tags: [admin]
@@ -560,6 +588,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ok"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/audit/events:
     get:
       tags: [audit]
@@ -602,6 +632,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditEventsPage"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/audit/workspace:
     get:
       tags: [audit]
@@ -615,6 +647,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditWorkspace"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/audit/chain:
     get:
       tags: [audit]
@@ -628,6 +662,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditChainHead"
+        default:
+          $ref: "#/components/responses/Error"
   /{workspace}/mcp:
     post:
       tags: [mcp]
@@ -647,6 +683,8 @@ paths:
       responses:
         "200":
           description: JSON-RPC response.
+        default:
+          $ref: "#/components/responses/Error"
   /{workspace}/gateway/{brain}/{path}:
     parameters:
       - in: path

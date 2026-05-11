@@ -11,6 +11,13 @@ import { cacheKey, type RevocationCache } from "./cache.js";
 
 const REVOCATION_CACHE_TTL = 60;
 
+export class AuditUnavailableError extends Error {
+  constructor() {
+    super("verifier audit unavailable");
+    this.name = "AuditUnavailableError";
+  }
+}
+
 export type VerifyInput = {
   token: string;
   action: string;
@@ -33,7 +40,7 @@ const stringArrayClaim = (value: unknown): string[] | null => {
   return null;
 };
 
-const tryAudit = async (
+const writeAudit = async (
   databaseUrl: string,
   rawMek: Uint8Array,
   workspaceId: string,
@@ -42,35 +49,31 @@ const tryAudit = async (
   actorId: string | undefined,
   input: VerifyInput,
 ): Promise<void> => {
-  try {
-    const db = createClient(databaseUrl);
-    const [ws] = await db
-      .select({ id: workspaces.id, createdAt: workspaces.createdAt })
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId))
-      .limit(1);
-    if (!ws) return;
+  const db = createClient(databaseUrl);
+  const [ws] = await db
+    .select({ id: workspaces.id, createdAt: workspaces.createdAt })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  if (!ws) throw new Error("workspace not found for verifier audit");
 
-    await withWorkspace(db, workspaceId, async (tx) => {
-      const auditKey = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
-      await writeEvent(tx, {
-        workspaceId,
-        workspaceCreatedAt: ws.createdAt,
-        signingKeyId: auditKey.id,
-        signingKey: auditKey.privateKey,
-        event: {
-          actorKind: "user",
-          ...(actorId ? { actorId } : {}),
-          action: `verify.${input.action}`,
-          target: { resource: input.resource, audience: input.audience },
-          decision,
-          supporting: { reasons },
-        },
-      });
+  await withWorkspace(db, workspaceId, async (tx) => {
+    const auditKey = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
+    await writeEvent(tx, {
+      workspaceId,
+      workspaceCreatedAt: ws.createdAt,
+      signingKeyId: auditKey.id,
+      signingKey: auditKey.privateKey,
+      event: {
+        actorKind: "user",
+        ...(actorId ? { actorId } : {}),
+        action: `verify.${input.action}`,
+        target: { resource: input.resource, audience: input.audience },
+        decision,
+        supporting: { reasons },
+      },
     });
-  } catch {
-    // best-effort: never fail the verify call because audit failed
-  }
+  });
 };
 
 export type VerifyDeps = {
@@ -78,10 +81,26 @@ export type VerifyDeps = {
   rawMek: Uint8Array;
   issuer: string;
   cache?: RevocationCache;
+  auditRequired?: boolean;
+};
+
+const auditDecision = async (
+  deps: VerifyDeps,
+  workspaceId: string,
+  decision: "allow" | "deny",
+  reasons: string[],
+  actorId: string | undefined,
+  input: VerifyInput,
+): Promise<void> => {
+  try {
+    await writeAudit(deps.databaseUrl, deps.rawMek, workspaceId, decision, reasons, actorId, input);
+  } catch {
+    if (deps.auditRequired) throw new AuditUnavailableError();
+  }
 };
 
 export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promise<VerifyOutput> => {
-  const { databaseUrl, rawMek, cache } = deps;
+  const { databaseUrl, cache } = deps;
   let claims: ReturnType<typeof decodeJwt>;
   try {
     claims = decodeJwt(input.token);
@@ -129,11 +148,11 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
 
   const expectedMode = tokenModeForAudience(input.audience);
   if (!expectedMode) {
-    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["invalid audience"], sub, input);
+    await auditDecision(deps, workspaceId, "deny", ["invalid audience"], sub, input);
     return result(false, ["invalid audience"], sub);
   }
   if (claims.mode !== expectedMode) {
-    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["token mode mismatch"], sub, input);
+    await auditDecision(deps, workspaceId, "deny", ["token mode mismatch"], sub, input);
     return result(false, ["token mode mismatch"], sub);
   }
 
@@ -156,7 +175,7 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
     }
   }
   if (revokedFlag === true) {
-    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["token revoked"], sub, input);
+    await auditDecision(deps, workspaceId, "deny", ["token revoked"], sub, input);
     return result(false, ["token revoked"], sub);
   }
 
@@ -170,22 +189,14 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
   );
 
   if (policyRow.length === 0) {
-    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["no active policy"], sub, input);
+    await auditDecision(deps, workspaceId, "deny", ["no active policy"], sub, input);
     return result(false, ["no active policy"], sub);
   }
 
   const groups = stringArrayClaim(claims.groups);
   const roles = stringArrayClaim(claims.roles);
   if (!groups || !roles) {
-    await tryAudit(
-      databaseUrl,
-      rawMek,
-      workspaceId,
-      "deny",
-      ["malformed token claims"],
-      sub,
-      input,
-    );
+    await auditDecision(deps, workspaceId, "deny", ["malformed token claims"], sub, input);
     return result(false, ["malformed token claims"], sub);
   }
 
@@ -198,7 +209,7 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
 
   const policy = tryParsePolicy(policyRow[0]?.body);
   if (!policy) {
-    await tryAudit(databaseUrl, rawMek, workspaceId, "deny", ["invalid policy"], sub, input);
+    await auditDecision(deps, workspaceId, "deny", ["invalid policy"], sub, input);
     return result(false, ["invalid policy"], sub);
   }
   const evalResult = evaluate({
@@ -208,9 +219,8 @@ export const verifyAction = async (deps: VerifyDeps, input: VerifyInput): Promis
     policy,
   });
 
-  await tryAudit(
-    databaseUrl,
-    rawMek,
+  await auditDecision(
+    deps,
     workspaceId,
     evalResult.allow ? "allow" : "deny",
     evalResult.reasons,

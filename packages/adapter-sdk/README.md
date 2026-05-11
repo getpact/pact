@@ -4,7 +4,7 @@ Plug a data source or company brain into pact.
 
 ## Status
 
-Pre-v1.0. Not yet published.
+Pre-v1.0. Not yet published. ESM-only, Node 22+.
 
 ## Adapter Shape
 
@@ -33,3 +33,5 @@ export const adapter: Adapter = {
 ```
 
 Authorization resources should include the workspace id unless the tool is intentionally global.
+
+CommonJS is not shipped in v1. Consumers should import from ESM or use a bundler that can load ESM packages.

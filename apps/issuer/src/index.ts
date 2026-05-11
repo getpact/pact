@@ -6,7 +6,7 @@ import {
   securityHeaders,
   timingSafeEqualString,
 } from "@getpact/core";
-import { createClient } from "@getpact/db";
+import { assertSafeRuntimeDbRole, createClient, UnsafeRuntimeDbRoleError } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
 import {
@@ -34,6 +34,23 @@ app.use("*", async (c, next) => {
   for (const [k, v] of Object.entries(headers)) c.header(k, v);
 });
 app.use("/v1/*", bodyLimit({ maxSize: 32 * 1024 }));
+app.use("/v1/*", async (c, next) => {
+  if (c.env.ENVIRONMENT === "production" && new URL(c.req.url).pathname === "/v1/dev/issue") {
+    await next();
+    return;
+  }
+  try {
+    await assertSafeRuntimeDbRole(c.env.DATABASE_URL, {
+      production: c.env.ENVIRONMENT === "production",
+    });
+  } catch (e) {
+    if (e instanceof UnsafeRuntimeDbRoleError) {
+      return c.json({ error: "misconfigured", message: "unsafe runtime database role" }, 503);
+    }
+    throw e;
+  }
+  await next();
+});
 
 const memLimiter = memoryRateLimiter();
 const testLimiter: RateLimiter = {

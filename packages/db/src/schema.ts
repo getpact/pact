@@ -198,11 +198,13 @@ export const vaultSecrets = pgTable(
     target: text("target").notNull(),
     ciphertext: text("ciphertext").notNull(),
     dekCiphertext: text("dek_ciphertext").notNull(),
+    mekKeyId: text("mek_key_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     rotatedAt: timestamp("rotated_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("vault_secrets_workspace_kind_target_idx").on(t.workspaceId, t.kind, t.target),
+    index("vault_secrets_mek_key_id_idx").on(t.mekKeyId),
   ],
 );
 
@@ -294,11 +296,15 @@ export const workspaceSigningKeys = pgTable(
     alg: text("alg").notNull().default("EdDSA"),
     publicKeySpki: text("public_key_spki").notNull(),
     privateKeyWrapped: text("private_key_wrapped").notNull(),
+    mekKeyId: text("mek_key_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     validForSigningUntil: timestamp("valid_for_signing_until", { withTimezone: true }),
     validForVerificationUntil: timestamp("valid_for_verification_until", { withTimezone: true }),
   },
-  (t) => [index("workspace_signing_keys_workspace_kind_idx").on(t.workspaceId, t.kind)],
+  (t) => [
+    index("workspace_signing_keys_workspace_kind_idx").on(t.workspaceId, t.kind),
+    index("workspace_signing_keys_mek_key_id_idx").on(t.mekKeyId),
+  ],
 );
 
 export type WorkspaceSigningKey = typeof workspaceSigningKeys.$inferSelect;

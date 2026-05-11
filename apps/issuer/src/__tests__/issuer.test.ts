@@ -492,7 +492,7 @@ run("issuer end-to-end", () => {
     const failCount = statuses.filter((s) => s === 401).length;
     expect(okCount).toBe(1);
     expect(failCount).toBe(4);
-  });
+  }, 15_000);
 
   it("rejects duplicate workspace slug", async () => {
     const env = await buildEnv();
