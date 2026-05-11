@@ -8,7 +8,7 @@ Pre-v1.0.
 
 ## Layout
 
-- `apps/` - Cloudflare Workers (issuer, verifier, mcp-server, gateway, admin-api, audit-api)
+- `apps/` - Cloudflare Workers (issuer, verifier, mcp-server, gateway, admin-api, audit-api, web)
 - `packages/` - shared libraries and OSS packages
 - `infra/cloudflare/` - Wrangler config and Cloudflare resource definitions
 - `infra/compose/` - local Postgres + Miniflare
@@ -44,6 +44,6 @@ OSS (MIT):
 - `@getpact/verifier-sdk` (Node.js + edge JWT verifier)
 - `@getpact/adapter-sdk`
 - `@getpact/adapter-slack`
-- `getpact-verifier` (Python placeholder; not functional yet)
+- `getpact-verifier` (Python, beta; EdDSA JWT verifier)
 
 Internal: `@getpact/core`, `@getpact/db`, `@getpact/crypto`, `@getpact/policy`, `@getpact/audit`, `@getpact/vault`, `@getpact/keystore`, `@getpact/logger`, `@getpact/ratelimit`, `@getpact/test-helpers`.
