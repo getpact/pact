@@ -33,6 +33,7 @@ const DRIVE_STATE_COOKIE = "__Host-pact-drive-state";
 const DRIVE_VERIFIER_COOKIE = "__Host-pact-drive-verifier";
 const DRIVE_WORKSPACE_COOKIE = "__Host-pact-drive-workspace";
 const DRIVE_NONCE_COOKIE = "__Host-pact-drive-nonce";
+const DRIVE_ADMIN_ACCESS_COOKIE = "__Secure-pact-drive-admin-access";
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const ADMIN_AUDIENCE = "pact-admin";
@@ -93,6 +94,14 @@ const driveCallbackUrl = (env: Env): string => {
   if (!base) throw new Error("WEB_BASE_URL is required");
   const path = env.WEB_DRIVE_OAUTH_CALLBACK_PATH ?? "/v1/connections/google-drive/callback";
   return `${base}/${path.replace(/^\/+/, "")}`;
+};
+
+const driveCallbackCookiePath = (env: Env): string => {
+  try {
+    return new URL(driveCallbackUrl(env)).pathname || "/";
+  } catch {
+    return "/";
+  }
 };
 
 const urlFor = (base: string, path: string): string =>
@@ -170,8 +179,13 @@ const cookie = (
   return attrs.join("; ");
 };
 
-const clearCookie = (name: string, env: Env): string =>
-  cookie(name, "", { env, maxAge: 0, httpOnly: true });
+const clearCookie = (name: string, env: Env, opts: { path?: string } = {}): string =>
+  cookie(name, "", {
+    env,
+    maxAge: 0,
+    httpOnly: true,
+    ...(opts.path ? { path: opts.path } : {}),
+  });
 
 const appendCookie = (c: AppContext, value: string): void => {
   c.header("Set-Cookie", value, { append: true });
@@ -351,6 +365,10 @@ const clearSession = (c: AppContext): void => {
   ]) {
     appendCookie(c, clearCookie(name, c.env));
   }
+  appendCookie(
+    c,
+    clearCookie(DRIVE_ADMIN_ACCESS_COOKIE, c.env, { path: driveCallbackCookiePath(c.env) }),
+  );
 };
 
 const clearOAuthAttempt = (c: AppContext): void => {
@@ -368,6 +386,10 @@ const clearDriveOAuthAttempt = (c: AppContext): void => {
   ]) {
     appendCookie(c, clearCookie(name, c.env));
   }
+  appendCookie(
+    c,
+    clearCookie(DRIVE_ADMIN_ACCESS_COOKIE, c.env, { path: driveCallbackCookiePath(c.env) }),
+  );
 };
 
 const loadWorkspaceJwks = async (
@@ -564,6 +586,7 @@ app.post("/v1/auth/google/start", async (c) => {
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
 
+  clearDriveOAuthAttempt(c);
   appendCookie(
     c,
     cookie(OAUTH_STATE_COOKIE, state, {
@@ -596,15 +619,19 @@ app.post("/v1/auth/google/start", async (c) => {
 
 const handleGoogleCallback = async (c: AppContext) => {
   const callbackCookies = sessionCookies(c);
-  if (callbackCookies[DRIVE_STATE_COOKIE] && !callbackCookies[OAUTH_STATE_COOKIE]) {
+  const url = new URL(c.req.url);
+  const state = url.searchParams.get("state") ?? "";
+  if (
+    state &&
+    callbackCookies[DRIVE_STATE_COOKIE] &&
+    timingSafeEqualString(state, callbackCookies[DRIVE_STATE_COOKIE])
+  ) {
     return handleDriveCallback(c);
   }
   if (!webBaseUrl(c.env)) {
     return c.json({ error: "misconfigured", message: "WEB_BASE_URL is required" }, 503);
   }
-  const url = new URL(c.req.url);
   const code = url.searchParams.get("code") ?? "";
-  const state = url.searchParams.get("state") ?? "";
   const cookies = sessionCookies(c);
   const expectedState = cookies[OAUTH_STATE_COOKIE];
   const verifier = cookies[OAUTH_VERIFIER_COOKIE];
@@ -731,6 +758,7 @@ app.post("/v1/connections/google-drive/start", async (c) => {
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
 
+  clearOAuthAttempt(c);
   appendCookie(
     c,
     cookie(DRIVE_STATE_COOKIE, state, {
@@ -767,6 +795,16 @@ app.post("/v1/connections/google-drive/start", async (c) => {
       sameSite: "Lax",
     }),
   );
+  appendCookie(
+    c,
+    cookie(DRIVE_ADMIN_ACCESS_COOKIE, adminToken, {
+      env: c.env,
+      httpOnly: true,
+      maxAge: TEN_MINUTES,
+      sameSite: "Lax",
+      path: driveCallbackCookiePath(c.env),
+    }),
+  );
 
   return c.json({ location: url.toString() });
 });
@@ -780,7 +818,7 @@ async function handleDriveCallback(c: AppContext) {
   const verifier = cookies[DRIVE_VERIFIER_COOKIE];
   const nonce = cookies[DRIVE_NONCE_COOKIE];
   const workspaceId = cookies[DRIVE_WORKSPACE_COOKIE];
-  const adminToken = cookies[ADMIN_ACCESS_COOKIE];
+  const adminToken = cookies[ADMIN_ACCESS_COOKIE] ?? cookies[DRIVE_ADMIN_ACCESS_COOKIE];
   if (
     !code ||
     !state ||

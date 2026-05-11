@@ -38,6 +38,12 @@ let signingPrivateKey: KeyLike;
 const requestUrl = (input: RequestInfo | URL): string =>
   input instanceof Request ? input.url : String(input);
 
+const setCookieFor = (header: string, name: string): string => {
+  const entry = header.split(/,\s*(?=__)/).find((value) => value.startsWith(`${name}=`));
+  if (!entry) throw new Error(`missing Set-Cookie entry for ${name}`);
+  return entry;
+};
+
 beforeAll(async () => {
   const pair = await generateKeyPair("EdDSA", { extractable: true });
   signingPrivateKey = pair.privateKey;
@@ -214,7 +220,149 @@ describe("web dashboard auth", () => {
     expect(cookies).toContain("__Host-pact-drive-state=");
     expect(cookies).toContain("__Host-pact-drive-verifier=");
     expect(cookies).toContain("__Host-pact-drive-nonce=");
+    const bridgeCookie = setCookieFor(cookies, "__Secure-pact-drive-admin-access");
+    expect(bridgeCookie).toContain("Path=/v1/connections/google-drive/callback");
+    expect(bridgeCookie).toContain("SameSite=Lax");
+    expect(bridgeCookie).toContain("Max-Age=600");
+    expect(bridgeCookie).toContain("HttpOnly");
+    expect(bridgeCookie).toContain("Secure");
+    expect(cookies).toContain("__Host-pact-oauth-state=");
+    expect(cookies).toContain("Max-Age=0");
     expect(cookies).toContain("HttpOnly");
+  });
+
+  it("uses a short-lived Drive callback bridge when strict session cookies are not sent", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(requestUrl(input)).toBe(
+        `https://admin.test/v1/workspaces/${workspaceId}/connections/google-drive/oauth`,
+      );
+      expect(init?.method).toBe("POST");
+      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer bridge-token");
+      const body = JSON.parse(String(init?.body)) as {
+        code: string;
+        codeVerifier: string;
+        nonce: string;
+        redirectUri: string;
+      };
+      expect(body).toMatchObject({
+        code: "drive-code",
+        codeVerifier: "verifier-1",
+        nonce: "nonce-1",
+        redirectUri: "https://app.test/v1/connections/google-drive/callback",
+      });
+      return Response.json({ connection: { status: "connected" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request(
+      "/v1/connections/google-drive/callback?code=drive-code&state=state-1",
+      {
+        headers: {
+          cookie: [
+            "__Host-pact-drive-state=state-1",
+            "__Host-pact-drive-verifier=verifier-1",
+            `__Host-pact-drive-workspace=${workspaceId}`,
+            "__Host-pact-drive-nonce=nonce-1",
+            "__Secure-pact-drive-admin-access=bridge-token",
+          ].join(";"),
+        },
+      },
+      env,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
+    const cookies = res.headers.get("set-cookie") ?? "";
+    const bridgeClear = setCookieFor(cookies, "__Secure-pact-drive-admin-access");
+    expect(bridgeClear).toContain("Max-Age=0");
+    expect(bridgeClear).toContain("Path=/v1/connections/google-drive/callback");
+  });
+
+  it("routes shared local callback by Drive state even when stale login cookies exist", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ connection: { status: "connected" } })),
+    );
+    const res = await app.request(
+      "http://127.0.0.1:19147/oauth/oidc/callback?code=drive-code&state=drive-state",
+      {
+        headers: {
+          cookie: [
+            "__Host-pact-oauth-state=stale-login-state",
+            "__Host-pact-oauth-verifier=stale-login-verifier",
+            `__Host-pact-oauth-workspace=${workspaceId}`,
+            "__Host-pact-drive-state=drive-state",
+            "__Host-pact-drive-verifier=drive-verifier",
+            `__Host-pact-drive-workspace=${workspaceId}`,
+            "__Host-pact-drive-nonce=drive-nonce",
+            "__Secure-pact-drive-admin-access=bridge-token",
+          ].join(";"),
+        },
+      },
+      {
+        ...env,
+        ENVIRONMENT: "development",
+        WEB_BASE_URL: "http://127.0.0.1:19147",
+        WEB_DRIVE_OAUTH_CALLBACK_PATH: "/oauth/oidc/callback",
+      },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
+  });
+
+  it("does not route shared local callback to Drive when state does not match Drive state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ tokens: {} })),
+    );
+    const res = await app.request(
+      "http://127.0.0.1:19147/oauth/oidc/callback?code=login-code&state=login-state",
+      {
+        headers: {
+          cookie: [
+            "__Host-pact-oauth-state=login-state",
+            "__Host-pact-oauth-verifier=login-verifier",
+            `__Host-pact-oauth-workspace=${workspaceId}`,
+            "__Host-pact-drive-state=drive-state",
+            "__Host-pact-drive-verifier=drive-verifier",
+            `__Host-pact-drive-workspace=${workspaceId}`,
+            "__Host-pact-drive-nonce=drive-nonce",
+            "__Secure-pact-drive-admin-access=bridge-token",
+          ].join(";"),
+        },
+      },
+      {
+        ...env,
+        ENVIRONMENT: "development",
+        WEB_BASE_URL: "http://127.0.0.1:19147",
+        WEB_OAUTH_CALLBACK_PATH: "/oauth/oidc/callback",
+        WEB_DRIVE_OAUTH_CALLBACK_PATH: "/oauth/oidc/callback",
+      },
+    );
+    expect(res.status).toBe(502);
+    const fetchMock = vi.mocked(fetch);
+    const firstInput = fetchMock.mock.calls[0]?.[0];
+    expect(firstInput).toBeTruthy();
+    expect(requestUrl(firstInput as RequestInfo | URL)).toBe(
+      "https://issuer.test/v1/oauth/google/session",
+    );
+  });
+
+  it("rejects Drive callback when neither strict session nor bridge token is sent", async () => {
+    const res = await app.request(
+      "/v1/connections/google-drive/callback?code=drive-code&state=state-1",
+      {
+        headers: {
+          cookie: [
+            "__Host-pact-drive-state=state-1",
+            "__Host-pact-drive-verifier=verifier-1",
+            `__Host-pact-drive-workspace=${workspaceId}`,
+            "__Host-pact-drive-nonce=nonce-1",
+          ].join(";"),
+        },
+      },
+      env,
+    );
+    expect(res.status).toBe(401);
   });
 
   it("supports sharing the local login callback path for Drive OAuth", async () => {
@@ -539,6 +687,12 @@ describe("web dashboard auth", () => {
       env,
     );
     expect(res.status).toBe(200);
+    const bridgeClear = setCookieFor(
+      res.headers.get("set-cookie") ?? "",
+      "__Secure-pact-drive-admin-access",
+    );
+    expect(bridgeClear).toContain("Max-Age=0");
+    expect(bridgeClear).toContain("Path=/v1/connections/google-drive/callback");
   });
 
   it("disconnects Drive through the dashboard BFF without exposing tokens", async () => {
