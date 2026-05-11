@@ -40,6 +40,7 @@ const help = () => {
       "env:",
       "  PACT_ENDPOINT       issuer URL (default http://localhost:8787)",
       "  PACT_AUDIENCE       token audience (default pact-mcp)",
+      "  PACT_AUDIT_EXPECTED_HEAD external audit checkpoint hash",
       "  PACT_GOOGLE_CLIENT  Google OAuth client id (required for login)",
       "  PACT_WORKSPACE_ID   workspace id (required for login)",
       "",

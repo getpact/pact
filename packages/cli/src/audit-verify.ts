@@ -36,6 +36,7 @@ const auditBase = (cfg: CliConfig): string =>
   process.env.PACT_AUDIT_ENDPOINT ?? process.env.PACT_ENDPOINT ?? cfg.endpoint;
 
 const auditAudience = (): string => process.env.PACT_AUDIT_AUDIENCE ?? "pact-audit";
+const expectedAuditHead = (): string | undefined => process.env.PACT_AUDIT_EXPECTED_HEAD;
 
 const getAuditToken = async (cfg: CliConfig & { workspaceId: string }): Promise<string> => {
   if (!cfg.refreshToken) {
@@ -82,7 +83,6 @@ export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyRepor
     `${base}/v1/workspaces/${workspaceId}/audit/workspace`,
     token,
   );
-  const chain = await get<ChainResponse>(`${base}/v1/workspaces/${workspaceId}/audit/chain`, token);
 
   // Fetch audit verifying keys from the issuer's public JWKS, not audit-api.
   // This keeps the chain trustworthy if audit-api is compromised: a tampered
@@ -127,10 +127,15 @@ export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyRepor
     cursor = page.nextCursor;
   }
 
+  const chain = await get<ChainResponse>(`${base}/v1/workspaces/${workspaceId}/audit/chain`, token);
   const genesis = await computeGenesisHash(workspaceId, new Date(ws.createdAt));
   const result = await verifyChain(all, jwks, genesis);
   if (result.ok) {
     const head = all[all.length - 1]?.thisHash ?? genesis;
+    const expectedHead = expectedAuditHead();
+    if (expectedHead && expectedHead !== head) {
+      return { ok: false, brokenAt: { index: all.length, reason: "expected head mismatch" } };
+    }
     if (chain.head && chain.head.lastHash !== head) {
       return { ok: false, brokenAt: { index: all.length, reason: "chain head mismatch" } };
     }

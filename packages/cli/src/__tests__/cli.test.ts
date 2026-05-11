@@ -176,10 +176,12 @@ describe("audit verify", () => {
   let tmp: string;
   let originalHome: string | undefined;
   let originalAuditEndpoint: string | undefined;
+  let originalExpectedHead: string | undefined;
 
   beforeEach(() => {
     originalHome = process.env.HOME;
     originalAuditEndpoint = process.env.PACT_AUDIT_ENDPOINT;
+    originalExpectedHead = process.env.PACT_AUDIT_EXPECTED_HEAD;
     tmp = mkdtempSync(join(tmpdir(), "pact-cli-audit-"));
     process.env.HOME = tmp;
     process.env.PACT_AUDIT_ENDPOINT = "https://audit.test";
@@ -196,6 +198,11 @@ describe("audit verify", () => {
       process.env.PACT_AUDIT_ENDPOINT = originalAuditEndpoint;
     } else {
       delete process.env.PACT_AUDIT_ENDPOINT;
+    }
+    if (originalExpectedHead) {
+      process.env.PACT_AUDIT_EXPECTED_HEAD = originalExpectedHead;
+    } else {
+      delete process.env.PACT_AUDIT_EXPECTED_HEAD;
     }
     vi.unstubAllGlobals();
     rmSync(tmp, { recursive: true, force: true });
@@ -254,5 +261,54 @@ describe("audit verify", () => {
     expect(requests).not.toContain(
       "https://audit.test/v1/workspaces/ws-1/.well-known/audit-jwks.json",
     );
+  });
+
+  it("rejects audit chains that do not match an external checkpoint", async () => {
+    process.env.PACT_AUDIT_EXPECTED_HEAD = "external-head";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = input.toString();
+        if (url === "https://issuer.test/v1/refresh") {
+          return Response.json({
+            token: "audit-token",
+            jti: "jti-1",
+            exp: 1,
+            userId: "user-1",
+            refreshToken: "refresh-2",
+            refreshExpiresAt: "2026-05-10T00:00:00Z",
+          });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/workspace") {
+          return Response.json({
+            id: "ws-1",
+            slug: "acme",
+            createdAt: "2026-05-10T00:00:00.000Z",
+          });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/events?order=asc&limit=200") {
+          return Response.json({ events: [], nextCursor: null });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/chain") {
+          return Response.json({ head: null });
+        }
+        if (url === "https://issuer.test/v1/workspaces/ws-1/.well-known/audit-jwks.json") {
+          return Response.json({ keys: [] });
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+
+    const { runAuditVerify } = await import("../audit-verify.js");
+    await expect(
+      runAuditVerify({
+        endpoint: "https://issuer.test",
+        workspaceId: "ws-1",
+        refreshToken: "refresh-1",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      brokenAt: { index: 0, reason: "expected head mismatch" },
+    });
   });
 });
