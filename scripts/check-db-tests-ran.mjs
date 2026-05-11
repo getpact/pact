@@ -41,7 +41,22 @@ for (const file of dbGated) {
     missed.push(rel);
     continue;
   }
-  const slice = log.slice(idx, idx + 4096);
+  const nextFile = dbGated
+    .filter((other) => other !== file)
+    .map((other) => {
+      const otherRel = other.replace(/^.*\/(apps|packages)\//, "$1/");
+      const otherPackageLocal = otherRel.split("/").slice(2).join("/");
+      const relIdx = log.indexOf(otherRel, idx + 1);
+      const localIdx = log.indexOf(otherPackageLocal, idx + 1);
+      const candidates = [relIdx, localIdx].filter((value) => value >= 0);
+      return candidates.length > 0 ? Math.min(...candidates) : -1;
+    })
+    .filter((value) => value > idx)
+    .sort((a, b) => a - b)[0];
+  const taskSummary = log.indexOf("\n Tasks:", idx + 1);
+  const endCandidates = [nextFile, taskSummary].filter((value) => value && value > idx);
+  const end = endCandidates.length > 0 ? Math.min(...endCandidates) : idx + 4096;
+  const slice = log.slice(idx, end);
   if (/\bskipped\b/.test(slice)) {
     missed.push(`${rel} (reported skipped tests)`);
   }
