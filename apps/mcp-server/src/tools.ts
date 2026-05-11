@@ -8,7 +8,7 @@ import {
 } from "@getpact/adapter-sdk";
 import { createSlackAdapter } from "@getpact/adapter-slack";
 import { createClient, withWorkspace } from "@getpact/db";
-import { auditEvents, policies, workspaces } from "@getpact/db/schema";
+import { auditEvents, policies, workspaceOauthConnections, workspaces } from "@getpact/db/schema";
 import { loadSecretString } from "@getpact/vault";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
@@ -186,13 +186,31 @@ const driveAdapter = createDriveAdapter({
   loadConnection: async (ctx, deps) => {
     if (!deps.rawMek) return null;
     const db = createClient(deps.databaseUrl);
-    const value = await withWorkspace(db, ctx.workspaceId, (tx) =>
-      loadSecretString(tx, deps.rawMek as Uint8Array, {
+    const value = await withWorkspace(db, ctx.workspaceId, async (tx) => {
+      const [connection] = await tx
+        .select({
+          vaultTarget: workspaceOauthConnections.vaultTarget,
+          status: workspaceOauthConnections.status,
+          expiresAt: workspaceOauthConnections.expiresAt,
+        })
+        .from(workspaceOauthConnections)
+        .where(
+          and(
+            eq(workspaceOauthConnections.workspaceId, ctx.workspaceId),
+            eq(workspaceOauthConnections.provider, "google_drive"),
+            eq(workspaceOauthConnections.userId, ctx.userId),
+            isNull(workspaceOauthConnections.disconnectedAt),
+          ),
+        )
+        .limit(1);
+      if (!connection || connection.status !== "connected") return null;
+      if (connection.expiresAt && connection.expiresAt.getTime() <= Date.now()) return null;
+      return loadSecretString(tx, deps.rawMek as Uint8Array, {
         workspaceId: ctx.workspaceId,
         kind: "google_drive_oauth",
-        target: `user:${ctx.userId}`,
-      }),
-    );
+        target: connection.vaultTarget,
+      });
+    });
     return parseDriveConnection(value);
   },
 });
