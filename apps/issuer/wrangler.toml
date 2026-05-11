@@ -10,6 +10,11 @@ ENVIRONMENT = "production"
 ISSUER_BASE_URL = "https://issuer.getpact.dev"
 WEB_OAUTH_REDIRECT_URI = "https://app.getpact.dev/v1/auth/google/callback"
 
+[env.local.vars]
+ENVIRONMENT = "development"
+ISSUER_BASE_URL = "http://127.0.0.1:8787"
+WEB_OAUTH_REDIRECT_URI = "http://127.0.0.1:19147/oauth/oidc/callback"
+
 [triggers]
 crons = ["0 4 * * 0"]
 

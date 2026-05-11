@@ -10,9 +10,18 @@ ENVIRONMENT = "production"
 ISSUER_BASE_URL = "https://issuer.getpact.dev"
 VERIFIER_AUDIENCES = "pact-mcp,pact-gateway"
 
+[env.local.vars]
+ENVIRONMENT = "development"
+ISSUER_BASE_URL = "http://127.0.0.1:8787"
+VERIFIER_AUDIENCES = "pact-mcp,pact-gateway"
+
 [[kv_namespaces]]
 binding = "REVOCATION_CACHE"
 id = "replace-with-pact-revocation-kv-id"
+
+[[env.local.kv_namespaces]]
+binding = "REVOCATION_CACHE"
+id = "local-pact-revocation-cache"
 
 [observability]
 enabled = true

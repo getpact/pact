@@ -10,6 +10,12 @@ ENVIRONMENT = "production"
 ISSUER_BASE_URL = "https://issuer.getpact.dev"
 MCP_AUDIENCE = "pact-mcp"
 
+[env.local.vars]
+ENVIRONMENT = "development"
+ISSUER_BASE_URL = "http://127.0.0.1:8787"
+MCP_AUDIENCE = "pact-mcp"
+VERIFIER_URL = "http://127.0.0.1:8789"
+
 [[services]]
 binding = "VERIFIER_SERVICE"
 service = "pact-verifier"
