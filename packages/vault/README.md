@@ -1,6 +1,6 @@
 # @getpact/vault
 
-Per-workspace secret storage with envelope encryption. Each secret has its own AES-GCM data encryption key (DEK); the DEK is wrapped with the workspace master encryption key (MEK) and stored alongside the ciphertext in the `vault_secrets` table.
+Workspace-scoped secret storage with envelope encryption. Each secret has its own AES-GCM data encryption key (DEK); the DEK is wrapped with the deployment master encryption key (MEK) and stored alongside the ciphertext in the `vault_secrets` table.
 
 ```ts
 import { storeSecret, loadSecretString, listSecrets, deleteSecret } from "@getpact/vault";
