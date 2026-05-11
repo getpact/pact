@@ -37,6 +37,7 @@ const has = (start, indent, pattern) =>
   children(start, indent).some((line) => pattern.test(line.text));
 
 const routeMethodMap = new Map();
+const ignoredRoutes = new Set(["/", "/assets/app.css", "/assets/app.js"]);
 for (const routeFile of [
   "apps/issuer/src/index.ts",
   "apps/verifier/src/index.ts",
@@ -44,11 +45,13 @@ for (const routeFile of [
   "apps/audit-api/src/index.ts",
   "apps/mcp-server/src/index.ts",
   "apps/gateway/src/index.ts",
+  "apps/web/src/index.ts",
 ]) {
   const source = readFileSync(routeFile, "utf8");
   for (const match of source.matchAll(/app\.(get|post|put|delete|patch|all)\("([^"]+)"/g)) {
     if (match[2] === "/health") continue;
     const route = normalizeRoute(match[2]);
+    if (ignoredRoutes.has(route)) continue;
     const routeMethods = match[1] === "all" ? [...methods] : [match[1]];
     const set = routeMethodMap.get(route) ?? new Set();
     for (const method of routeMethods) set.add(method);
@@ -89,8 +92,8 @@ if (pathsIndex >= 0) {
       const statuses = direct(responseLine.index, responseLine.indent)
         .map((line) => line.text.match(/^"?([0-9]{3}|default)"?:/)?.[1])
         .filter(Boolean);
-      if (!statuses.some((code) => /^2[0-9][0-9]$/.test(code))) {
-        failures.push(`${label} missing 2xx response`);
+      if (!statuses.some((code) => /^(2[0-9][0-9]|302)$/.test(code))) {
+        failures.push(`${label} missing 2xx/302 response`);
       }
       if (
         openapiPath !== "/health" &&

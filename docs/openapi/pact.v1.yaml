@@ -12,6 +12,7 @@ tags:
   - name: audit
   - name: gateway
   - name: mcp
+  - name: dashboard
 security:
   - bearerAuth: []
 paths:
@@ -76,6 +77,8 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
   /v1/workspaces:
@@ -165,6 +168,10 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
   /v1/oauth/google/session:
@@ -221,6 +228,176 @@ paths:
           $ref: "#/components/responses/PayloadTooLarge"
         "429":
           $ref: "#/components/responses/RateLimited"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/config:
+    get:
+      tags: [dashboard]
+      summary: Read dashboard runtime configuration
+      description: Public BFF config used by the dashboard to display local OAuth setup status. Does not expose secrets.
+      security: []
+      responses:
+        "200":
+          description: Dashboard runtime config returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode, oauthConfigured]
+                properties:
+                  mode:
+                    type: string
+                    enum: [production, nonproduction]
+                  oauthConfigured:
+                    type: boolean
+                  defaultWorkspaceId:
+                    type: string
+                    format: uuid
+                    nullable: true
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/auth/google/start:
+    post:
+      tags: [dashboard]
+      summary: Start dashboard Google OAuth
+      description: Same-origin BFF endpoint. Requires an exact Origin or Referer matching WEB_BASE_URL and returns a Google authorization URL plus HttpOnly OAuth cookies.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId]
+              properties:
+                workspaceId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: OAuth authorization URL returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [location]
+                properties:
+                  location:
+                    type: string
+                    format: uri
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/auth/google/callback:
+    get:
+      tags: [dashboard]
+      summary: Complete dashboard Google OAuth
+      description: Browser callback that validates HttpOnly state and exchanges the code through the issuer session endpoint.
+      security: []
+      responses:
+        "302":
+          description: Session cookies stored and browser redirected to the dashboard.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /oauth/oidc/callback:
+    get:
+      tags: [dashboard]
+      summary: Complete local dashboard Google OAuth
+      description: Browser callback alias used by the local Google OAuth client. Validates HttpOnly state and exchanges the code through the issuer session endpoint.
+      security: []
+      responses:
+        "302":
+          description: Session cookies stored and browser redirected to the dashboard.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/session:
+    get:
+      tags: [dashboard]
+      summary: Read dashboard session state
+      description: Same-origin BFF endpoint backed by HttpOnly Pact cookies. Access tokens are never returned.
+      security: []
+      responses:
+        "200":
+          description: Session state returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSession"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [dashboard]
+      summary: Clear dashboard session cookies
+      security:
+        - csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session cleared.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/session/refresh:
+    post:
+      tags: [dashboard]
+      summary: Refresh dashboard Pact tokens
+      security:
+        - csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspace/status:
+    get:
+      tags: [dashboard]
+      summary: Read dashboard workspace status
+      description: BFF-owned status DTO; upstream admin/audit tokens remain in HttpOnly cookies.
+      security: []
+      responses:
+        "200":
+          description: Workspace status returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardWorkspaceStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
   /v1/refresh:
@@ -920,6 +1097,11 @@ components:
       in: header
       name: x-pact-web-service-token
       description: Shared service token used by the dashboard BFF for OAuth code exchange.
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: x-pact-csrf
+      description: Same-origin dashboard CSRF token.
   responses:
     BadRequest:
       description: Invalid request.
@@ -992,6 +1174,74 @@ components:
     DashboardAudience:
       type: string
       enum: [pact-admin, pact-audit]
+    DashboardSession:
+      type: object
+      required: [authenticated]
+      properties:
+        authenticated:
+          type: boolean
+        workspaceId:
+          type: string
+          format: uuid
+        csrfToken:
+          type: string
+        claims:
+          type: object
+          properties:
+            workspaceId:
+              type: string
+              format: uuid
+            userId:
+              type: string
+            email:
+              type: string
+              format: email
+            exp:
+              type: integer
+            roles:
+              type: array
+              items:
+                type: string
+            groups:
+              type: array
+              items:
+                type: string
+    DashboardWorkspaceStatus:
+      type: object
+      required: [workspaceId, users, brains, connections, audit]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        users:
+          type: object
+          required: [count]
+          properties:
+            count:
+              type: integer
+        brains:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardBrain"
+        connections:
+          type: object
+          required: [drive]
+          properties:
+            drive:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                brainId:
+                  type: string
+                  format: uuid
+        audit:
+          type: object
+          properties:
+            head:
+              type: object
+              nullable: true
     Jwks:
       type: object
       required: [keys]
@@ -1123,6 +1373,17 @@ components:
         expiresAt:
           type: string
           format: date-time
+    DashboardBrain:
+      type: object
+      required: [id, kind, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        status:
+          type: string
     Brain:
       type: object
       required: [id, kind, baseUrl]
