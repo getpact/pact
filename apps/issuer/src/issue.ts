@@ -4,12 +4,13 @@ import { issueJwt } from "@getpact/crypto";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, roles, userRoles, users, workspaces } from "@getpact/db/schema";
 import { loadActiveSigningKey } from "@getpact/keystore";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { type IssuedRefresh, issueRefresh } from "./refresh.js";
 
 export type IssueTokenInput = {
   workspaceId: string;
   email: Email;
+  googleSub?: string;
   audience: string;
   ttlSeconds: number;
   refreshTtlSeconds?: number;
@@ -25,8 +26,20 @@ export type IssueTokenResult = {
   refreshExpiresAt: string;
 };
 
+export type IssueTokenBundleInput = Omit<IssueTokenInput, "audience"> & {
+  audiences: string[];
+};
+
 const newJti = () => crypto.randomUUID();
 const DEFAULT_REFRESH_TTL = 24 * 60 * 60;
+
+const pgErrorCode = (value: unknown): string | null => {
+  if (typeof value !== "object" || value === null || !("code" in value)) return null;
+  const code = (value as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+};
+
+const isUniqueViolation = (value: unknown): boolean => pgErrorCode(value) === "23505";
 
 const tryAuditRefresh = async (
   tx: Tx,
@@ -122,6 +135,73 @@ const issueAccessToken = async (
   return { token, jti, exp: Math.floor(Date.now() / 1000) + input.ttlSeconds };
 };
 
+const loadAndBindUser = async (
+  tx: Tx,
+  input: { workspaceId: string; email: Email; googleSub?: string },
+): Promise<{ id: string; email: string }> => {
+  const rows = (await tx.execute(
+    sql`SELECT id, email, google_sub AS "googleSub"
+        FROM users
+        WHERE workspace_id = ${input.workspaceId}
+          AND email = ${input.email}
+        LIMIT 1
+        FOR UPDATE`,
+  )) as Array<{ id: string; email: string; googleSub: string | null }>;
+  const user = rows[0];
+  if (!user) throw new AuthzError("user not in workspace");
+  if (input.googleSub) {
+    if (user.googleSub && user.googleSub !== input.googleSub) {
+      throw new AuthzError("google identity mismatch");
+    }
+    if (!user.googleSub) {
+      let updated: Array<{ id: string }>;
+      try {
+        updated = await tx
+          .update(users)
+          .set({ googleSub: input.googleSub })
+          .where(and(eq(users.id, user.id), sql`${users.googleSub} IS NULL`))
+          .returning({ id: users.id });
+      } catch (e) {
+        if (isUniqueViolation(e)) throw new AuthzError("google identity mismatch");
+        throw e;
+      }
+      if (updated.length === 0) throw new AuthzError("google identity mismatch");
+    }
+  }
+  return { id: user.id, email: user.email };
+};
+
+const issueTokenForUser = async (
+  tx: Tx,
+  rawMek: Uint8Array,
+  input: IssueTokenInput & { userId: string; userEmail: string },
+): Promise<IssueTokenResult> => {
+  const access = await issueAccessToken(tx, {
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    email: input.userEmail,
+    audience: input.audience,
+    ttlSeconds: input.ttlSeconds,
+    issuerUrl: input.issuerUrl,
+    rawMek,
+  });
+
+  const refresh: IssuedRefresh = await issueRefresh(tx, {
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    audience: input.audience,
+    accessJti: access.jti,
+    ttlSeconds: input.refreshTtlSeconds ?? DEFAULT_REFRESH_TTL,
+  });
+
+  return {
+    ...access,
+    userId: input.userId,
+    refreshToken: refresh.refreshToken,
+    refreshExpiresAt: refresh.expiresAt.toISOString(),
+  };
+};
+
 export const issueTokenForEmail = async (
   databaseUrl: string,
   rawMek: Uint8Array,
@@ -129,37 +209,33 @@ export const issueTokenForEmail = async (
 ): Promise<IssueTokenResult> => {
   const db = createClient(databaseUrl);
   return withWorkspace(db, input.workspaceId, async (tx) => {
-    const [user] = await tx
-      .select()
-      .from(users)
-      .where(and(eq(users.workspaceId, input.workspaceId), eq(users.email, input.email)))
-      .limit(1);
-    if (!user) throw new AuthzError("user not in workspace");
-
-    const access = await issueAccessToken(tx, {
-      workspaceId: input.workspaceId,
+    const user = await loadAndBindUser(tx, input);
+    return issueTokenForUser(tx, rawMek, {
+      ...input,
       userId: user.id,
-      email: user.email,
-      audience: input.audience,
-      ttlSeconds: input.ttlSeconds,
-      issuerUrl: input.issuerUrl,
-      rawMek,
+      userEmail: user.email,
     });
+  });
+};
 
-    const refresh: IssuedRefresh = await issueRefresh(tx, {
-      workspaceId: input.workspaceId,
-      userId: user.id,
-      audience: input.audience,
-      accessJti: access.jti,
-      ttlSeconds: input.refreshTtlSeconds ?? DEFAULT_REFRESH_TTL,
-    });
-
-    return {
-      ...access,
-      userId: user.id,
-      refreshToken: refresh.refreshToken,
-      refreshExpiresAt: refresh.expiresAt.toISOString(),
-    };
+export const issueTokenBundleForEmail = async (
+  databaseUrl: string,
+  rawMek: Uint8Array,
+  input: IssueTokenBundleInput,
+): Promise<Record<string, IssueTokenResult>> => {
+  const db = createClient(databaseUrl);
+  return withWorkspace(db, input.workspaceId, async (tx) => {
+    const user = await loadAndBindUser(tx, input);
+    const tokens: Record<string, IssueTokenResult> = {};
+    for (const audience of input.audiences) {
+      tokens[audience] = await issueTokenForUser(tx, rawMek, {
+        ...input,
+        audience,
+        userId: user.id,
+        userEmail: user.email,
+      });
+    }
+    return tokens;
   });
 };
 

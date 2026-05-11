@@ -181,6 +181,9 @@ const requireVerifierBinding = (app) => {
 
 if (apps.includes("gateway")) requireVerifierBinding("gateway");
 if (apps.includes("mcp-server")) requireVerifierBinding("mcp-server");
+if (apps.includes("web")) {
+  requireTomlValue("apps/web/wrangler.toml", /^WEB_BASE_URL\s*=\s*"https:\/\//m, "WEB_BASE_URL");
+}
 
 if (gatewayEnabled) {
   requireEnv("PACT_GATEWAY_EGRESS_POLICY_ID");

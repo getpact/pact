@@ -13,6 +13,11 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 
 - JWT signed with workspace Ed25519 key. Token mode (A/B) bound at issue. Audience binding enforced at issue + verify + admin/audit/mcp auth.
 - Refresh token redemption binds workspace + audience.
+- Dashboard is a same-origin BFF. Browser JavaScript calls only `apps/web`; Pact access and refresh tokens stay in `__Host-` HttpOnly cookies.
+- Dashboard session cookies use host-only `__Host-` names, `Secure`, `Path=/`, and `SameSite=Strict`. OAuth handoff cookies use `SameSite=Lax` because Google callback is a top-level cross-site redirect.
+- Dashboard mutations require a CSRF header checked with a timing-safe compare plus exact `Origin` or `Referer` match against configured `WEB_BASE_URL`.
+- Dashboard OAuth callback exchanges codes through issuer `/v1/oauth/google/session`, which requires the web service token and an exact configured redirect URI.
+- Google login binds the verified Google `sub` to the workspace user on first OAuth login and rejects later subject changes for the same workspace email.
 - jti revocation: verifier checks `revoked_jtis` per workspace; KV cache TTL 60s.
 - Audit chain: hash-linked + signed events under workspace audit signing key, ordered by `audit_seq` with `pg_advisory_xact_lock` per workspace.
 - Admin mutations write audit in the SAME transaction as the mutation; audit failure rolls back mutation and returns 503.
@@ -48,6 +53,11 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 
 ### 5. Verifier-side workspace probing
 - Verifier looks up workspace signing keys before verifying the JWT signature. An attacker who knows or guesses a workspace UUID can probe for its existence by observing 401 vs other errors. Listed workspaces are not user-discoverable elsewhere; impact is enumeration only.
+
+### 6. Dashboard XSS impact
+- Dashboard CSP is strict and browser code never receives Pact access or refresh tokens.
+- XSS would still allow same-origin UI actions during the victim's session and can read the CSRF token returned by `/v1/session`.
+- Treat any dashboard XSS as high severity. Do not add inline scripts, third-party scripts, broad `connect-src`, or token-bearing JSON responses to browser code.
 
 ## Out of scope
 

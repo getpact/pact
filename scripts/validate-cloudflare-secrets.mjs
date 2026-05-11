@@ -7,9 +7,16 @@ const required = {
   "admin-api": ["DATABASE_URL", "MEK"],
   "audit-api": ["DATABASE_URL"],
   gateway: ["DATABASE_URL", "MEK", "VERIFIER_SERVICE_TOKEN"],
-  issuer: ["DATABASE_URL", "MEK", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"],
+  issuer: [
+    "DATABASE_URL",
+    "MEK",
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "WEB_ISSUER_SERVICE_TOKEN",
+  ],
   "mcp-server": ["DATABASE_URL", "MEK", "VERIFIER_SERVICE_TOKEN"],
   verifier: ["DATABASE_URL", "MEK", "VERIFIER_SERVICE_TOKEN"],
+  web: ["GOOGLE_OAUTH_CLIENT_ID", "WEB_ISSUER_SERVICE_TOKEN"],
 };
 
 const secretNames = (app) => {

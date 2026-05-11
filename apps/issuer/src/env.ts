@@ -12,6 +12,8 @@ export type Env = {
   ENVIRONMENT?: string;
   ENABLE_DEV_ISSUE?: string;
   DEV_ISSUE_SECRET?: string;
+  WEB_ISSUER_SERVICE_TOKEN?: string;
+  WEB_OAUTH_REDIRECT_URI?: string;
   TOKEN_TTL_SECONDS?: string;
 };
 
