@@ -9,8 +9,11 @@ Rules:
 - Run `pnpm check:openapi` before merging API changes.
 - Do not generate SDKs from inline Hono `c.req.json<T>()` types; those are not
   runtime validation.
-- The first generated SDK should cover issuer, verifier, admin, and audit APIs.
-  Gateway success responses remain opaque upstream responses.
+- The first generated SDK should be a TypeScript HTTP client for issuer,
+  verifier, admin, and audit APIs. Gateway success responses remain opaque
+  upstream responses and should not be strongly typed from this contract.
+- Do not target `packages/verifier-sdk-python`; that package is reserved for a
+  future Python verifier SDK, not the full Pact HTTP API.
 
 Next migration step: introduce shared runtime schemas, wire them into Hono
 handlers, then generate this OpenAPI file from those schemas.

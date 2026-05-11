@@ -43,7 +43,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [workspaceId, email]
+              required: [workspaceId, email, audience]
               properties:
                 workspaceId:
                   type: string
@@ -114,8 +114,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [code, codeVerifier, redirectUri]
+              required: [workspaceId, code, codeVerifier, redirectUri, audience]
               properties:
+                workspaceId:
+                  type: string
+                  format: uuid
                 code:
                   type: string
                 codeVerifier:
@@ -143,8 +146,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [refreshToken]
+              required: [workspaceId, refreshToken, audience]
               properties:
+                workspaceId:
+                  type: string
+                  format: uuid
                 refreshToken:
                   type: string
                 audience:
@@ -210,6 +216,16 @@ paths:
       responses:
         "200":
           description: Users.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/User"
     post:
       tags: [admin]
       summary: Create a user
@@ -231,6 +247,14 @@ paths:
       responses:
         "201":
           description: User created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
   /v1/workspaces/{workspaceId}/groups:
     post:
       tags: [admin]
@@ -246,6 +270,14 @@ paths:
       responses:
         "201":
           description: Group created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [group]
+                properties:
+                  group:
+                    $ref: "#/components/schemas/Group"
   /v1/workspaces/{workspaceId}/groups/{groupId}/members:
     post:
       tags: [admin]
@@ -272,6 +304,10 @@ paths:
       responses:
         "201":
           description: Member added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
   /v1/workspaces/{workspaceId}/policies:
     get:
       tags: [admin]
@@ -281,6 +317,16 @@ paths:
       responses:
         "200":
           description: Policies.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [policies]
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PolicySummary"
     post:
       tags: [admin]
       summary: Create a policy version
@@ -299,6 +345,14 @@ paths:
       responses:
         "201":
           description: Policy created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [policy]
+                properties:
+                  policy:
+                    $ref: "#/components/schemas/PolicySummary"
   /v1/workspaces/{workspaceId}/revocations:
     post:
       tags: [admin]
@@ -314,6 +368,10 @@ paths:
       responses:
         "201":
           description: Token revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
   /v1/workspaces/{workspaceId}/invites:
     post:
       tags: [admin]
@@ -329,6 +387,14 @@ paths:
       responses:
         "201":
           description: Invite created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invite]
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/Invite"
   /v1/workspaces/{workspaceId}/brains:
     get:
       tags: [admin]
@@ -338,6 +404,16 @@ paths:
       responses:
         "200":
           description: Brains.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [brains]
+                properties:
+                  brains:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Brain"
     post:
       tags: [admin]
       summary: Create a gateway brain
@@ -352,6 +428,14 @@ paths:
       responses:
         "201":
           description: Brain created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [brain]
+                properties:
+                  brain:
+                    $ref: "#/components/schemas/Brain"
   /v1/workspaces/{workspaceId}/brains/{brainId}:
     delete:
       tags: [admin]
@@ -367,6 +451,10 @@ paths:
       responses:
         "200":
           description: Brain deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
   /v1/workspaces/{workspaceId}/brains/{brainId}/credential:
     put:
       tags: [admin]
@@ -392,15 +480,52 @@ paths:
       responses:
         "200":
           description: Credential stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
   /v1/workspaces/{workspaceId}/audit/events:
     get:
       tags: [audit]
       summary: List audit events
       parameters:
         - $ref: "#/components/parameters/workspaceId"
+        - in: query
+          name: action
+          schema:
+            type: string
+        - in: query
+          name: since
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: until
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - in: query
+          name: cursor
+          schema:
+            type: string
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
       responses:
         "200":
           description: Audit events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventsPage"
   /v1/workspaces/{workspaceId}/audit/workspace:
     get:
       tags: [audit]
@@ -410,6 +535,10 @@ paths:
       responses:
         "200":
           description: Workspace metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditWorkspace"
   /v1/workspaces/{workspaceId}/audit/chain:
     get:
       tags: [audit]
@@ -419,6 +548,10 @@ paths:
       responses:
         "200":
           description: Chain head.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditChainHead"
   /{workspace}/mcp:
     post:
       tags: [mcp]
@@ -456,9 +589,55 @@ paths:
         schema:
           type: string
     x-pact-note: Gateway accepts all HTTP methods and forwards only configured request headers.
+    x-pact-opaque-upstream: true
     get:
       tags: [gateway]
       summary: Gateway GET to a brain upstream
+      responses:
+        "200":
+          description: Upstream response.
+    post:
+      tags: [gateway]
+      summary: Gateway POST to a brain upstream
+      requestBody:
+        required: false
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Upstream response.
+    put:
+      tags: [gateway]
+      summary: Gateway PUT to a brain upstream
+      requestBody:
+        required: false
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Upstream response.
+    patch:
+      tags: [gateway]
+      summary: Gateway PATCH to a brain upstream
+      requestBody:
+        required: false
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Upstream response.
+    delete:
+      tags: [gateway]
+      summary: Gateway DELETE to a brain upstream
       responses:
         "200":
           description: Upstream response.
@@ -488,14 +667,23 @@ components:
           type: boolean
     IssuedToken:
       type: object
-      required: [token]
+      required: [token, jti, exp, userId, refreshToken, refreshExpiresAt]
       properties:
         token:
           type: string
+        jti:
+          type: string
+          format: uuid
+        exp:
+          type: integer
+        userId:
+          type: string
+          format: uuid
         refreshToken:
           type: string
-        expiresIn:
-          type: integer
+        refreshExpiresAt:
+          type: string
+          format: date-time
     VerifyRequest:
       type: object
       required: [token, action, resource]
@@ -520,6 +708,157 @@ components:
             type: string
         sub:
           type: string
+    User:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    Group:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    PolicySummary:
+      type: object
+      required: [id, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        replacedAt:
+          type: string
+          format: date-time
+          nullable: true
+    Invite:
+      type: object
+      required: [id, email, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        expiresAt:
+          type: string
+          format: date-time
+    Brain:
+      type: object
+      required: [id, kind, baseUrl]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        baseUrl:
+          type: string
+          format: uri
+        authScheme:
+          type: string
+          enum: [none, bearer]
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AuditEvent:
+      type: object
+      required: [id, workspaceId, auditSeq, ts, actorKind, action, target, decision, signingKeyId, prevHash, thisHash, signature]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        auditSeq:
+          type: integer
+        ts:
+          type: string
+          format: date-time
+        actorKind:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        action:
+          type: string
+        target:
+          type: object
+        decision:
+          type: string
+        supporting:
+          type: object
+        signingKeyId:
+          type: string
+        prevHash:
+          type: string
+        thisHash:
+          type: string
+        signature:
+          type: string
+    AuditEventsPage:
+      type: object
+      required: [events, nextCursor]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        nextCursor:
+          type: string
+          nullable: true
+    AuditWorkspace:
+      type: object
+      required: [id, slug, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AuditChainHead:
+      type: object
+      required: [head]
+      properties:
+        head:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [lastHash, lastEventId, updatedAt]
+              properties:
+                lastHash:
+                  type: string
+                lastEventId:
+                  type: string
+                  format: uuid
+                updatedAt:
+                  type: string
+                  format: date-time
     GroupCreate:
       type: object
       required: [name]
@@ -554,9 +893,13 @@ components:
       properties:
         kind:
           type: string
+          pattern: "^[a-z][a-z0-9-]{0,32}$"
         baseUrl:
           type: string
           format: uri
         authScheme:
           type: string
           enum: [none, bearer]
+        scopeInjectionTemplate:
+          type: object
+          maxProperties: 0

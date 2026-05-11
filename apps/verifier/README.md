@@ -1,6 +1,6 @@
 # @getpact/verifier
 
-Stateless authorization oracle. Takes (token, action, resource, audience), returns allow/deny + reasons. Emits audit events for every decision.
+Stateless authorization oracle. Takes (token, action, resource, audience), returns allow/deny + reasons. Emits audit events after a token is structurally usable enough to identify workspace context.
 
 ## Endpoints
 
