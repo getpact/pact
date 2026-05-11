@@ -20,6 +20,10 @@ const whoami: AdapterTool = {
     description: "Return the verified identity, groups, and roles for the current Pact JWT.",
     inputSchema: { type: "object" },
   },
+  authorize: (_args, ctx) => ({
+    action: "pact.whoami",
+    resource: `workspace:${ctx.workspaceId}:identity`,
+  }),
   handler: async (_args, ctx) =>
     json({
       workspaceId: ctx.workspaceId,
@@ -36,6 +40,10 @@ const workspaceInfo: AdapterTool = {
     description: "Return the workspace metadata visible to the current token.",
     inputSchema: { type: "object" },
   },
+  authorize: (_args, ctx) => ({
+    action: "pact.workspace.info",
+    resource: `workspace:${ctx.workspaceId}:info`,
+  }),
   handler: async (_args, ctx, deps) => {
     const db = createClient(deps.databaseUrl);
     const [ws] = await db
@@ -74,7 +82,14 @@ const auditRecent: AdapterTool = {
       },
     },
   },
+  authorize: (_args, ctx) => ({
+    action: "pact.audit.recent",
+    resource: `workspace:${ctx.workspaceId}:audit`,
+  }),
   handler: async (args, ctx, deps) => {
+    if (!ctx.roles.includes("admin") && !ctx.roles.includes("auditor")) {
+      return { content: [{ type: "text", text: "admin or auditor role required" }], isError: true };
+    }
     const db = createClient(deps.databaseUrl);
     const limitRaw = typeof args.limit === "number" ? args.limit : 20;
     const limit = Math.max(1, Math.min(50, Math.floor(limitRaw)));
@@ -115,7 +130,14 @@ const policyActive: AdapterTool = {
     description: "Return the active policy version body for the current workspace.",
     inputSchema: { type: "object" },
   },
+  authorize: (_args, ctx) => ({
+    action: "pact.policy.active",
+    resource: `workspace:${ctx.workspaceId}:policy`,
+  }),
   handler: async (_args, ctx, deps) => {
+    if (!ctx.roles.includes("admin")) {
+      return { content: [{ type: "text", text: "admin role required" }], isError: true };
+    }
     const db = createClient(deps.databaseUrl);
     const [row] = await withWorkspace(db, ctx.workspaceId, (tx) =>
       tx
