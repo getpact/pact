@@ -112,7 +112,7 @@ describe("gateway", () => {
         "x-http-method-override": "DELETE",
         "x-method-override": "PATCH",
       }),
-      "content-type,x-client",
+      "authorization,content-type,cookie,x-api-key,x-client,x-forwarded-for",
     );
     expect(headers.get("x-client")).toBe("test");
     expect(headers.get("content-type")).toBe("application/json");

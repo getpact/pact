@@ -179,6 +179,32 @@ const DEFAULT_RESPONSE_HEADER_ALLOWLIST = [
   "content-range",
 ];
 
+const NEVER_FORWARD_REQUEST_HEADERS = new Set([
+  "authorization",
+  "cf-connecting-ip",
+  "cf-ipcountry",
+  "cf-ray",
+  "connection",
+  "content-length",
+  "cookie",
+  "forwarded",
+  "host",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "x-api-key",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-http-method",
+  "x-http-method-override",
+  "x-method-override",
+  "x-real-ip",
+]);
+
 const parseAllowlist = (raw: string | undefined, fallback: string[]): Set<string> =>
   new Set(
     (raw ?? fallback.join(","))
@@ -191,7 +217,10 @@ export const forwardedRequestHeaders = (headers: Headers, allowlist?: string): H
   const out = new Headers();
   const allowed = parseAllowlist(allowlist, DEFAULT_FORWARD_HEADER_ALLOWLIST);
   headers.forEach((value, key) => {
-    if (allowed.has(key.toLowerCase())) out.set(key, value);
+    const normalized = key.toLowerCase();
+    if (allowed.has(normalized) && !NEVER_FORWARD_REQUEST_HEADERS.has(normalized)) {
+      out.set(key, value);
+    }
   });
   return out;
 };
