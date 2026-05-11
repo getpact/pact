@@ -259,12 +259,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VerifyResponse"
+        "400":
+          description: Invalid audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid verifier service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "403":
           description: Denied by policy or token validation.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/VerifyResponse"
+        "503":
+          description: Verifier service token not configured in production.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/workspaces/{workspaceId}/users:
     get:
       tags: [admin]
