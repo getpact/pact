@@ -1,4 +1,4 @@
-import { type Email, PactError, securityHeaders } from "@getpact/core";
+import { type Email, PactError, securityHeaders, timingSafeEqualString } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
 import { createLogger, requestLogger } from "@getpact/logger";
@@ -112,7 +112,8 @@ app.post("/v1/dev/issue", async (c) => {
   }
   if (c.env.ENVIRONMENT !== "test") {
     if (!c.env.DEV_ISSUE_SECRET) return c.json({ error: "not_found" }, 404);
-    if (c.req.header("x-pact-dev-issue-secret") !== c.env.DEV_ISSUE_SECRET) {
+    const received = c.req.header("x-pact-dev-issue-secret") ?? "";
+    if (!timingSafeEqualString(received, c.env.DEV_ISSUE_SECRET)) {
       return c.json({ error: "unauthorized", message: "invalid dev issue secret" }, 401);
     }
   }
