@@ -32,10 +32,16 @@ export const users = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     email: text("email").notNull(),
+    googleSub: text("google_sub"),
     name: text("name"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("users_workspace_email_idx").on(t.workspaceId, t.email)],
+  (t) => [
+    uniqueIndex("users_workspace_email_idx").on(t.workspaceId, t.email),
+    uniqueIndex("users_workspace_google_sub_idx")
+      .on(t.workspaceId, t.googleSub)
+      .where(sql`google_sub IS NOT NULL`),
+  ],
 );
 
 export const roles = pgTable(

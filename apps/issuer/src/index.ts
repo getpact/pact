@@ -2,6 +2,7 @@ import {
   AuthzError,
   type Email,
   isStrongSharedSecret,
+  isUuid,
   PactError,
   securityHeaders,
   timingSafeEqualString,
@@ -20,7 +21,7 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
 import { exchangeGoogleCode } from "./google.js";
-import { issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
+import { issueTokenBundleForEmail, issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
 import { createWorkspace } from "./workspace.js";
 
@@ -111,6 +112,20 @@ app.use("/v1/dev/issue", (c, next) =>
 
 app.get("/health", (c) => c.json({ ok: true }));
 
+const enforceRouteRateLimit = async (
+  c: Context<{ Bindings: Env }>,
+  input: { key: string; limit: number; windowSeconds: number },
+): Promise<Response | null> => {
+  const result = await limiter(c.env).hit(input.key, input.limit, input.windowSeconds);
+  c.header("x-ratelimit-limit", String(input.limit));
+  c.header("x-ratelimit-remaining", String(result.remaining));
+  c.header("x-ratelimit-reset", String(Math.ceil(result.resetAt / 1000)));
+  if (result.allowed) return null;
+  const retryAfter = Math.max(Math.ceil((result.resetAt - Date.now()) / 1000), 1);
+  c.header("retry-after", String(retryAfter));
+  return c.json({ error: "rate_limited" }, 429);
+};
+
 app.post("/v1/workspaces", async (c) => {
   const body = await c.req.json<{
     slug: string;
@@ -170,6 +185,12 @@ app.post("/v1/oauth/google/exchange", async (c) => {
     redirectUri: string;
     audience: string;
   }>();
+  if (!isUuid(body.workspaceId)) {
+    return c.json({ error: "invalid_workspace" }, 400);
+  }
+  if (body.audience === "pact-admin" || body.audience === "pact-audit") {
+    return c.json({ error: "invalid_audience" }, 400);
+  }
 
   let identity: Awaited<ReturnType<typeof exchangeGoogleCode>>;
   try {
@@ -194,11 +215,86 @@ app.post("/v1/oauth/google/exchange", async (c) => {
     const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
       workspaceId: body.workspaceId,
       email: identity.email as Email,
+      googleSub: identity.sub,
       audience: body.audience,
       ttlSeconds: tokenTtlSeconds(c.env),
       issuerUrl: c.env.ISSUER_BASE_URL,
     });
     return c.json(result);
+  } catch (e) {
+    if (e instanceof AuthzError) {
+      return c.json({ error: "user_not_in_workspace" }, 403);
+    }
+    if (e instanceof PactError) {
+      return c.json({ error: e.code, message: e.message }, e.status as 400);
+    }
+    return c.json({ error: "user_not_in_workspace" }, 403);
+  }
+});
+
+app.post("/v1/oauth/google/session", async (c) => {
+  const serviceToken = c.env.WEB_ISSUER_SERVICE_TOKEN;
+  if (!serviceToken || !isStrongSharedSecret(serviceToken)) {
+    return c.json({ error: "misconfigured", message: "web issuer service token is missing" }, 503);
+  }
+  const received = c.req.header("x-pact-web-service-token") ?? "";
+  if (!timingSafeEqualString(received, serviceToken)) {
+    return c.json({ error: "unauthorized", message: "invalid service token" }, 401);
+  }
+  const body = await c.req.json<{
+    workspaceId: string;
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+    audiences: string[];
+  }>();
+  if (!isUuid(body.workspaceId)) {
+    return c.json({ error: "invalid_workspace" }, 400);
+  }
+  const limited = await enforceRouteRateLimit(c, {
+    key: `oauth-google-session:${body.workspaceId}`,
+    limit: 10,
+    windowSeconds: 60,
+  });
+  if (limited) return limited;
+  if (!c.env.WEB_OAUTH_REDIRECT_URI || body.redirectUri !== c.env.WEB_OAUTH_REDIRECT_URI) {
+    return c.json({ error: "invalid_redirect_uri" }, 400);
+  }
+  const audiences = [...new Set(body.audiences ?? [])];
+  const allowedDashboardAudiences = new Set(["pact-admin", "pact-audit"]);
+  if (audiences.length === 0 || audiences.some((aud) => !allowedDashboardAudiences.has(aud))) {
+    return c.json({ error: "invalid_audience" }, 400);
+  }
+
+  let identity: Awaited<ReturnType<typeof exchangeGoogleCode>>;
+  try {
+    identity = await exchangeGoogleCode({
+      clientId: c.env.GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret: c.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      code: body.code,
+      codeVerifier: body.codeVerifier,
+      redirectUri: body.redirectUri,
+      ...(c.env.GOOGLE_TOKEN_ENDPOINT ? { tokenEndpoint: c.env.GOOGLE_TOKEN_ENDPOINT } : {}),
+      ...(c.env.GOOGLE_JWKS_URI ? { jwksUri: c.env.GOOGLE_JWKS_URI } : {}),
+      ...(c.env.GOOGLE_ISSUER ? { expectedIssuer: c.env.GOOGLE_ISSUER } : {}),
+    });
+  } catch {
+    return c.json({ error: "invalid_grant" }, 401);
+  }
+  if (!identity.emailVerified) {
+    return c.json({ error: "email_not_verified" }, 403);
+  }
+
+  try {
+    const tokens = await issueTokenBundleForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
+      workspaceId: body.workspaceId,
+      email: identity.email as Email,
+      googleSub: identity.sub,
+      audiences,
+      ttlSeconds: tokenTtlSeconds(c.env),
+      issuerUrl: c.env.ISSUER_BASE_URL,
+    });
+    return c.json({ tokens });
   } catch (e) {
     if (e instanceof AuthzError) {
       return c.json({ error: "user_not_in_workspace" }, 403);

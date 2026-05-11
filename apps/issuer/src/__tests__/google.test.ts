@@ -87,7 +87,10 @@ run("google oidc exchange", () => {
     nextTokenBody = { error: "invalid_grant" };
   });
 
-  const buildIdToken = async (overrides: Record<string, unknown> = {}): Promise<string> => {
+  const buildIdToken = async (
+    overrides: Record<string, unknown> = {},
+    subject = "google-sub-123",
+  ): Promise<string> => {
     const now = Math.floor(Date.now() / 1000);
     return new SignJWT({
       email: "alice@example.com",
@@ -97,7 +100,7 @@ run("google oidc exchange", () => {
       .setProtectedHeader({ alg: "RS256", kid })
       .setIssuer(issuerHost)
       .setAudience(CLIENT_ID)
-      .setSubject("google-sub-123")
+      .setSubject(subject)
       .setIssuedAt(now)
       .setExpirationTime(now + 600)
       .sign(googlePrivate);
@@ -115,6 +118,8 @@ run("google oidc exchange", () => {
       GOOGLE_ISSUER: issuerHost,
       ISSUER_BASE_URL: "https://issuer.test/acme",
       ENVIRONMENT: "test",
+      WEB_ISSUER_SERVICE_TOKEN: "test-web-issuer-service-token-12345",
+      WEB_OAUTH_REDIRECT_URI: "https://app.test/v1/auth/google/callback",
     };
   };
 
@@ -162,6 +167,176 @@ run("google oidc exchange", () => {
     const body = (await res.json()) as { token: string; refreshToken: string };
     expect(body.token.split(".").length).toBe(3);
     expect(body.refreshToken.length).toBeGreaterThan(20);
+  });
+
+  it("exchanges one google code for a dashboard token bundle", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+    nextIdToken = await buildIdToken();
+
+    const res = await app.request(
+      "/v1/oauth/google/session",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-pact-web-service-token": env.WEB_ISSUER_SERVICE_TOKEN,
+        },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "real-google-auth-code",
+          codeVerifier: `v${"x".repeat(43)}`,
+          redirectUri: "https://app.test/v1/auth/google/callback",
+          audiences: ["pact-admin", "pact-audit"],
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-ratelimit-limit")).toBe("10");
+    const body = (await res.json()) as {
+      tokens: Record<string, { token: string; refreshToken: string }>;
+    };
+    expect(body.tokens["pact-admin"]?.token.split(".").length).toBe(3);
+    expect(body.tokens["pact-audit"]?.token.split(".").length).toBe(3);
+    expect(body.tokens["pact-admin"]?.refreshToken).not.toBe(
+      body.tokens["pact-audit"]?.refreshToken,
+    );
+  });
+
+  it("rejects a changed Google subject for an already linked email", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+    nextIdToken = await buildIdToken({}, "google-sub-123");
+
+    const first = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-1",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(first.status).toBe(200);
+
+    nextIdToken = await buildIdToken({}, "different-google-sub");
+    const second = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-2",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(second.status).toBe(403);
+  });
+
+  it("rejects dashboard token bundle requests with unsupported audiences", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+
+    const res = await app.request(
+      "/v1/oauth/google/session",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-pact-web-service-token": env.WEB_ISSUER_SERVICE_TOKEN,
+        },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://app.test/v1/auth/google/callback",
+          audiences: ["pact-admin", "pact-gateway"],
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects generic Google exchange for dashboard audiences", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+
+    const res = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-admin",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects dashboard token bundle requests without service auth", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+
+    const res = await app.request(
+      "/v1/oauth/google/session",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code",
+          codeVerifier: "v".repeat(43),
+          redirectUri: env.WEB_OAUTH_REDIRECT_URI,
+          audiences: ["pact-admin", "pact-audit"],
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects dashboard token bundle requests with the wrong redirect URI", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+
+    const res = await app.request(
+      "/v1/oauth/google/session",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-pact-web-service-token": env.WEB_ISSUER_SERVICE_TOKEN,
+        },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://evil.test/callback",
+          audiences: ["pact-admin", "pact-audit"],
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(400);
   });
 
   it("rejects when google email is unverified", async () => {
