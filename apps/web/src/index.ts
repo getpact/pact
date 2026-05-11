@@ -7,6 +7,7 @@ type Env = {
   ENVIRONMENT?: string;
   WEB_BASE_URL?: string;
   WEB_OAUTH_CALLBACK_PATH?: string;
+  WEB_DRIVE_OAUTH_CALLBACK_PATH?: string;
   WEB_DEV_ROUTE_ORIGIN?: string;
   WEB_DEFAULT_WORKSPACE_ID?: string;
   ISSUER_BASE_URL: string;
@@ -28,6 +29,10 @@ const CSRF_COOKIE = "__Host-pact-csrf";
 const OAUTH_STATE_COOKIE = "__Host-pact-oauth-state";
 const OAUTH_VERIFIER_COOKIE = "__Host-pact-oauth-verifier";
 const OAUTH_WORKSPACE_COOKIE = "__Host-pact-oauth-workspace";
+const DRIVE_STATE_COOKIE = "__Host-pact-drive-state";
+const DRIVE_VERIFIER_COOKIE = "__Host-pact-drive-verifier";
+const DRIVE_WORKSPACE_COOKIE = "__Host-pact-drive-workspace";
+const DRIVE_NONCE_COOKIE = "__Host-pact-drive-nonce";
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const ADMIN_AUDIENCE = "pact-admin";
@@ -80,6 +85,13 @@ const callbackUrl = (env: Env): string => {
   const base = webBaseUrl(env);
   if (!base) throw new Error("WEB_BASE_URL is required");
   const path = env.WEB_OAUTH_CALLBACK_PATH ?? "/v1/auth/google/callback";
+  return `${base}/${path.replace(/^\/+/, "")}`;
+};
+
+const driveCallbackUrl = (env: Env): string => {
+  const base = webBaseUrl(env);
+  if (!base) throw new Error("WEB_BASE_URL is required");
+  const path = env.WEB_DRIVE_OAUTH_CALLBACK_PATH ?? "/v1/connections/google-drive/callback";
   return `${base}/${path.replace(/^\/+/, "")}`;
 };
 
@@ -332,6 +344,10 @@ const clearSession = (c: AppContext): void => {
     OAUTH_STATE_COOKIE,
     OAUTH_VERIFIER_COOKIE,
     OAUTH_WORKSPACE_COOKIE,
+    DRIVE_STATE_COOKIE,
+    DRIVE_VERIFIER_COOKIE,
+    DRIVE_WORKSPACE_COOKIE,
+    DRIVE_NONCE_COOKIE,
   ]) {
     appendCookie(c, clearCookie(name, c.env));
   }
@@ -339,6 +355,17 @@ const clearSession = (c: AppContext): void => {
 
 const clearOAuthAttempt = (c: AppContext): void => {
   for (const name of [OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, OAUTH_WORKSPACE_COOKIE]) {
+    appendCookie(c, clearCookie(name, c.env));
+  }
+};
+
+const clearDriveOAuthAttempt = (c: AppContext): void => {
+  for (const name of [
+    DRIVE_STATE_COOKIE,
+    DRIVE_VERIFIER_COOKIE,
+    DRIVE_WORKSPACE_COOKIE,
+    DRIVE_NONCE_COOKIE,
+  ]) {
     appendCookie(c, clearCookie(name, c.env));
   }
 };
@@ -568,6 +595,10 @@ app.post("/v1/auth/google/start", async (c) => {
 });
 
 const handleGoogleCallback = async (c: AppContext) => {
+  const callbackCookies = sessionCookies(c);
+  if (callbackCookies[DRIVE_STATE_COOKIE] && !callbackCookies[OAUTH_STATE_COOKIE]) {
+    return handleDriveCallback(c);
+  }
   if (!webBaseUrl(c.env)) {
     return c.json({ error: "misconfigured", message: "WEB_BASE_URL is required" }, 503);
   }
@@ -667,6 +698,153 @@ const handleGoogleCallback = async (c: AppContext) => {
 
 app.get("/v1/auth/google/callback", handleGoogleCallback);
 app.get("/oauth/oidc/callback", handleGoogleCallback);
+
+app.post("/v1/connections/google-drive/start", async (c) => {
+  if (!webBaseUrl(c.env)) {
+    return c.json({ error: "misconfigured", message: "WEB_BASE_URL is required" }, 503);
+  }
+  if (!requireCsrf(c)) return c.json({ error: "csrf" }, 403);
+
+  const cookies = sessionCookies(c);
+  const adminToken = cookies[ADMIN_ACCESS_COOKIE];
+  const workspaceId = cookies[WORKSPACE_COOKIE];
+  if (!adminToken || !workspaceId || !isUuid(workspaceId)) {
+    return c.json({ error: "not_authenticated" }, 401);
+  }
+
+  const state = randomBase64Url(32);
+  const nonce = randomBase64Url(32);
+  const verifier = randomBase64Url(64);
+  const challenge = await sha256Base64Url(verifier);
+  const url = new URL(c.env.GOOGLE_OAUTH_AUTHORIZATION_ENDPOINT ?? GOOGLE_AUTH_ENDPOINT);
+  url.searchParams.set("client_id", c.env.GOOGLE_OAUTH_CLIENT_ID);
+  url.searchParams.set("redirect_uri", driveCallbackUrl(c.env));
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set(
+    "scope",
+    "openid email profile https://www.googleapis.com/auth/drive.readonly",
+  );
+  url.searchParams.set("state", state);
+  url.searchParams.set("nonce", nonce);
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+
+  appendCookie(
+    c,
+    cookie(DRIVE_STATE_COOKIE, state, {
+      env: c.env,
+      httpOnly: true,
+      maxAge: TEN_MINUTES,
+      sameSite: "Lax",
+    }),
+  );
+  appendCookie(
+    c,
+    cookie(DRIVE_VERIFIER_COOKIE, verifier, {
+      env: c.env,
+      httpOnly: true,
+      maxAge: TEN_MINUTES,
+      sameSite: "Lax",
+    }),
+  );
+  appendCookie(
+    c,
+    cookie(DRIVE_WORKSPACE_COOKIE, workspaceId, {
+      env: c.env,
+      httpOnly: true,
+      maxAge: TEN_MINUTES,
+      sameSite: "Lax",
+    }),
+  );
+  appendCookie(
+    c,
+    cookie(DRIVE_NONCE_COOKIE, nonce, {
+      env: c.env,
+      httpOnly: true,
+      maxAge: TEN_MINUTES,
+      sameSite: "Lax",
+    }),
+  );
+
+  return c.json({ location: url.toString() });
+});
+
+async function handleDriveCallback(c: AppContext) {
+  const url = new URL(c.req.url);
+  const code = url.searchParams.get("code") ?? "";
+  const state = url.searchParams.get("state") ?? "";
+  const cookies = sessionCookies(c);
+  const expectedState = cookies[DRIVE_STATE_COOKIE];
+  const verifier = cookies[DRIVE_VERIFIER_COOKIE];
+  const nonce = cookies[DRIVE_NONCE_COOKIE];
+  const workspaceId = cookies[DRIVE_WORKSPACE_COOKIE];
+  const adminToken = cookies[ADMIN_ACCESS_COOKIE];
+  if (
+    !code ||
+    !state ||
+    !expectedState ||
+    !timingSafeEqualString(state, expectedState) ||
+    !verifier ||
+    !nonce ||
+    !workspaceId ||
+    !adminToken ||
+    !isUuid(workspaceId)
+  ) {
+    clearDriveOAuthAttempt(c);
+    return c.html(
+      loginFailedHtml("The Google Drive connection link expired. Start again from the dashboard."),
+      401,
+    );
+  }
+
+  const response = await bearerFetch(
+    `${baseUrl(c.env.ADMIN_API_BASE_URL)}/v1/workspaces/${workspaceId}/connections/google-drive/oauth`,
+    adminToken,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code,
+        codeVerifier: verifier,
+        nonce,
+        redirectUri: driveCallbackUrl(c.env),
+      }),
+    },
+  ).catch(() => null);
+  clearDriveOAuthAttempt(c);
+  if (!response?.ok) {
+    return c.html(
+      loginFailedHtml("Google Drive could not be connected for this workspace user."),
+      response?.status === 400 || response?.status === 401 || response?.status === 403
+        ? response.status
+        : 502,
+    );
+  }
+  return c.redirect("/", 302);
+}
+
+app.get("/v1/connections/google-drive/callback", handleDriveCallback);
+
+app.delete("/v1/connections/google-drive", async (c) => {
+  if (!requireCsrf(c)) return c.json({ error: "csrf" }, 403);
+  const cookies = sessionCookies(c);
+  const adminToken = cookies[ADMIN_ACCESS_COOKIE];
+  const workspaceId = cookies[WORKSPACE_COOKIE];
+  if (!adminToken || !workspaceId || !isUuid(workspaceId)) {
+    return c.json({ error: "not_authenticated" }, 401);
+  }
+  const response = await bearerFetch(
+    `${baseUrl(c.env.ADMIN_API_BASE_URL)}/v1/workspaces/${workspaceId}/connections/google-drive`,
+    adminToken,
+    { method: "DELETE" },
+  ).catch(() => null);
+  if (!response?.ok) {
+    return c.json({ error: "drive_disconnect_failed" }, response?.status === 401 ? 401 : 502);
+  }
+  return c.json({ ok: true });
+});
 
 app.get("/v1/session", async (c) => {
   const cookies = sessionCookies(c);
@@ -776,6 +954,22 @@ app.get("/v1/workspace/status", async (c) => {
     brains?: Array<{ id: string; kind: string; status: string }>;
   };
 
+  const driveRes = await bearerFetch(
+    `${baseUrl(c.env.ADMIN_API_BASE_URL)}/v1/workspaces/${workspaceId}/connections/google-drive`,
+    adminToken,
+  );
+  if (!driveRes.ok) return c.json({ error: "admin_unavailable", status: driveRes.status }, 502);
+  const driveBody = (await driveRes.json()) as {
+    connection?: {
+      id?: string;
+      status?: string;
+      email?: string;
+      scopes?: string[];
+      expiresAt?: string;
+      connectedAt?: string;
+    };
+  };
+
   const chainRes = await bearerFetch(
     `${baseUrl(c.env.AUDIT_API_BASE_URL)}/v1/workspaces/${workspaceId}/audit/chain`,
     auditToken,
@@ -787,14 +981,13 @@ app.get("/v1/workspace/status", async (c) => {
     kind: brain.kind,
     status: brain.status,
   }));
-  const drive = brains.find((brain) => brain.kind === "google-drive");
 
   return c.json({
     workspaceId,
     users: { count: usersBody.users?.length ?? 0 },
     brains,
     connections: {
-      drive: drive ? { status: drive.status, brainId: drive.id } : { status: "not_configured" },
+      drive: driveBody.connection ?? { status: "not_configured" },
     },
     audit: { head: chainBody.head ?? null },
   });
@@ -879,8 +1072,11 @@ const INDEX_HTML = `<!doctype html>
             <div class="panel-head"><span>google drive</span><span class="panel-meta">source</span></div>
             <div class="panel-body">
               <p id="drive-status">Checking connection...</p>
-              <button type="button" disabled aria-describedby="drive-help">Connect Drive</button>
-              <p id="drive-help" class="help">Drive setup is not available in this dashboard build yet.</p>
+              <div class="row">
+                <button id="drive-connect" type="button" aria-describedby="drive-help">Connect Drive</button>
+                <button id="drive-disconnect" class="ghost hidden" type="button">Disconnect</button>
+              </div>
+              <p id="drive-help" class="help">Connect the signed-in Google account with read-only Drive access.</p>
             </div>
           </article>
           <article class="panel">
@@ -1235,6 +1431,11 @@ const messageForError = (path, status, body) => {
     if (status === 403 || code === "origin") return "This page was opened from an unexpected local address. Reload the dashboard and try again.";
     if (status === 503 || code === "misconfigured") return "Dashboard login is not configured for this environment.";
   }
+  if (path.includes("/v1/connections/google-drive/start")) {
+    if (status === 403 || code === "csrf") return "Refresh the page before connecting Drive.";
+    if (status === 401) return "Sign in again before connecting Drive.";
+    if (status === 503 || code === "misconfigured") return "Drive connection is not configured for this environment.";
+  }
   if (status === 401) return "Your session expired. Sign in again.";
   if (status >= 500) return "A Pact service is unavailable. Try again in a moment.";
   return body?.message || code || path + " returned " + status;
@@ -1333,14 +1534,22 @@ const renderSession = (session) => {
 const renderStatus = (status) => {
   const drive = status.connections?.drive;
   $("metric-users").textContent = String(status.users?.count ?? 0);
-  $("metric-drive").textContent = drive?.status === "not_configured" ? "not set" : drive?.status || "unknown";
+  const driveStatus = drive?.status || "unknown";
+  $("metric-drive").textContent = driveStatus === "not_configured" ? "not set" : driveStatus;
   $("metric-audit").textContent = status.audit?.head ? "active" : "no head";
   $("drive-status").textContent =
-    drive?.status === "not_configured"
+    driveStatus === "not_configured"
       ? "Drive is not connected yet."
-      : "Drive connection status: " + drive.status;
+      : driveStatus === "connected"
+        ? "Drive connected for " + (drive.email || "this user") + "."
+        : "Drive connection status: " + driveStatus;
+  $("drive-connect").textContent = driveStatus === "connected" ? "Reconnect Drive" : "Connect Drive";
+  $("drive-connect").disabled = false;
+  const canDisconnect = !["not_configured", "unknown", "disconnected"].includes(driveStatus);
+  $("drive-disconnect").classList.toggle("hidden", !canDisconnect);
+  $("drive-disconnect").disabled = !canDisconnect;
   $("mcp-status").textContent =
-    drive?.status === "active"
+    driveStatus === "connected"
       ? "Agent access can use this workspace once MCP credentials are issued."
       : "Connect Google Drive before enabling agent access.";
   $("audit-status").textContent = status.audit?.head
@@ -1353,6 +1562,9 @@ const renderStatusUnavailable = (message) => {
   $("metric-drive").textContent = "unavailable";
   $("metric-audit").textContent = "unavailable";
   $("drive-status").textContent = "Connection status is unavailable.";
+  $("drive-connect").disabled = false;
+  $("drive-disconnect").classList.add("hidden");
+  $("drive-disconnect").disabled = true;
   $("mcp-status").textContent = "Agent access status is unavailable.";
   $("audit-status").textContent = message || "Audit log status is unavailable.";
 };
@@ -1416,6 +1628,41 @@ $("login-form").addEventListener("submit", async (event) => {
 $("logout").addEventListener("click", async () => {
   await fetch("/v1/session", { method: "DELETE", headers: { "x-pact-csrf": csrfToken } });
   await load();
+});
+
+$("drive-connect").addEventListener("click", async () => {
+  setError();
+  const button = $("drive-connect");
+  button.disabled = true;
+  const previous = button.textContent;
+  button.textContent = "Redirecting to Google...";
+  try {
+    const body = await requestJson("/v1/connections/google-drive/start", {
+      method: "POST",
+      headers: { "x-pact-csrf": csrfToken },
+    });
+    window.location.href = body.location;
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = previous || "Connect Drive";
+    setError(error instanceof Error ? error.message : "Drive connection failed");
+  }
+});
+
+$("drive-disconnect").addEventListener("click", async () => {
+  setError();
+  const button = $("drive-disconnect");
+  button.disabled = true;
+  try {
+    await requestJson("/v1/connections/google-drive", {
+      method: "DELETE",
+      headers: { "x-pact-csrf": csrfToken },
+    });
+    await load();
+  } catch (error) {
+    button.disabled = false;
+    setError(error instanceof Error ? error.message : "Drive disconnect failed");
+  }
 });
 
 load().catch((error) => {

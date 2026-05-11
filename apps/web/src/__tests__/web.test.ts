@@ -187,6 +187,61 @@ describe("web dashboard auth", () => {
     );
   });
 
+  it("starts Google Drive OAuth with session CSRF and readonly scope", async () => {
+    const res = await app.request(
+      "/v1/connections/google-drive/start",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.test",
+          "x-pact-csrf": "csrf-1",
+          cookie: `__Host-pact-admin-access=${token};__Host-pact-workspace=${workspaceId};__Host-pact-csrf=csrf-1`,
+        },
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { location: string };
+    const location = new URL(body.location);
+    expect(location.searchParams.get("scope")).toContain(
+      "https://www.googleapis.com/auth/drive.readonly",
+    );
+    expect(location.searchParams.get("nonce")).toBeTruthy();
+    expect(location.searchParams.get("redirect_uri")).toBe(
+      "https://app.test/v1/connections/google-drive/callback",
+    );
+    const cookies = res.headers.get("set-cookie") ?? "";
+    expect(cookies).toContain("__Host-pact-drive-state=");
+    expect(cookies).toContain("__Host-pact-drive-verifier=");
+    expect(cookies).toContain("__Host-pact-drive-nonce=");
+    expect(cookies).toContain("HttpOnly");
+  });
+
+  it("supports sharing the local login callback path for Drive OAuth", async () => {
+    const res = await app.request(
+      "http://127.0.0.1:19147/v1/connections/google-drive/start",
+      {
+        method: "POST",
+        headers: {
+          origin: "http://127.0.0.1:19147",
+          "x-pact-csrf": "csrf-1",
+          cookie: `__Host-pact-admin-access=${token};__Host-pact-workspace=${workspaceId};__Host-pact-csrf=csrf-1`,
+        },
+      },
+      {
+        ...env,
+        ENVIRONMENT: "development",
+        WEB_BASE_URL: "http://127.0.0.1:19147",
+        WEB_DRIVE_OAUTH_CALLBACK_PATH: "/oauth/oidc/callback",
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { location: string };
+    expect(new URL(body.location).searchParams.get("redirect_uri")).toBe(
+      "http://127.0.0.1:19147/oauth/oidc/callback",
+    );
+  });
+
   it("accepts localhost origin aliases in local development", async () => {
     const res = await app.request(
       "http://localhost:19147/v1/auth/google/start",
@@ -486,6 +541,32 @@ describe("web dashboard auth", () => {
     expect(res.status).toBe(200);
   });
 
+  it("disconnects Drive through the dashboard BFF without exposing tokens", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(requestUrl(input)).toBe(
+        "https://admin.test/v1/workspaces/00000000-0000-4000-8000-000000000001/connections/google-drive",
+      );
+      expect(init?.method).toBe("DELETE");
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await app.request(
+      "/v1/connections/google-drive",
+      {
+        method: "DELETE",
+        headers: {
+          origin: "https://app.test",
+          "x-pact-csrf": "csrf-1",
+          cookie: `__Host-pact-admin-access=${token};__Host-pact-workspace=${workspaceId};__Host-pact-csrf=csrf-1`,
+        },
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true });
+  });
+
   it("proxies workspace status without exposing tokens to browser code", async () => {
     const calls: Array<{ url: string; auth: string | null }> = [];
     vi.stubGlobal(
@@ -499,6 +580,9 @@ describe("web dashboard auth", () => {
           return Response.json({
             brains: [{ id: "b1", kind: "google-drive", status: "active", authScheme: "bearer" }],
           });
+        }
+        if (url.includes("/connections/google-drive")) {
+          return Response.json({ connection: { status: "connected", email: "alice@example.com" } });
         }
         return Response.json({ head: { lastHash: "abc" } });
       }),
@@ -517,9 +601,9 @@ describe("web dashboard auth", () => {
       brains: Array<{ authScheme?: string; kind: string }>;
       connections: { drive: { status: string } };
     };
-    expect(body.connections.drive.status).toBe("active");
+    expect(body.connections.drive.status).toBe("connected");
     expect(body.brains).toEqual([{ id: "b1", kind: "google-drive", status: "active" }]);
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
     expect(calls.every((call) => call.auth === `Bearer ${token}`)).toBe(true);
   });
 

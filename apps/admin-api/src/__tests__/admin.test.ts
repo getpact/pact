@@ -357,6 +357,39 @@ run("admin api", () => {
     expect(res.status).toBe(400);
   });
 
+  it("reports Google Drive as not configured before OAuth", async () => {
+    const { env, created, token } = await setup();
+    const res = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/connections/google-drive`,
+      token,
+      "GET",
+      undefined,
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ connection: { status: "not_configured" } });
+  });
+
+  it("fails closed when Google Drive OAuth is not configured", async () => {
+    const { env, created, token } = await setup();
+    const res = await callAdmin(
+      `/v1/workspaces/${created.workspaceId}/connections/google-drive/oauth`,
+      token,
+      "POST",
+      {
+        code: "code",
+        codeVerifier: "verifier",
+        nonce: "nonce",
+        redirectUri: "https://app.example/callback",
+      },
+      { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string; message?: string };
+    expect(body.error).toBe("invalid_request");
+    expect(body.message).toContain("google drive oauth is not configured");
+  });
+
   it("rejects brain delete from a different workspace", async () => {
     const a = await setup();
     const b = await setup();

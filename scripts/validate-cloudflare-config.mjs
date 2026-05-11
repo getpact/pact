@@ -217,6 +217,24 @@ if (apps.includes("web")) {
   );
 }
 
+if (apps.includes("admin-api")) {
+  requireTomlValue(
+    "apps/admin-api/wrangler.toml",
+    /^GOOGLE_DRIVE_OAUTH_REDIRECT_URI\s*=\s*"https:\/\//m,
+    "GOOGLE_DRIVE_OAUTH_REDIRECT_URI",
+  );
+  rejectTomlValue(
+    "apps/admin-api/wrangler.toml",
+    /^GOOGLE_OAUTH_CLIENT_SECRET\s*=/m,
+    "committed GOOGLE_OAUTH_CLIENT_SECRET",
+  );
+  rejectTomlValue(
+    "apps/admin-api/wrangler.toml",
+    /^GOOGLE_OAUTH_CLIENT_ID\s*=/m,
+    "committed GOOGLE_OAUTH_CLIENT_ID",
+  );
+}
+
 if (gatewayEnabled) {
   requireEnv("PACT_GATEWAY_EGRESS_POLICY_ID");
   requireEnv("CLOUDFLARE_ACCOUNT_ID");
