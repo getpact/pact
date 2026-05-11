@@ -1,5 +1,6 @@
 import { PactError, securityHeaders } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
+import { assertSafeRuntimeDbRole, UnsafeRuntimeDbRoleError } from "@getpact/db";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -14,6 +15,7 @@ type Env = {
   MEK?: string;
   MCP_AUDIENCE?: string;
   VERIFIER_URL?: string;
+  VERIFIER_SERVICE?: { fetch: (request: Request) => Promise<Response> };
   VERIFIER_SERVICE_TOKEN?: string;
 };
 
@@ -33,6 +35,16 @@ app.get("/health", (c) => c.json({ ok: true }));
 app.post("/:workspace/mcp", async (c) => {
   const workspace = c.req.param("workspace");
   const audience = c.env.MCP_AUDIENCE ?? "pact-mcp";
+  try {
+    await assertSafeRuntimeDbRole(c.env.DATABASE_URL, {
+      production: c.env.ENVIRONMENT === "production",
+    });
+  } catch (e) {
+    if (e instanceof UnsafeRuntimeDbRoleError) {
+      return c.json({ error: "misconfigured", message: "unsafe runtime database role" }, 503);
+    }
+    throw e;
+  }
 
   let ctx: Awaited<ReturnType<typeof authenticate>>;
   try {
@@ -52,9 +64,8 @@ app.post("/:workspace/mcp", async (c) => {
   }
 
   const body = await c.req.json();
-  const verify = c.env.VERIFIER_URL
-    ? httpVerifyClient(c.env.VERIFIER_URL, c.env.VERIFIER_SERVICE_TOKEN)
-    : undefined;
+  const verifier = c.env.VERIFIER_SERVICE ?? c.env.VERIFIER_URL;
+  const verify = verifier ? httpVerifyClient(verifier, c.env.VERIFIER_SERVICE_TOKEN) : undefined;
   const response = await handleMcp(body, ctx, {
     audience,
     deps: {

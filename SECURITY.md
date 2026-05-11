@@ -32,7 +32,7 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 - `assertSafeUpstreamUrl` validates the host string at parse time. `fetch` re-resolves DNS at request time.
 - Workers do not expose a DNS resolver hook, so post-DNS IP validation cannot happen inside the Worker.
 - Mitigation: deploy-time Cloudflare Zero Trust egress policy (operator responsibility). `scripts/deploy-cloudflare.sh` requires `PACT_GATEWAY_EGRESS_POLICY_ID` and validates the referenced rule before gateway deploy.
-- Same exposure applies to the gateway-to-verifier and mcp-to-verifier fetches if `VERIFIER_URL` is ever pointed at an attacker-controlled DNS.
+- Gateway and MCP production deploys should use Cloudflare service bindings for verifier calls. `VERIFIER_URL` remains a local-dev fallback and must not be used for production internal routing.
 
 ### 2. Verifier public oracle in non-production
 - The verifier service-token gate is mandatory only when `ENVIRONMENT === "production"`. Non-prod deploys without `VERIFIER_SERVICE_TOKEN` will accept anonymous `POST /v1/verify` calls.
@@ -53,8 +53,8 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 
 - DDoS protection at the L3/L4 layer (Cloudflare responsibility).
 - Backend Postgres tenant isolation beyond RLS + workspace-scoped advisory locks. Operator must run Pact's Postgres with `pact_app` role for runtime queries; `pact` admin role bypasses RLS and must only be used for migrations.
-- MEK key management. Operators must rotate MEK out-of-band; Pact does not include an HSM or KMS integration in v1.
-- Per-workspace MEK isolation. A single deployment MEK wraps vault DEKs and signing keys in v1, so MEK compromise is a deployment-wide incident.
+- MEK key management. Pact v1 includes a raw-key rewrap tool, but not HSM or KMS integration.
+- Per-workspace MEK isolation. A single deployment MEK wraps vault DEKs and signing keys in v1 beta, so MEK compromise is a deployment-wide incident. Do not handle customer production data until a KMS-backed or per-workspace wrapping design is implemented.
 
 ## Reporting
 

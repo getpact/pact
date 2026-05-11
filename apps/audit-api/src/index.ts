@@ -1,5 +1,10 @@
 import { PactError, securityHeaders } from "@getpact/core";
-import { createClient, withWorkspace } from "@getpact/db";
+import {
+  assertSafeRuntimeDbRole,
+  createClient,
+  UnsafeRuntimeDbRoleError,
+  withWorkspace,
+} from "@getpact/db";
 import { auditChainState, workspaces } from "@getpact/db/schema";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { eq } from "drizzle-orm";
@@ -36,6 +41,9 @@ app.get("/health", (c) => c.json({ ok: true }));
 const auth = async (c: AppCtx, workspaceId: string): Promise<AuditAuthContext | Response> => {
   const audience = c.env.AUDIT_AUDIENCE ?? "pact-audit";
   try {
+    await assertSafeRuntimeDbRole(c.env.DATABASE_URL, {
+      production: c.env.ENVIRONMENT === "production",
+    });
     return await authenticateAuditReader(
       c.env.DATABASE_URL,
       workspaceId,
@@ -44,6 +52,9 @@ const auth = async (c: AppCtx, workspaceId: string): Promise<AuditAuthContext | 
       c.env.ISSUER_BASE_URL,
     );
   } catch (e) {
+    if (e instanceof UnsafeRuntimeDbRoleError) {
+      return c.json({ error: "misconfigured", message: "unsafe runtime database role" }, 503);
+    }
     if (e instanceof PactError) {
       return c.json({ error: e.code, message: e.message }, e.status as 400 | 401 | 403 | 404);
     }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { writeFileSync } from "node:fs";
 import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
-import { runAuditVerify } from "./audit-verify.js";
+import { runAuditCheckpoint, runAuditVerify } from "./audit-verify.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { type ClientId, installMcpServer } from "./mcp-install.js";
 import { serveStdio } from "./mcp-serve.js";
@@ -36,13 +37,20 @@ const help = () => {
       "  mcp install      register Pact MCP server with an agent client",
       "  mcp serve        run the Pact MCP stdio proxy (used by clients)",
       "  audit verify     verify the workspace audit chain end to end",
+      "  audit checkpoint export a signed audit head checkpoint",
+      "  mek rewrap       rewrap stored secrets with a new MEK",
       "",
       "env:",
       "  PACT_ENDPOINT       issuer URL (default http://localhost:8787)",
       "  PACT_AUDIENCE       token audience (default pact-mcp)",
       "  PACT_AUDIT_EXPECTED_HEAD external audit checkpoint hash",
+      "  PACT_AUDIT_CHECKPOINT_FILE signed checkpoint path",
+      "  PACT_AUDIT_CHECKPOINT_SECRET HMAC key for checkpoints",
       "  PACT_GOOGLE_CLIENT  Google OAuth client id (required for login)",
       "  PACT_WORKSPACE_ID   workspace id (required for login)",
+      "  DATABASE_URL        postgres dsn (required for mek rewrap)",
+      "  PACT_MEK_OLD        base64 current MEK (required for mek rewrap)",
+      "  PACT_MEK_NEW        base64 new MEK (required for mek rewrap)",
       "",
     ].join("\n"),
   );
@@ -205,11 +213,24 @@ const mcp = async () => {
 
 const audit = async () => {
   const sub = process.argv[3];
-  if (sub !== "verify") {
+  if (sub !== "verify" && sub !== "checkpoint") {
     process.stderr.write("usage: pact audit verify\n");
+    process.stderr.write("       pact audit checkpoint\n");
     process.exit(1);
   }
   const cfg = await loadConfig();
+  if (sub === "checkpoint") {
+    const checkpoint = await runAuditCheckpoint(cfg);
+    const json = `${JSON.stringify(checkpoint, null, 2)}\n`;
+    const file = process.env.PACT_AUDIT_CHECKPOINT_FILE;
+    if (file) {
+      writeFileSync(file, json, { mode: 0o600 });
+      process.stdout.write(`audit checkpoint written to ${file}\n`);
+    } else {
+      process.stdout.write(json);
+    }
+    return;
+  }
   const report = await runAuditVerify(cfg);
   if (report.ok) {
     process.stdout.write(`audit chain ok. ${report.eventsChecked} events. head ${report.head}\n`);
@@ -219,6 +240,34 @@ const audit = async () => {
     `audit chain BROKEN at index ${report.brokenAt.index}: ${report.brokenAt.reason}\n`,
   );
   process.exit(2);
+};
+
+const mek = async () => {
+  const sub = process.argv[3];
+  if (sub !== "rewrap") {
+    process.stderr.write("usage: pact mek rewrap [--apply] [--new-key-id <id>]\n");
+    process.exit(1);
+  }
+  const args = process.argv.slice(4);
+  const apply = args.includes("--apply");
+  const idIdx = args.indexOf("--new-key-id");
+  const newKeyId = idIdx >= 0 ? args[idIdx + 1] : undefined;
+  const databaseUrl = env("DATABASE_URL");
+  const oldB64 = env("PACT_MEK_OLD");
+  const newB64 = env("PACT_MEK_NEW");
+  const { fromBase64 } = await import("@getpact/crypto");
+  const { rewrapMek } = await import("@getpact/db/rewrap-mek");
+  const result = await rewrapMek({
+    databaseUrl,
+    oldMek: fromBase64(oldB64),
+    newMek: fromBase64(newB64),
+    ...(newKeyId ? { newMekKeyId: newKeyId } : {}),
+    apply,
+  });
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  if (!result.applied) {
+    process.stdout.write("dry run only. pass --apply to persist changes.\n");
+  }
 };
 
 const main = async () => {
@@ -249,6 +298,9 @@ const main = async () => {
       return;
     case "audit":
       await audit();
+      return;
+    case "mek":
+      await mek();
       return;
     default:
       process.stderr.write(`unknown command: ${command}\n`);

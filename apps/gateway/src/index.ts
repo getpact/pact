@@ -5,7 +5,13 @@ import {
   securityHeaders,
 } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
-import { createClient, schema, withWorkspace } from "@getpact/db";
+import {
+  assertSafeRuntimeDbRole,
+  createClient,
+  schema,
+  UnsafeRuntimeDbRoleError,
+  withWorkspace,
+} from "@getpact/db";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { databaseRateLimiter } from "@getpact/ratelimit";
 import { loadSecretString } from "@getpact/vault";
@@ -17,7 +23,8 @@ import { emitGatewayAudit } from "./audit.js";
 
 type Env = {
   DATABASE_URL: string;
-  VERIFIER_URL: string;
+  VERIFIER_URL?: string;
+  VERIFIER_SERVICE?: { fetch: (request: Request) => Promise<Response> };
   MEK?: string;
   ENVIRONMENT?: string;
   GATEWAY_AUDIENCE?: string;
@@ -142,7 +149,7 @@ const clientRateKey = (headers: Headers): string => {
 const VERIFIER_TIMEOUT_MS = 5000;
 
 export const verify = async (
-  verifierUrl: string,
+  verifier: string | { fetch: (request: Request) => Promise<Response> },
   input: { token: string; action: string; resource: string; audience: string },
   serviceToken?: string,
 ): Promise<VerifyOutput> => {
@@ -151,12 +158,16 @@ export const verify = async (
   try {
     const headers = new Headers({ "content-type": "application/json" });
     if (serviceToken) headers.set("authorization", `Bearer ${serviceToken}`);
-    const res = await fetch(`${verifierUrl.replace(/\/+$/, "")}/v1/verify`, {
+    const init = {
       method: "POST",
       headers,
       body: JSON.stringify(input),
       signal: controller.signal,
-    });
+    };
+    const res =
+      typeof verifier === "string"
+        ? await fetch(`${verifier.replace(/\/+$/, "")}/v1/verify`, init)
+        : await verifier.fetch(new Request("https://verifier.internal/v1/verify", init));
     const body = (await res.json()) as Partial<VerifyOutput>;
     const bodyOk = typeof body.allow === "boolean" && Array.isArray(body.reasons);
     if (bodyOk && (res.ok || res.status === 403)) {
@@ -266,6 +277,10 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
     : "";
   const audience = c.env.GATEWAY_AUDIENCE ?? "pact-gateway";
   const authz = gatewayAuthorization(c.req.method, brainKind, path, requestUrl.search);
+  const verifier = c.env.VERIFIER_SERVICE ?? c.env.VERIFIER_URL;
+  if (!verifier) {
+    return c.json({ error: "misconfigured", message: "verifier binding not configured" }, 503);
+  }
 
   let claims: ReturnType<typeof decodeJwt>;
   try {
@@ -276,6 +291,17 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   const workspaceId = claims.org as string | undefined;
   if (!workspaceId || !isUuid(workspaceId)) {
     return c.json({ error: "unauthorized", message: "missing workspace claim" }, 401);
+  }
+
+  try {
+    await assertSafeRuntimeDbRole(c.env.DATABASE_URL, {
+      production: c.env.ENVIRONMENT === "production",
+    });
+  } catch (e) {
+    if (e instanceof UnsafeRuntimeDbRoleError) {
+      return c.json({ error: "misconfigured", message: "unsafe runtime database role" }, 503);
+    }
+    throw e;
   }
 
   const db = createClient(c.env.DATABASE_URL);
@@ -293,7 +319,7 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   }
 
   const verdict = await verify(
-    c.env.VERIFIER_URL,
+    verifier,
     {
       token,
       action: authz.action,

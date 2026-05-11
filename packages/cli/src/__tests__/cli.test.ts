@@ -177,11 +177,15 @@ describe("audit verify", () => {
   let originalHome: string | undefined;
   let originalAuditEndpoint: string | undefined;
   let originalExpectedHead: string | undefined;
+  let originalCheckpointFile: string | undefined;
+  let originalCheckpointSecret: string | undefined;
 
   beforeEach(() => {
     originalHome = process.env.HOME;
     originalAuditEndpoint = process.env.PACT_AUDIT_ENDPOINT;
     originalExpectedHead = process.env.PACT_AUDIT_EXPECTED_HEAD;
+    originalCheckpointFile = process.env.PACT_AUDIT_CHECKPOINT_FILE;
+    originalCheckpointSecret = process.env.PACT_AUDIT_CHECKPOINT_SECRET;
     tmp = mkdtempSync(join(tmpdir(), "pact-cli-audit-"));
     process.env.HOME = tmp;
     process.env.PACT_AUDIT_ENDPOINT = "https://audit.test";
@@ -203,6 +207,16 @@ describe("audit verify", () => {
       process.env.PACT_AUDIT_EXPECTED_HEAD = originalExpectedHead;
     } else {
       delete process.env.PACT_AUDIT_EXPECTED_HEAD;
+    }
+    if (originalCheckpointFile) {
+      process.env.PACT_AUDIT_CHECKPOINT_FILE = originalCheckpointFile;
+    } else {
+      delete process.env.PACT_AUDIT_CHECKPOINT_FILE;
+    }
+    if (originalCheckpointSecret) {
+      process.env.PACT_AUDIT_CHECKPOINT_SECRET = originalCheckpointSecret;
+    } else {
+      delete process.env.PACT_AUDIT_CHECKPOINT_SECRET;
     }
     vi.unstubAllGlobals();
     rmSync(tmp, { recursive: true, force: true });
@@ -309,6 +323,68 @@ describe("audit verify", () => {
     ).resolves.toEqual({
       ok: false,
       brokenAt: { index: 0, reason: "expected head mismatch" },
+    });
+  });
+
+  it("rejects signed checkpoint files with invalid signatures", async () => {
+    const { writeFileSync } = await import("node:fs");
+    process.env.PACT_AUDIT_CHECKPOINT_SECRET = "checkpoint-secret";
+    process.env.PACT_AUDIT_CHECKPOINT_FILE = join(tmp, "checkpoint.json");
+    writeFileSync(
+      process.env.PACT_AUDIT_CHECKPOINT_FILE,
+      JSON.stringify({
+        version: 1,
+        workspaceId: "ws-1",
+        head: "external-head",
+        eventsChecked: 0,
+        createdAt: "2026-05-10T00:00:00.000Z",
+        signature: "hmac-sha256:invalid",
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = input.toString();
+        if (url === "https://issuer.test/v1/refresh") {
+          return Response.json({
+            token: "audit-token",
+            jti: "jti-1",
+            exp: 1,
+            userId: "user-1",
+            refreshToken: "refresh-2",
+            refreshExpiresAt: "2026-05-10T00:00:00Z",
+          });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/workspace") {
+          return Response.json({
+            id: "ws-1",
+            slug: "acme",
+            createdAt: "2026-05-10T00:00:00.000Z",
+          });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/events?order=asc&limit=200") {
+          return Response.json({ events: [], nextCursor: null });
+        }
+        if (url === "https://audit.test/v1/workspaces/ws-1/audit/chain") {
+          return Response.json({ head: null });
+        }
+        if (url === "https://issuer.test/v1/workspaces/ws-1/.well-known/audit-jwks.json") {
+          return Response.json({ keys: [] });
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+
+    const { runAuditVerify } = await import("../audit-verify.js");
+    await expect(
+      runAuditVerify({
+        endpoint: "https://issuer.test",
+        workspaceId: "ws-1",
+        refreshToken: "refresh-1",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      brokenAt: { index: 0, reason: "checkpoint signature mismatch" },
     });
   });
 });

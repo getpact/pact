@@ -68,6 +68,25 @@ describe("mcp server auth hardening", () => {
     ).resolves.toEqual({ allow: false, reasons: ["verifier returned 500"] });
     vi.unstubAllGlobals();
   });
+
+  it("preserves verifier deny reasons returned with 403", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({ allow: false, reasons: ["policy denied"] }, { status: 403 }),
+      ),
+    );
+    const verify = httpVerifyClient("https://verifier.test");
+    await expect(
+      verify({
+        token: "token",
+        action: "pact.whoami",
+        resource: "pact:whoami",
+        audience: "pact-mcp",
+      }),
+    ).resolves.toEqual({ allow: false, reasons: ["policy denied"] });
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("mcp handler registry injection", () => {

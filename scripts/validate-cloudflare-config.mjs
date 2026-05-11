@@ -14,6 +14,11 @@ const requireTomlValue = (path, pattern, label) => {
   if (!pattern.test(text)) failures.push(`${path} missing ${label}`);
 };
 
+const rejectTomlValue = (path, pattern, label) => {
+  const text = readFileSync(path, "utf8");
+  if (pattern.test(text)) failures.push(`${path} must not contain ${label}`);
+};
+
 const tomlString = (path, key) => {
   const text = readFileSync(path, "utf8");
   const match = text.match(new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "m"));
@@ -164,6 +169,19 @@ const assertGatewayEgressPolicy = (policyId, result) => {
 };
 
 const gatewayEnabled = apps.includes("gateway");
+const requireVerifierBinding = (app) => {
+  const wrangler = `apps/${app}/wrangler.toml`;
+  requireTomlValue(
+    wrangler,
+    /\[\[services\]\][\s\S]*binding\s*=\s*"VERIFIER_SERVICE"[\s\S]*service\s*=\s*"pact-verifier"/,
+    "VERIFIER_SERVICE service binding",
+  );
+  rejectTomlValue(wrangler, /^VERIFIER_URL\s*=/m, "production VERIFIER_URL fallback");
+};
+
+if (apps.includes("gateway")) requireVerifierBinding("gateway");
+if (apps.includes("mcp-server")) requireVerifierBinding("mcp-server");
+
 if (gatewayEnabled) {
   requireEnv("PACT_GATEWAY_EGRESS_POLICY_ID");
   requireEnv("CLOUDFLARE_ACCOUNT_ID");

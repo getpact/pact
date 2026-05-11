@@ -1,10 +1,11 @@
 import { isStrongSharedSecret, securityHeaders, timingSafeEqualString } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
+import { assertSafeRuntimeDbRole, UnsafeRuntimeDbRoleError } from "@getpact/db";
 import { createLogger, requestLogger } from "@getpact/logger";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type KVNamespace, kvRevocationCache } from "./cache.js";
-import { verifyAction } from "./verify.js";
+import { AuditUnavailableError, verifyAction } from "./verify.js";
 
 type Env = {
   DATABASE_URL: string;
@@ -61,22 +62,41 @@ app.post("/v1/verify", async (c) => {
   if (!allowedAudiences(c.env).includes(audience)) {
     return c.json({ error: "invalid_audience", message: "audience is not allowed" }, 400);
   }
+  try {
+    await assertSafeRuntimeDbRole(c.env.DATABASE_URL, {
+      production: c.env.ENVIRONMENT === "production",
+    });
+  } catch (e) {
+    if (e instanceof UnsafeRuntimeDbRoleError) {
+      return c.json({ error: "misconfigured", message: "unsafe runtime database role" }, 503);
+    }
+    throw e;
+  }
   const rawMek = fromBase64(c.env.MEK);
   const cache = c.env.REVOCATION_CACHE ? kvRevocationCache(c.env.REVOCATION_CACHE) : undefined;
-  const result = await verifyAction(
-    {
-      databaseUrl: c.env.DATABASE_URL,
-      rawMek,
-      issuer: c.env.ISSUER_BASE_URL,
-      ...(cache ? { cache } : {}),
-    },
-    {
-      token: body.token,
-      action: body.action,
-      resource: body.resource,
-      audience,
-    },
-  );
+  let result: Awaited<ReturnType<typeof verifyAction>>;
+  try {
+    result = await verifyAction(
+      {
+        databaseUrl: c.env.DATABASE_URL,
+        rawMek,
+        issuer: c.env.ISSUER_BASE_URL,
+        ...(cache ? { cache } : {}),
+        auditRequired: c.env.ENVIRONMENT === "production",
+      },
+      {
+        token: body.token,
+        action: body.action,
+        resource: body.resource,
+        audience,
+      },
+    );
+  } catch (e) {
+    if (e instanceof AuditUnavailableError) {
+      return c.json({ error: "audit_unavailable", message: "verifier audit is required" }, 503);
+    }
+    throw e;
+  }
   return c.json(result, result.allow ? 200 : 403);
 });
 

@@ -2,6 +2,8 @@
 
 Slack adapter primitives for Pact.
 
+Pre-v1.0. ESM-only, Node 22+.
+
 ## Usage
 
 ```ts

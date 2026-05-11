@@ -465,7 +465,8 @@ run("gateway integration", () => {
       {
         DATABASE_URL: testEnv.DATABASE_URL,
         VERIFIER_URL: "https://verifier.test",
-        ENVIRONMENT: "production",
+        ENVIRONMENT: "test",
+        GATEWAY_AUDIT_MODE: "required",
         GATEWAY_AUDIENCE: "pact-gateway",
         GATEWAY_RATE_LIMIT: "1000",
         UPSTREAM_HOST_ALLOWLIST: "api.example.com",
@@ -496,7 +497,8 @@ run("gateway integration", () => {
       {
         DATABASE_URL: testEnv.DATABASE_URL,
         VERIFIER_URL: "https://verifier.test",
-        ENVIRONMENT: "production",
+        ENVIRONMENT: "test",
+        GATEWAY_AUDIT_MODE: "required",
         GATEWAY_AUDIENCE: "pact-gateway",
         GATEWAY_RATE_LIMIT: "1000",
         MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",

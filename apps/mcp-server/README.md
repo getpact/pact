@@ -12,7 +12,9 @@ Bearer JWT with `aud=pact-mcp` (Mode A). Workspace slug or id in path must match
 
 ## Env
 
-- `DATABASE_URL`, `MEK`, `VERIFIER_URL`, `ISSUER_BASE_URL` (required)
+- `DATABASE_URL`, `MEK`, `ISSUER_BASE_URL` (required)
+- `VERIFIER_SERVICE` - Cloudflare service binding to verifier in production
+- `VERIFIER_URL` - local-dev fallback only
 - `VERIFIER_SERVICE_TOKEN`
 - `MCP_AUDIENCE` (default `pact-mcp`)
 - Per-adapter secrets (e.g. `SLACK_*` via vault, not env)

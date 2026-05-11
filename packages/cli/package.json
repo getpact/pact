@@ -22,7 +22,8 @@
   },
   "dependencies": {
     "@getpact/audit": "workspace:*",
-    "@getpact/crypto": "workspace:*"
+    "@getpact/crypto": "workspace:*",
+    "@getpact/db": "workspace:*"
   },
   "files": [
     "dist/*.js",

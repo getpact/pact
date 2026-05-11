@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { computeGenesisHash } from "@getpact/audit/genesis";
 import { type AuditJwks, type StoredEvent, verifyChain } from "@getpact/audit/verifier";
 import { type Ed25519PublicJwk, importPublicJwkEd25519 } from "@getpact/crypto";
@@ -37,6 +39,8 @@ const auditBase = (cfg: CliConfig): string =>
 
 const auditAudience = (): string => process.env.PACT_AUDIT_AUDIENCE ?? "pact-audit";
 const expectedAuditHead = (): string | undefined => process.env.PACT_AUDIT_EXPECTED_HEAD;
+const checkpointFile = (): string | undefined => process.env.PACT_AUDIT_CHECKPOINT_FILE;
+const checkpointSecret = (): string | undefined => process.env.PACT_AUDIT_CHECKPOINT_SECRET;
 
 const getAuditToken = async (cfg: CliConfig & { workspaceId: string }): Promise<string> => {
   if (!cfg.refreshToken) {
@@ -73,7 +77,62 @@ export type VerifyReport =
   | { ok: true; eventsChecked: number; head: string }
   | { ok: false; brokenAt: { index: number; reason: string } };
 
-export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyReport> => {
+export type AuditCheckpoint = {
+  version: 1;
+  workspaceId: string;
+  head: string;
+  eventsChecked: number;
+  createdAt: string;
+  signature: string;
+};
+
+const checkpointPayload = (checkpoint: Omit<AuditCheckpoint, "signature">): string =>
+  JSON.stringify(checkpoint);
+
+const signCheckpoint = (checkpoint: Omit<AuditCheckpoint, "signature">): AuditCheckpoint => {
+  const secret = checkpointSecret();
+  if (!secret) throw new Error("missing PACT_AUDIT_CHECKPOINT_SECRET");
+  const signature = createHmac("sha256", secret)
+    .update(checkpointPayload(checkpoint))
+    .digest("base64url");
+  return { ...checkpoint, signature: `hmac-sha256:${signature}` };
+};
+
+const loadCheckpoint = (): AuditCheckpoint | null => {
+  const file = checkpointFile();
+  if (!file) return null;
+  const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<AuditCheckpoint>;
+  if (
+    parsed.version !== 1 ||
+    typeof parsed.workspaceId !== "string" ||
+    typeof parsed.head !== "string" ||
+    typeof parsed.eventsChecked !== "number" ||
+    typeof parsed.createdAt !== "string" ||
+    typeof parsed.signature !== "string"
+  ) {
+    throw new Error("invalid audit checkpoint");
+  }
+  return parsed as AuditCheckpoint;
+};
+
+const verifyCheckpointSignature = (checkpoint: AuditCheckpoint): boolean => {
+  const expected = signCheckpoint({
+    version: checkpoint.version,
+    workspaceId: checkpoint.workspaceId,
+    head: checkpoint.head,
+    eventsChecked: checkpoint.eventsChecked,
+    createdAt: checkpoint.createdAt,
+  }).signature;
+  const actualBytes = new TextEncoder().encode(checkpoint.signature);
+  const expectedBytes = new TextEncoder().encode(expected);
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+};
+
+export const runAuditVerify = async (
+  cfg: CliConfig | null,
+  opts: { externalCheckpoint?: boolean } = {},
+): Promise<VerifyReport> => {
+  const checkExternalCheckpoint = opts.externalCheckpoint ?? true;
   const config = requireConfig(cfg);
   const workspaceId = config.workspaceId;
   const token = await getAuditToken(config);
@@ -136,6 +195,26 @@ export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyRepor
     if (expectedHead && expectedHead !== head) {
       return { ok: false, brokenAt: { index: all.length, reason: "expected head mismatch" } };
     }
+    if (checkExternalCheckpoint) {
+      const checkpoint = loadCheckpoint();
+      if (checkpoint) {
+        if (checkpoint.workspaceId !== workspaceId) {
+          return {
+            ok: false,
+            brokenAt: { index: all.length, reason: "checkpoint workspace mismatch" },
+          };
+        }
+        if (!verifyCheckpointSignature(checkpoint)) {
+          return {
+            ok: false,
+            brokenAt: { index: all.length, reason: "checkpoint signature mismatch" },
+          };
+        }
+        if (checkpoint.head !== head) {
+          return { ok: false, brokenAt: { index: all.length, reason: "checkpoint head mismatch" } };
+        }
+      }
+    }
     if (chain.head && chain.head.lastHash !== head) {
       return { ok: false, brokenAt: { index: all.length, reason: "chain head mismatch" } };
     }
@@ -145,4 +224,21 @@ export const runAuditVerify = async (cfg: CliConfig | null): Promise<VerifyRepor
     return { ok: true, eventsChecked: all.length, head };
   }
   return result;
+};
+
+export const runAuditCheckpoint = async (cfg: CliConfig | null): Promise<AuditCheckpoint> => {
+  const config = requireConfig(cfg);
+  const report = await runAuditVerify(config, { externalCheckpoint: false });
+  if (!report.ok) {
+    throw new Error(
+      `audit chain broken at index ${report.brokenAt.index}: ${report.brokenAt.reason}`,
+    );
+  }
+  return signCheckpoint({
+    version: 1,
+    workspaceId: config.workspaceId,
+    head: report.head,
+    eventsChecked: report.eventsChecked,
+    createdAt: new Date().toISOString(),
+  });
 };

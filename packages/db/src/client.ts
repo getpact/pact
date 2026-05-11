@@ -17,6 +17,42 @@ export const createClient = (url: string, options?: Partial<Options<Record<strin
   return drizzle(client);
 };
 
+const checkedRuntimeRoles = new Set<string>();
+
+export class UnsafeRuntimeDbRoleError extends Error {
+  constructor() {
+    super("unsafe runtime database role");
+    this.name = "UnsafeRuntimeDbRoleError";
+  }
+}
+
+export const assertSafeRuntimeDbRole = async (
+  url: string,
+  opts: { production?: boolean; expectedRole?: string } = {},
+): Promise<void> => {
+  if (!opts.production) return;
+  const expectedRole = opts.expectedRole ?? "pact_app";
+  const cacheKey = `${url}:${expectedRole}`;
+  if (checkedRuntimeRoles.has(cacheKey)) return;
+
+  const client = postgres(url, { max: 1 });
+  try {
+    const rows = (await client`
+      SELECT current_user, rolsuper, rolbypassrls
+      FROM pg_roles
+      WHERE rolname = current_user
+    `) as Array<{ current_user: string; rolsuper: boolean; rolbypassrls: boolean }>;
+    const row = rows[0];
+    if (!row) throw new Error("runtime database role not found");
+    if (row.current_user !== expectedRole || row.rolsuper || row.rolbypassrls) {
+      throw new UnsafeRuntimeDbRoleError();
+    }
+    checkedRuntimeRoles.add(cacheKey);
+  } finally {
+    await client.end();
+  }
+};
+
 export type Tx = Parameters<Parameters<DbClient["transaction"]>[0]>[0];
 
 export const withWorkspace = async <T>(
