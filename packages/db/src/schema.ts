@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  check,
   index,
   integer,
   jsonb,
@@ -237,6 +238,44 @@ export const brains = pgTable(
 
 export type VaultSecret = typeof vaultSecrets.$inferSelect;
 export type NewVaultSecret = typeof vaultSecrets.$inferInsert;
+
+export const workspaceOauthConnections = pgTable(
+  "workspace_oauth_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    providerSubject: text("provider_subject").notNull(),
+    email: text("email").notNull(),
+    scopes: jsonb("scopes").notNull(),
+    status: text("status").notNull().default("connected"),
+    vaultTarget: text("vault_target").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
+    lastRefreshAt: timestamp("last_refresh_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("workspace_oauth_connections_active_idx")
+      .on(t.workspaceId, t.provider, t.userId)
+      .where(sql`disconnected_at IS NULL`),
+    index("workspace_oauth_connections_workspace_provider_idx").on(t.workspaceId, t.provider),
+    check(
+      "workspace_oauth_connections_status_check",
+      sql`${t.status} IN ('connected', 'disconnected', 'expired')`,
+    ),
+  ],
+);
+
+export type WorkspaceOauthConnection = typeof workspaceOauthConnections.$inferSelect;
+export type NewWorkspaceOauthConnection = typeof workspaceOauthConnections.$inferInsert;
+
 export type Brain = typeof brains.$inferSelect;
 export type NewBrain = typeof brains.$inferInsert;
 

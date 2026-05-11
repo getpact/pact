@@ -148,6 +148,13 @@
       "when": 1778487000000,
       "tag": "0020_user_google_sub",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1778488000000,
+      "tag": "0021_workspace_oauth_connections",
+      "breakpoints": true
     }
   ]
 }
