@@ -29,7 +29,8 @@ fi
 
 export DATABASE_URL="${DATABASE_URL:-postgres://pact:pact@${DB_HOST}:${DB_PORT}/pact}"
 export RLS_TEST_DB="${RLS_TEST_DB:-postgres://pact_app:pact_app@${DB_HOST}:${DB_PORT}/pact}"
-export PG_POOL_MAX="${PG_POOL_MAX:-4}"
+export PG_POOL_MAX="${PG_POOL_MAX:-1}"
+export PG_IDLE_TIMEOUT="${PG_IDLE_TIMEOUT:-1}"
 export PACT_REQUIRE_DB=1
 
 if [ "$EXTERNAL_DB" = "false" ]; then
@@ -46,8 +47,12 @@ if [ "$EXTERNAL_DB" = "false" ]; then
   echo "[test-db] waiting for postgres on ${DB_HOST}:${DB_PORT}"
   ready=false
   for _ in $(seq 1 30); do
-    if pg_isready -h "$DB_HOST" -p "$DB_PORT" -U pact >/dev/null 2>&1; then
-      ready=true
+    if command -v pg_isready >/dev/null 2>&1; then
+      pg_isready -h "$DB_HOST" -p "$DB_PORT" -U pact >/dev/null 2>&1 && ready=true
+    else
+      docker compose -f "$COMPOSE" exec -T postgres pg_isready -U pact >/dev/null 2>&1 && ready=true
+    fi
+    if [ "$ready" = "true" ]; then
       break
     fi
     sleep 1
