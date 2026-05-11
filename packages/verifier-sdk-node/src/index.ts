@@ -1,5 +1,7 @@
 import { createRemoteJWKSet, type JWTPayload, type JWTVerifyResult, jwtVerify } from "jose";
 
+export type { JWTPayload, JWTVerifyResult } from "jose";
+
 export type VerifierOptions = {
   jwksUrl: string;
   issuer: string;
