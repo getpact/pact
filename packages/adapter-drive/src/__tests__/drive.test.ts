@@ -72,6 +72,37 @@ describe("createDriveAdapter", () => {
     });
   });
 
+  it("declares user-scoped authorization for file reads", async () => {
+    const adapter = createDriveAdapter();
+    const tool = adapter.tools.find(
+      (candidate) => candidate.descriptor.name === "pact.drive.file.get",
+    );
+
+    expect(
+      tool?.authorize?.(
+        { fileId: "file_1" },
+        { workspaceId: "w1", userId: "u1", email: "u@example.com", roles: [], groups: [] },
+      ),
+    ).toEqual({
+      action: "drive.file.get",
+      resource: "workspace:w1:drive:user:u1:file:file_1",
+    });
+  });
+
+  it("does not put malformed file IDs into authorization resources", async () => {
+    const adapter = createDriveAdapter();
+    const tool = adapter.tools.find(
+      (candidate) => candidate.descriptor.name === "pact.drive.file.get",
+    );
+
+    expect(
+      tool?.authorize?.(
+        { fileId: "../bad" },
+        { workspaceId: "w1", userId: "u1", email: "u@example.com", roles: [], groups: [] },
+      )?.resource,
+    ).toBe("workspace:w1:drive:user:u1:file:invalid");
+  });
+
   it("returns a clear error when Drive is not connected", async () => {
     const adapter = createDriveAdapter({ loadConnection: async () => null });
     const tool = adapter.tools.find(
