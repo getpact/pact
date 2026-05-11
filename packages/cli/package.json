@@ -1,6 +1,7 @@
 {
   "name": "@getpact/cli",
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -24,7 +25,10 @@
     "@getpact/crypto": "workspace:*"
   },
   "files": [
-    "dist",
+    "dist/*.js",
+    "dist/*.js.map",
+    "dist/*.d.ts",
+    "dist/*.d.ts.map",
     "README.md",
     "LICENSE"
   ]
