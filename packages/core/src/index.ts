@@ -42,6 +42,19 @@ export const timingSafeEqualString = (a: string, b: string): boolean => {
   return diff === 0;
 };
 
+const weakSecretMarkers = ["changeme", "replace", "placeholder", "secret", "password", "todo"];
+
+export const isStrongSharedSecret = (value: string | undefined): boolean => {
+  const secret = value?.trim();
+  if (!secret || secret.length < 32) return false;
+  for (let i = 0; i < secret.length; i++) {
+    const code = secret.charCodeAt(i);
+    if (code <= 32 || code === 127) return false;
+  }
+  const lower = secret.toLowerCase();
+  return !weakSecretMarkers.some((marker) => lower.includes(marker));
+};
+
 export class PactError extends Error {
   readonly code: string;
   readonly status: number;

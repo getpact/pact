@@ -1,6 +1,7 @@
 import {
   AuthzError,
   type Email,
+  isStrongSharedSecret,
   PactError,
   securityHeaders,
   timingSafeEqualString,
@@ -118,6 +119,9 @@ app.post("/v1/dev/issue", async (c) => {
   }
   if (c.env.ENVIRONMENT !== "test") {
     if (!c.env.DEV_ISSUE_SECRET) return c.json({ error: "not_found" }, 404);
+    if (!isStrongSharedSecret(c.env.DEV_ISSUE_SECRET)) {
+      return c.json({ error: "misconfigured", message: "dev issue secret is too weak" }, 503);
+    }
     const received = c.req.header("x-pact-dev-issue-secret") ?? "";
     if (!timingSafeEqualString(received, c.env.DEV_ISSUE_SECRET)) {
       return c.json({ error: "unauthorized", message: "invalid dev issue secret" }, 401);

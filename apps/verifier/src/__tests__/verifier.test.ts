@@ -148,6 +148,35 @@ describe("verifier audience config", () => {
       message: "verifier service token is required",
     });
   });
+
+  it("fails closed in production when service auth is weak", async () => {
+    const res = await app.request(
+      "/v1/verify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: "unused",
+          action: "read",
+          resource: "doc:any",
+          audience: "pact-mcp",
+        }),
+      },
+      {
+        DATABASE_URL: "postgres://unused",
+        MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ISSUER_BASE_URL: "https://issuer.test",
+        ENVIRONMENT: "production",
+        VERIFIER_SERVICE_TOKEN: "service-secret",
+      },
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      error: "misconfigured",
+      message: "verifier service token is too weak",
+    });
+  });
 });
 
 run("verifier", () => {
