@@ -250,6 +250,7 @@ run("gateway integration", () => {
         VERIFIER_SERVICE_TOKEN: "verifier-secret",
         GATEWAY_AUDIENCE: "pact-gateway",
         GATEWAY_FORWARD_HEADER_ALLOWLIST: "x-client",
+        GATEWAY_RESPONSE_HEADER_ALLOWLIST: "content-type,x-upstream",
         MEK: testEnv.MEK,
       },
     );
