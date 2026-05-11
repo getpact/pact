@@ -682,6 +682,8 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Error"
+        "501":
+          $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
         "503":
@@ -710,6 +712,8 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
+          $ref: "#/components/responses/Error"
+        "501":
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
@@ -740,6 +744,8 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Error"
+        "501":
+          $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
         "503":
@@ -769,6 +775,8 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/Error"
+        "501":
+          $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
         "503":
@@ -790,6 +798,8 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
         "500":
+          $ref: "#/components/responses/Error"
+        "501":
           $ref: "#/components/responses/Error"
         "502":
           $ref: "#/components/responses/Error"
