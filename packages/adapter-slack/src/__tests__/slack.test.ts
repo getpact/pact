@@ -142,6 +142,36 @@ describe("Slack adapter", () => {
     expect(calls[0]).toEqual({ limit: 25, cursor: "next", types: "public_channel" });
   });
 
+  it("scopes adapter authorization resources to the workspace", () => {
+    const adapter = createSlackAdapter({
+      loadBotToken: async () => "xoxb-test",
+      createClient: () => {
+        throw new Error("should not build client");
+      },
+    });
+    const ctx = {
+      workspaceId: "ws1",
+      userId: "u1",
+      email: "alice@example.com",
+      groups: [],
+      roles: ["admin"],
+    };
+
+    const authTest = adapter.tools.find((tool) => tool.descriptor.name === "pact.slack.auth.test");
+    const channels = adapter.tools.find(
+      (tool) => tool.descriptor.name === "pact.slack.channels.list",
+    );
+
+    expect(authTest?.authorize?.({}, ctx)).toEqual({
+      action: "slack.auth.test",
+      resource: "slack:workspace:ws1",
+    });
+    expect(channels?.authorize?.({}, ctx)).toEqual({
+      action: "slack.channels.list",
+      resource: "slack:workspace:ws1:channels:public",
+    });
+  });
+
   it("adapter tools report missing vault prerequisites", async () => {
     const adapter = createSlackAdapter({
       loadBotToken: async () => null,

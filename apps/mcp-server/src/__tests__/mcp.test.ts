@@ -146,6 +146,52 @@ describe("mcp handler registry injection", () => {
   });
 });
 
+describe("mcp builtin tool guards", () => {
+  const baseCtx = {
+    workspaceId: "00000000-0000-0000-0000-000000000001",
+    userId: "user-1",
+    email: "alice@example.com",
+    groups: [],
+    roles: [] as string[],
+    jti: "jti-1",
+    token: "token-1",
+  };
+
+  const callBuiltin = (name: string, roles: string[] = []) =>
+    handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name, arguments: {} },
+      },
+      { ...baseCtx, roles },
+      {
+        audience: "pact-mcp",
+        verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+        deps: { databaseUrl: "postgres://unused" },
+      },
+    );
+
+  it("requires admin for policy.active even when policy allows", async () => {
+    const body = await callBuiltin("pact.policy.active");
+    expect(body.error).toBeUndefined();
+    expect(body.result).toEqual({
+      content: [{ type: "text", text: "admin role required" }],
+      isError: true,
+    });
+  });
+
+  it("requires admin or auditor for audit.recent even when policy allows", async () => {
+    const body = await callBuiltin("pact.audit.recent");
+    expect(body.error).toBeUndefined();
+    expect(body.result).toEqual({
+      content: [{ type: "text", text: "admin or auditor role required" }],
+      isError: true,
+    });
+  });
+});
+
 run("mcp server", () => {
   const adminDb = createClient(url as string);
   const cleanup: string[] = [];
