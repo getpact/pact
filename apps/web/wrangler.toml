@@ -11,8 +11,17 @@ WEB_BASE_URL = "https://app.getpact.dev"
 ISSUER_BASE_URL = "https://issuer.getpact.dev"
 ADMIN_API_BASE_URL = "https://admin.getpact.dev"
 AUDIT_API_BASE_URL = "https://audit.getpact.dev"
-ADMIN_AUDIENCE = "pact-admin"
 GOOGLE_OAUTH_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 
 [observability]
 enabled = true
+
+[env.local.vars]
+ENVIRONMENT = "development"
+WEB_BASE_URL = "http://127.0.0.1:19147"
+WEB_OAUTH_CALLBACK_PATH = "/oauth/oidc/callback"
+WEB_DEV_ROUTE_ORIGIN = "http://app.getpact.dev"
+ISSUER_BASE_URL = "http://127.0.0.1:8787"
+ADMIN_API_BASE_URL = "http://127.0.0.1:8788"
+AUDIT_API_BASE_URL = "http://127.0.0.1:8791"
+GOOGLE_OAUTH_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/auth"
