@@ -36,25 +36,22 @@ Workers continue to read from `MEK` (= `PACT_MEK_OLD`) for now.
 
 ### 2. Re-wrap signing keys and vault secrets
 
-Run a one-shot Node script (operator-owned, not in repo) that:
+Run the rewrap command from a workstation that has direct postgres access through the `pact` admin role (RLS bypass required):
 
 ```
-SELECT id, workspace_id, kind, private_key_wrapped FROM workspace_signing_keys;
+DATABASE_URL=postgres://pact:...@host/pact \
+PACT_MEK_OLD=<base64 current> \
+PACT_MEK_NEW=<base64 new> \
+pact mek rewrap --new-key-id <id>
 ```
 
-For each row:
-- Decrypt `private_key_wrapped` with `PACT_MEK_OLD` and AAD `keystore:v1:<workspaceId>:<kind>`.
-- Re-encrypt the plaintext under `PACT_MEK_NEW` with the same AAD.
-- `UPDATE workspace_signing_keys SET private_key_wrapped = $new WHERE id = $id`.
+This is a dry run. It reports the number of signing keys and vault secrets that would be rewrapped. Re-run with `--apply` to persist:
 
-Repeat for `vault_secrets`:
 ```
-SELECT id, workspace_id, kind, target, dek_ciphertext, ciphertext FROM vault_secrets;
+... pact mek rewrap --apply --new-key-id <id>
 ```
 
-For each row, decrypt the DEK with `PACT_MEK_OLD` + AAD `vault:v1:<workspaceId>:<kind>:<target>`, re-wrap with `PACT_MEK_NEW` + same AAD, persist. The inner `ciphertext` (DEK-encrypted plaintext) does NOT need rotation because the DEK itself was re-wrapped.
-
-Each row updates inside its own transaction wrapped in `SELECT set_config('app.current_workspace_id', $workspaceId, true)` so RLS audit ordering stays consistent.
+The command runs as one transaction. It decrypts `private_key_wrapped` and each `dek_ciphertext` with the old MEK and the same AAD used at write time, re-encrypts with the new MEK, and stamps `mek_key_id` for each rewrapped row. The inner `ciphertext` (DEK-encrypted plaintext) is not rotated because the DEK itself was re-wrapped.
 
 ### 3. Swap the binding
 
