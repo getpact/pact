@@ -139,11 +139,15 @@ const clientRateKey = (headers: Headers): string => {
   return forwarded && forwarded.length > 0 ? forwarded : "anonymous";
 };
 
+const VERIFIER_TIMEOUT_MS = 5000;
+
 export const verify = async (
   verifierUrl: string,
   input: { token: string; action: string; resource: string; audience: string },
   serviceToken?: string,
 ): Promise<VerifyOutput> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERIFIER_TIMEOUT_MS);
   try {
     const headers = new Headers({ "content-type": "application/json" });
     if (serviceToken) headers.set("authorization", `Bearer ${serviceToken}`);
@@ -151,6 +155,7 @@ export const verify = async (
       method: "POST",
       headers,
       body: JSON.stringify(input),
+      signal: controller.signal,
     });
     const body = (await res.json()) as Partial<VerifyOutput>;
     const bodyOk = typeof body.allow === "boolean" && Array.isArray(body.reasons);
@@ -160,6 +165,8 @@ export const verify = async (
     return { allow: false, reasons: [`verifier returned ${res.status}`] };
   } catch {
     return { allow: false, reasons: ["verifier unavailable"] };
+  } finally {
+    clearTimeout(timer);
   }
 };
 
