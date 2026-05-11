@@ -1,5 +1,5 @@
 import { writeEvent } from "@getpact/audit";
-import { type Email, tokenModeForAudience, ValidationError } from "@getpact/core";
+import { AuthzError, type Email, tokenModeForAudience, ValidationError } from "@getpact/core";
 import { issueJwt } from "@getpact/crypto";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, roles, userRoles, users, workspaces } from "@getpact/db/schema";
@@ -134,7 +134,7 @@ export const issueTokenForEmail = async (
       .from(users)
       .where(and(eq(users.workspaceId, input.workspaceId), eq(users.email, input.email)))
       .limit(1);
-    if (!user) throw new Error("user not found in workspace");
+    if (!user) throw new AuthzError("user not in workspace");
 
     const access = await issueAccessToken(tx, {
       workspaceId: input.workspaceId,

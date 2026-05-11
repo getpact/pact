@@ -26,6 +26,7 @@ run("google oidc exchange", () => {
   let issuerHost: string;
   let nextIdToken: string | null = null;
   let nextTokenStatus = 200;
+  let nextTokenBody: unknown = { error: "invalid_grant" };
 
   beforeAll(async () => {
     const pair = await generateKeyPair("RS256", { extractable: true });
@@ -42,7 +43,7 @@ run("google oidc exchange", () => {
         req.on("end", () => {
           if (nextTokenStatus !== 200) {
             res.writeHead(nextTokenStatus, { "content-type": "application/json" });
-            res.end(JSON.stringify({ error: "invalid_grant" }));
+            res.end(JSON.stringify(nextTokenBody));
             return;
           }
           res.writeHead(200, { "content-type": "application/json" });
@@ -83,6 +84,7 @@ run("google oidc exchange", () => {
     }
     nextIdToken = null;
     nextTokenStatus = 200;
+    nextTokenBody = { error: "invalid_grant" };
   });
 
   const buildIdToken = async (overrides: Record<string, unknown> = {}): Promise<string> => {
@@ -216,6 +218,7 @@ run("google oidc exchange", () => {
     const env = await buildEnv();
     const created = await setupWorkspace(env);
     nextTokenStatus = 400;
+    nextTokenBody = { error: "invalid_grant", client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET };
 
     const res = await app.request(
       "/v1/oauth/google/exchange",
@@ -233,7 +236,7 @@ run("google oidc exchange", () => {
       env,
     );
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("invalid_grant");
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ error: "invalid_grant" });
   });
 });
