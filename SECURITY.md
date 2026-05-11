@@ -6,7 +6,7 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 
 - Adversary can reach all Worker routes from the public internet.
 - Adversary can register their own workspaces and obtain valid tokens for those workspaces.
-- Adversary cannot obtain a workspace MEK (held only by the operator) or a workspace signing key (wrapped at rest with MEK).
+- Adversary cannot obtain the deployment MEK (held only by the operator) or a workspace signing key (wrapped at rest with MEK).
 - Adversary may attempt: token forgery, replay, cross-workspace token reuse, audit chain tampering, SSRF via brain config, quota exhaustion, audit fail-open exploitation.
 
 ## Defenses in place
@@ -17,11 +17,11 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 - Audit chain: hash-linked + signed events under workspace audit signing key, ordered by `audit_seq` with `pg_advisory_xact_lock` per workspace.
 - Admin mutations write audit in the SAME transaction as the mutation; audit failure rolls back mutation and returns 503.
 - Gateway only uses unsigned JWT claims for cheap syntax and workspace-route rejection. Brain lookup, rate limiting, actor attribution, and signed gateway audit rows happen after verifier allow/deny.
-- Vault: per-secret DEK wrapped by workspace MEK with AAD bound to workspace + kind + target.
+- Vault: per-secret DEK wrapped by the deployment MEK with AAD bound to workspace + kind + target.
 - Keystore signing keys wrapped with AAD bound to workspace + kind; backward-compat rewrap holds row lock.
 - SSRF guard: brain `baseUrl` and gateway upstream URL parsed at request handler entry; private hosts, IPv6, link-local, RFC1918, and metadata IPs rejected.
 - Gateway path traversal: percent-decoded segment check rejects `.`, `..`, embedded `/` or `\`.
-- Outbound header policy: gateway forwards only a small request header allowlist by default. Operators may add explicit safe headers via `GATEWAY_FORWARD_HEADER_ALLOWLIST`; credentials and forwarding headers are not forwarded unless deliberately allowed, which is not recommended.
+- Outbound header policy: gateway forwards only a small request header allowlist by default. Operators may add explicit safe headers via `GATEWAY_FORWARD_HEADER_ALLOWLIST`; credentials, forwarding headers, hop-by-hop headers, and method override headers are hard blocked.
 - Rate limit: DB-backed UPSERT per `(workspace_id, brain_kind, client_ip)` bucket after verifier allow.
 - Cheap checks before verifier: bearer parse, JWT decode, and workspace param vs JWT org claim run before verifier call. Brain existence, rate limit, and gateway audit are post-verifier to avoid signed audit rows from unsigned tokens.
 - TLS termination at Cloudflare; HSTS in production; CSP `default-src 'none'` and no-referrer everywhere.
@@ -54,6 +54,7 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 - DDoS protection at the L3/L4 layer (Cloudflare responsibility).
 - Backend Postgres tenant isolation beyond RLS + workspace-scoped advisory locks. Operator must run Pact's Postgres with `pact_app` role for runtime queries; `pact` admin role bypasses RLS and must only be used for migrations.
 - MEK key management. Operators must rotate MEK out-of-band; Pact does not include an HSM or KMS integration in v1.
+- Per-workspace MEK isolation. A single deployment MEK wraps vault DEKs and signing keys in v1, so MEK compromise is a deployment-wide incident.
 
 ## Reporting
 
