@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
 import { createClient } from "@getpact/db";
-import { workspaces } from "@getpact/db/schema";
-import { eq } from "drizzle-orm";
+import { auditEvents, users, workspaces } from "@getpact/db/schema";
+import { and, eq } from "drizzle-orm";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import app from "../index.js";
@@ -92,11 +92,14 @@ run("google oidc exchange", () => {
     subject = "google-sub-123",
   ): Promise<string> => {
     const now = Math.floor(Date.now() / 1000);
-    return new SignJWT({
+    const claims: Record<string, unknown> = {
       email: "alice@example.com",
       email_verified: true,
-      ...overrides,
-    })
+      hd: "example.com",
+    };
+    Object.assign(claims, overrides);
+    if (claims.hd === undefined) delete claims.hd;
+    return new SignJWT(claims)
       .setProtectedHeader({ alg: "RS256", kid })
       .setIssuer(issuerHost)
       .setAudience(CLIENT_ID)
@@ -123,7 +126,10 @@ run("google oidc exchange", () => {
     };
   };
 
-  const setupWorkspace = async (env: Awaited<ReturnType<typeof buildEnv>>) => {
+  const setupWorkspace = async (
+    env: Awaited<ReturnType<typeof buildEnv>>,
+    adminEmail = "alice@example.com",
+  ) => {
     const slug = `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const res = await app.request(
       "/v1/workspaces",
@@ -133,7 +139,7 @@ run("google oidc exchange", () => {
         body: JSON.stringify({
           slug,
           name: "Google Test",
-          adminEmail: "alice@example.com",
+          adminEmail,
         }),
       },
       env,
@@ -243,6 +249,375 @@ run("google oidc exchange", () => {
       env,
     );
     expect(second.status).toBe(403);
+  });
+
+  it("backfills google subject for a pre-existing workspace user", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+    nextIdToken = await buildIdToken({}, "google-sub-backfill");
+
+    const before = await adminDb
+      .select({ googleSub: users.googleSub })
+      .from(users)
+      .where(and(eq(users.workspaceId, created.workspaceId), eq(users.email, "alice@example.com")))
+      .limit(1);
+    expect(before[0]?.googleSub).toBeNull();
+
+    const res = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-backfill",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+
+    const after = await adminDb
+      .select({ googleSub: users.googleSub })
+      .from(users)
+      .where(and(eq(users.workspaceId, created.workspaceId), eq(users.email, "alice@example.com")))
+      .limit(1);
+    expect(after[0]?.googleSub).toBe("google-sub-backfill");
+  });
+
+  it("revokes existing refresh tokens when google subject is first bound", async () => {
+    const env = { ...(await buildEnv()), ENABLE_DEV_ISSUE: "true" };
+    const created = await setupWorkspace(env);
+
+    const issueBeforeBinding = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(issueBeforeBinding.status).toBe(200);
+    const issued = (await issueBeforeBinding.json()) as { refreshToken: string };
+
+    nextIdToken = await buildIdToken({}, "google-sub-revokes-refresh");
+    const bind = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-bind-revoke",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(bind.status).toBe(200);
+
+    const refresh = await app.request(
+      "/v1/refresh",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          refreshToken: issued.refreshToken,
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(refresh.status).toBe(401);
+  });
+
+  it.skipIf(!process.env.RLS_TEST_DB)(
+    "backfills google subject using the runtime RLS role",
+    async () => {
+      const env = await buildEnv();
+      const created = await setupWorkspace(env);
+      nextIdToken = await buildIdToken({}, "google-sub-rls");
+
+      const res = await app.request(
+        "/v1/oauth/google/session",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-pact-web-service-token": env.WEB_ISSUER_SERVICE_TOKEN,
+          },
+          body: JSON.stringify({
+            workspaceId: created.workspaceId,
+            code: "code-rls",
+            codeVerifier: "v".repeat(43),
+            redirectUri: env.WEB_OAUTH_REDIRECT_URI,
+            audiences: ["pact-admin", "pact-audit"],
+          }),
+        },
+        { ...env, DATABASE_URL: process.env.RLS_TEST_DB },
+      );
+      expect(res.status).toBe(200);
+
+      const rows = await adminDb
+        .select({ googleSub: users.googleSub })
+        .from(users)
+        .where(
+          and(eq(users.workspaceId, created.workspaceId), eq(users.email, "alice@example.com")),
+        )
+        .limit(1);
+      expect(rows[0]?.googleSub).toBe("google-sub-rls");
+    },
+  );
+
+  it("rejects google subject collision when current email belongs to another user", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+    await adminDb.insert(users).values({
+      workspaceId: created.workspaceId,
+      email: "bob@example.com",
+      googleSub: "google-sub-123",
+    });
+    nextIdToken = await buildIdToken({}, "google-sub-123");
+
+    const res = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-collision",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("google_identity_mismatch");
+    const rows = await adminDb
+      .select({ email: users.email, googleSub: users.googleSub })
+      .from(users)
+      .where(eq(users.workspaceId, created.workspaceId));
+    expect(rows.find((row) => row.email === "alice@example.com")?.googleSub).toBeNull();
+    expect(rows.find((row) => row.email === "bob@example.com")?.googleSub).toBe("google-sub-123");
+    const audits = await adminDb
+      .select({
+        action: auditEvents.action,
+        decision: auditEvents.decision,
+        supporting: auditEvents.supporting,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.workspaceId, created.workspaceId));
+    expect(audits).toContainEqual(
+      expect.objectContaining({
+        action: "issuer.google_auth.denied",
+        decision: "deny",
+        supporting: expect.objectContaining({
+          reason: "google_identity_mismatch",
+          email: "alice@example.com",
+        }),
+      }),
+    );
+  });
+
+  it("allows the same google subject in different workspaces", async () => {
+    const env = await buildEnv();
+    const firstWorkspace = await setupWorkspace(env);
+    const secondWorkspace = await setupWorkspace(env);
+
+    nextIdToken = await buildIdToken({}, "google-sub-cross-workspace");
+    const first = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: firstWorkspace.workspaceId,
+          code: "code-first",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(first.status).toBe(200);
+
+    nextIdToken = await buildIdToken({}, "google-sub-cross-workspace");
+    const second = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: secondWorkspace.workspaceId,
+          code: "code-second",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(second.status).toBe(200);
+  });
+
+  it("uses bound google subject as the stable login key after email changes", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+    nextIdToken = await buildIdToken({}, "google-sub-stable");
+
+    const first = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-stable-first",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(first.status).toBe(200);
+
+    nextIdToken = await buildIdToken(
+      { email: "alice.renamed@example.com", hd: "example.com" },
+      "google-sub-stable",
+    );
+    const second = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-stable-second",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(second.status).toBe(200);
+  });
+
+  it("rejects first binding for non-authoritative non-gmail email", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+    nextIdToken = await buildIdToken({ hd: undefined }, "google-sub-no-hd");
+
+    const res = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-no-hd",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("google_email_not_authoritative");
+  });
+
+  it("accepts first binding for gmail addresses without hosted domain", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env, "alice@gmail.com");
+    nextIdToken = await buildIdToken(
+      { email: "alice@gmail.com", hd: undefined },
+      "google-sub-gmail",
+    );
+
+    const res = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-gmail",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects first binding for googlemail.com without hosted domain", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env, "alice@googlemail.com");
+    nextIdToken = await buildIdToken(
+      { email: "alice@googlemail.com", hd: undefined },
+      "google-sub-googlemail",
+    );
+
+    const res = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-googlemail",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts first binding for Google Workspace aliases with hosted domain", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env, "cto@acme.io");
+    nextIdToken = await buildIdToken({ email: "cto@acme.io", hd: "acme.com" }, "google-sub-alias");
+
+    const res = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "code-alias",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
   });
 
   it("rejects dashboard token bundle requests with unsupported audiences", async () => {
@@ -387,6 +762,60 @@ run("google oidc exchange", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("user_not_in_workspace");
+  });
+
+  it("returns upstream failure when Google token endpoint errors", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+    nextTokenStatus = 500;
+    nextTokenBody = { error: "server_error" };
+
+    const res = await app.request(
+      "/v1/oauth/google/exchange",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "bad-code",
+          codeVerifier: "v".repeat(43),
+          redirectUri: "https://localhost:8787/callback",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe("google_oauth_exchange_failed");
+  });
+
+  it("returns upstream failure when Google token response has no id token", async () => {
+    const env = await buildEnv();
+    const created = await setupWorkspace(env);
+    nextIdToken = null;
+
+    const res = await app.request(
+      "/v1/oauth/google/session",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-pact-web-service-token": env.WEB_ISSUER_SERVICE_TOKEN,
+        },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          code: "bad-code",
+          codeVerifier: "v".repeat(43),
+          redirectUri: env.WEB_OAUTH_REDIRECT_URI,
+          audiences: ["pact-admin", "pact-audit"],
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe("google_identity_verification_failed");
   });
 
   it("rejects when google token endpoint fails", async () => {

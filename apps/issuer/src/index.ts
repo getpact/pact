@@ -20,8 +20,18 @@ import {
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
-import { exchangeGoogleCode } from "./google.js";
-import { issueTokenBundleForEmail, issueTokenForEmail, redeemRefreshAndIssue } from "./issue.js";
+import {
+  exchangeGoogleCode,
+  GoogleIdentityVerificationError,
+  GoogleTokenExchangeError,
+} from "./google.js";
+import {
+  GoogleEmailNotAuthoritativeError,
+  GoogleIdentityMismatchError,
+  issueTokenBundleForEmail,
+  issueTokenForEmail,
+  redeemRefreshAndIssue,
+} from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
 import { createWorkspace } from "./workspace.js";
 
@@ -111,6 +121,38 @@ app.use("/v1/dev/issue", (c, next) =>
 );
 
 app.get("/health", (c) => c.json({ ok: true }));
+
+const googleAuthzBody = (e: AuthzError): { error: string; message: string } => {
+  if (e instanceof GoogleIdentityMismatchError) {
+    return { error: "google_identity_mismatch", message: e.message };
+  }
+  if (e instanceof GoogleEmailNotAuthoritativeError) {
+    return { error: "google_email_not_authoritative", message: e.message };
+  }
+  return { error: "user_not_in_workspace", message: e.message };
+};
+
+const googleExchangeFailure = (e: unknown): Response | null => {
+  if (e instanceof GoogleTokenExchangeError) {
+    if (e.invalidGrant) {
+      return Response.json({ error: "invalid_grant" }, { status: 401 });
+    }
+    return Response.json(
+      { error: "google_oauth_exchange_failed", message: "Google token exchange failed" },
+      { status: 502 },
+    );
+  }
+  if (e instanceof GoogleIdentityVerificationError) {
+    return Response.json(
+      {
+        error: "google_identity_verification_failed",
+        message: "Google identity verification failed",
+      },
+      { status: 502 },
+    );
+  }
+  return null;
+};
 
 const enforceRouteRateLimit = async (
   c: Context<{ Bindings: Env }>,
@@ -204,8 +246,10 @@ app.post("/v1/oauth/google/exchange", async (c) => {
       ...(c.env.GOOGLE_JWKS_URI ? { jwksUri: c.env.GOOGLE_JWKS_URI } : {}),
       ...(c.env.GOOGLE_ISSUER ? { expectedIssuer: c.env.GOOGLE_ISSUER } : {}),
     });
-  } catch {
-    return c.json({ error: "invalid_grant" }, 401);
+  } catch (e) {
+    const failure = googleExchangeFailure(e);
+    if (failure) return failure;
+    throw e;
   }
   if (!identity.emailVerified) {
     return c.json({ error: "email_not_verified" }, 403);
@@ -216,6 +260,7 @@ app.post("/v1/oauth/google/exchange", async (c) => {
       workspaceId: body.workspaceId,
       email: identity.email as Email,
       googleSub: identity.sub,
+      googleEmailAuthoritative: identity.emailAuthoritative,
       audience: body.audience,
       ttlSeconds: tokenTtlSeconds(c.env),
       issuerUrl: c.env.ISSUER_BASE_URL,
@@ -223,12 +268,12 @@ app.post("/v1/oauth/google/exchange", async (c) => {
     return c.json(result);
   } catch (e) {
     if (e instanceof AuthzError) {
-      return c.json({ error: "user_not_in_workspace" }, 403);
+      return c.json(googleAuthzBody(e), 403);
     }
     if (e instanceof PactError) {
       return c.json({ error: e.code, message: e.message }, e.status as 400);
     }
-    return c.json({ error: "user_not_in_workspace" }, 403);
+    throw e;
   }
 });
 
@@ -278,8 +323,10 @@ app.post("/v1/oauth/google/session", async (c) => {
       ...(c.env.GOOGLE_JWKS_URI ? { jwksUri: c.env.GOOGLE_JWKS_URI } : {}),
       ...(c.env.GOOGLE_ISSUER ? { expectedIssuer: c.env.GOOGLE_ISSUER } : {}),
     });
-  } catch {
-    return c.json({ error: "invalid_grant" }, 401);
+  } catch (e) {
+    const failure = googleExchangeFailure(e);
+    if (failure) return failure;
+    throw e;
   }
   if (!identity.emailVerified) {
     return c.json({ error: "email_not_verified" }, 403);
@@ -290,6 +337,7 @@ app.post("/v1/oauth/google/session", async (c) => {
       workspaceId: body.workspaceId,
       email: identity.email as Email,
       googleSub: identity.sub,
+      googleEmailAuthoritative: identity.emailAuthoritative,
       audiences,
       ttlSeconds: tokenTtlSeconds(c.env),
       issuerUrl: c.env.ISSUER_BASE_URL,
@@ -297,12 +345,12 @@ app.post("/v1/oauth/google/session", async (c) => {
     return c.json({ tokens });
   } catch (e) {
     if (e instanceof AuthzError) {
-      return c.json({ error: "user_not_in_workspace" }, 403);
+      return c.json(googleAuthzBody(e), 403);
     }
     if (e instanceof PactError) {
       return c.json({ error: e.code, message: e.message }, e.status as 400);
     }
-    return c.json({ error: "user_not_in_workspace" }, 403);
+    throw e;
   }
 });
 

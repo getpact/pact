@@ -54,6 +54,29 @@ export const redeemRefresh = async (
   audience: string,
 ): Promise<RedeemRefreshResult | null> => {
   const hash = await hashRefresh(rawRefresh);
+  const candidate = (await tx.execute(
+    sql`SELECT user_id
+        FROM refresh_tokens
+        WHERE workspace_id = ${workspaceId}
+          AND ciphertext = ${hash}
+          AND audience = ${audience}
+          AND expires_at > NOW()
+          AND last_used_at IS NULL
+          AND revoked_at IS NULL
+        LIMIT 1`,
+  )) as Array<{ user_id: string }>;
+  const userId = candidate[0]?.user_id;
+  if (!userId) return null;
+
+  const lockedUser = (await tx.execute(
+    sql`SELECT id
+        FROM users
+        WHERE workspace_id = ${workspaceId}
+          AND id = ${userId}
+        FOR UPDATE`,
+  )) as Array<{ id: string }>;
+  if (!lockedUser[0]) return null;
+
   // Atomic redeem: claim the row by setting last_used_at, only succeeds if
   // not already used and not expired. Concurrent redeems collide here.
   const claimed = (await tx.execute(
