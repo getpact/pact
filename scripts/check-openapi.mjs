@@ -5,6 +5,15 @@ import { exit } from "node:process";
 const path = "docs/openapi/pact.v1.yaml";
 const spec = readFileSync(path, "utf8");
 const seedRequired = ["openapi: 3.1.0"];
+const requiredContracts = [
+  "devIssueSecretAuth:",
+  "x-pact-dev-issue-secret",
+  '$ref: "#/components/schemas/Audience"',
+  '$ref: "#/components/schemas/Jwks"',
+  '"401":',
+  '"404":',
+  '"429":',
+];
 
 const routeFiles = [
   "apps/issuer/src/index.ts",
@@ -37,7 +46,7 @@ for (const routeFile of routeFiles) {
   }
 }
 
-const required = seedRequired.concat([...publicRoutes].sort());
+const required = seedRequired.concat(requiredContracts, [...publicRoutes].sort());
 const missing = required.filter((needle) => !spec.includes(needle));
 if (missing.length > 0) {
   for (const needle of missing) console.error(`${path} missing ${needle}`);
