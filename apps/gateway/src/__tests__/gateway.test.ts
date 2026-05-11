@@ -196,7 +196,6 @@ run("gateway integration", () => {
         kind: "notion",
         baseUrl: "https://api.example.com/base",
         authScheme: "none",
-        scopeInjectionTemplate: {},
       }),
     );
     return { testEnv, created, issued };
@@ -533,7 +532,6 @@ run("gateway integration", () => {
           kind: "notion",
           baseUrl: "https://api.example.com/base",
           authScheme: "bearer",
-          scopeInjectionTemplate: {},
         })
         .returning({ id: schema.brains.id }),
     );
@@ -594,7 +592,6 @@ run("gateway integration", () => {
         kind: "notion",
         baseUrl: "https://api.example.com/base",
         authScheme: "bearer",
-        scopeInjectionTemplate: {},
       }),
     );
     vi.stubGlobal(
