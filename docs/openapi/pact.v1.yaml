@@ -1151,6 +1151,3 @@ components:
         authScheme:
           type: string
           enum: [none, bearer]
-        scopeInjectionTemplate:
-          type: object
-          maxProperties: 0

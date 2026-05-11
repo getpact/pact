@@ -216,8 +216,6 @@ export const brains = pgTable(
     kind: text("kind").notNull(),
     baseUrl: text("base_url").notNull(),
     authScheme: text("auth_scheme").notNull(),
-    scopeInjectionTemplate: jsonb("scope_injection_template").notNull(),
-    responseFilter: jsonb("response_filter"),
     status: text("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -127,6 +127,20 @@
       "when": 1778480000000,
       "tag": "0017_drop_adapter_configs",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778485000000,
+      "tag": "0018_drop_brain_dead_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778486000000,
+      "tag": "0019_mek_key_id",
+      "breakpoints": true
     }
   ]
 }

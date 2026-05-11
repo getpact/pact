@@ -305,7 +305,6 @@ app.post("/v1/workspaces/:id/invites", async (c) => {
 });
 
 const KIND_RE = /^[a-z][a-z0-9-]{0,32}$/;
-const UNSAFE_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const pgErrorCode = (value: unknown): string | null => {
   if (typeof value !== "object" || value === null || !("code" in value)) return null;
   const code = (value as { code?: unknown }).code;
@@ -313,23 +312,6 @@ const pgErrorCode = (value: unknown): string | null => {
 };
 
 const isUniqueViolation = (value: unknown): boolean => pgErrorCode(value) === "23505";
-
-const ensureSafeJsonKeys = (value: unknown, path = ""): void => {
-  if (!value || typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) ensureSafeJsonKeys(value[i], `${path}[${i}]`);
-    return;
-  }
-  for (const key of Object.keys(value)) {
-    if (UNSAFE_KEYS.has(key)) {
-      throw new ValidationError(`unsafe key ${key} at ${path || "root"}`);
-    }
-    ensureSafeJsonKeys((value as Record<string, unknown>)[key], `${path}.${key}`);
-  }
-};
-
-const isEmptyObject = (value: unknown): boolean =>
-  !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
 
 app.post("/v1/workspaces/:id/brains", async (c) => {
   const workspaceId = c.req.param("id");
@@ -341,8 +323,6 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
       kind: string;
       baseUrl: string;
       authScheme?: string;
-      scopeInjectionTemplate?: unknown;
-      responseFilter?: unknown;
     };
     try {
       body = await c.req.json();
@@ -364,14 +344,6 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
     if (authScheme !== "none" && authScheme !== "bearer") {
       throw new ValidationError("authScheme must be none or bearer");
     }
-    if (body.scopeInjectionTemplate !== undefined && !isEmptyObject(body.scopeInjectionTemplate)) {
-      throw new ValidationError("scopeInjectionTemplate is not implemented");
-    }
-    if (body.responseFilter !== undefined) {
-      throw new ValidationError("responseFilter is not implemented");
-    }
-    const scopeTemplate = body.scopeInjectionTemplate ?? {};
-    ensureSafeJsonKeys(scopeTemplate);
 
     const db = createClient(c.env.DATABASE_URL);
     const inserted = await withWorkspace(db, workspaceId, async (tx) => {
@@ -383,8 +355,6 @@ app.post("/v1/workspaces/:id/brains", async (c) => {
             kind: body.kind,
             baseUrl: body.baseUrl,
             authScheme,
-            scopeInjectionTemplate: scopeTemplate,
-            responseFilter: body.responseFilter ?? null,
           })
           .returning({ id: brains.id, kind: brains.kind, baseUrl: brains.baseUrl });
         await auditInTx(tx, c, ctx, "admin.brain.created", {

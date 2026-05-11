@@ -328,7 +328,7 @@ run("admin api", () => {
     expect(secrets).toHaveLength(0);
   });
 
-  it("rejects unsafe gateway brain configuration", async () => {
+  it("rejects unsafe gateway brain host", async () => {
     const { env, created, token } = await setup();
     const runtime = {
       DATABASE_URL: env.DATABASE_URL,
@@ -343,32 +343,6 @@ run("admin api", () => {
       runtime,
     );
     expect(unsafeHost.status).toBe(400);
-
-    const unsafeJson = await callAdmin(
-      `/v1/workspaces/${created.workspaceId}/brains`,
-      token,
-      "POST",
-      {
-        kind: "unsafe",
-        baseUrl: "https://api.example.com",
-        scopeInjectionTemplate: { constructor: { polluted: true } },
-      },
-      runtime,
-    );
-    expect(unsafeJson.status).toBe(400);
-
-    const inertFilter = await callAdmin(
-      `/v1/workspaces/${created.workspaceId}/brains`,
-      token,
-      "POST",
-      {
-        kind: "filtered",
-        baseUrl: "https://api.example.com",
-        responseFilter: { allow: ["id"] },
-      },
-      runtime,
-    );
-    expect(inertFilter.status).toBe(400);
   });
 
   it("rejects http brain baseUrl", async () => {
