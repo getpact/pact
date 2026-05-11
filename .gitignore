@@ -8,4 +8,6 @@ coverage
 .env
 .env.local
 .env.*.local
+.dev.vars
+apps/*/.dev.vars
 *.tsbuildinfo
