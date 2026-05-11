@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient, type DbClient, withWorkspace } from "../client.js";
-import { users, workspaces } from "../schema.js";
+import { users, workspaceOauthConnections, workspaces } from "../schema.js";
 
 const url = process.env.RLS_TEST_DB;
 const run = url ? describe : describe.skip;
@@ -24,11 +24,40 @@ run("rls tenant isolation", () => {
     if (!a[0] || !b[0]) throw new Error("workspace insert failed");
     wsA = a[0].id;
     wsB = b[0].id;
+    const [userA] = await withWorkspace(db, wsA, (tx) =>
+      tx
+        .insert(users)
+        .values({ workspaceId: wsA, email: "a@example.com" })
+        .returning({ id: users.id }),
+    );
+    const [userB] = await withWorkspace(db, wsB, (tx) =>
+      tx
+        .insert(users)
+        .values({ workspaceId: wsB, email: "b@example.com" })
+        .returning({ id: users.id }),
+    );
+    if (!userA || !userB) throw new Error("user insert failed");
     await withWorkspace(db, wsA, (tx) =>
-      tx.insert(users).values({ workspaceId: wsA, email: "a@example.com" }),
+      tx.insert(workspaceOauthConnections).values({
+        workspaceId: wsA,
+        provider: "google_drive",
+        userId: userA.id,
+        providerSubject: "google-sub-a",
+        email: "a@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget: `user:${userA.id}`,
+      }),
     );
     await withWorkspace(db, wsB, (tx) =>
-      tx.insert(users).values({ workspaceId: wsB, email: "b@example.com" }),
+      tx.insert(workspaceOauthConnections).values({
+        workspaceId: wsB,
+        provider: "google_drive",
+        userId: userB.id,
+        providerSubject: "google-sub-b",
+        email: "b@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget: `user:${userB.id}`,
+      }),
     );
   });
 
@@ -58,6 +87,23 @@ run("rls tenant isolation", () => {
     );
     expect(rows.length).toBe(1);
     expect((rows[0] as { email: string }).email).toBe("b@example.com");
+  });
+
+  it("isolates workspace OAuth connection metadata", async () => {
+    const rowsA = await withWorkspace(db, wsA, (tx) =>
+      tx
+        .select({ email: workspaceOauthConnections.email })
+        .from(workspaceOauthConnections)
+        .where(eq(workspaceOauthConnections.provider, "google_drive")),
+    );
+    const rowsB = await withWorkspace(db, wsB, (tx) =>
+      tx
+        .select({ email: workspaceOauthConnections.email })
+        .from(workspaceOauthConnections)
+        .where(eq(workspaceOauthConnections.provider, "google_drive")),
+    );
+    expect(rowsA).toEqual([{ email: "a@example.com" }]);
+    expect(rowsB).toEqual([{ email: "b@example.com" }]);
   });
 
   it("has google subject migration artifacts", async () => {
