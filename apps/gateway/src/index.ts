@@ -355,6 +355,7 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
   const [brain] = await withWorkspace(db, workspaceId, (tx) =>
     tx
       .select({
+        id: schema.brains.id,
         baseUrl: schema.brains.baseUrl,
         authScheme: schema.brains.authScheme,
       })
@@ -411,7 +412,7 @@ app.all("/:workspace/gateway/:brain/*", async (c) => {
       loadSecretString(tx, rawMek, {
         workspaceId,
         kind: "brain_credential",
-        target: brainKind,
+        target: brain.id,
       }),
     );
     if (!brainBearerToken) {
