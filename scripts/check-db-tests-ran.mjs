@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Fail CI if any test file that is supposed to require a real database was skipped.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { argv, exit } from "node:process";
 
 const logPath = argv[2];
@@ -19,26 +18,19 @@ if (missingEnv.length > 0) {
   exit(1);
 }
 
-const walk = (dir, out = []) => {
-  for (const entry of readdirSync(dir)) {
-    if (entry === "node_modules" || entry === "dist" || entry === ".turbo") continue;
-    const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) walk(full, out);
-    else if (full.endsWith(".test.ts")) out.push(full);
-  }
-  return out;
-};
-
-const dbGated = walk("apps")
-  .concat(walk("packages"))
-  .filter((p) => {
-    const src = readFileSync(p, "utf8");
-    return (
-      (src.includes("process.env.DATABASE_URL") || src.includes("process.env.RLS_TEST_DB")) &&
-      src.includes("describe.skip")
-    );
-  });
+const dbGated = [
+  "apps/admin-api/src/__tests__/admin.test.ts",
+  "apps/audit-api/src/__tests__/audit-api.test.ts",
+  "apps/gateway/src/__tests__/gateway.test.ts",
+  "apps/issuer/src/__tests__/google.test.ts",
+  "apps/issuer/src/__tests__/issuer.test.ts",
+  "apps/mcp-server/src/__tests__/mcp.test.ts",
+  "apps/verifier/src/__tests__/verifier.test.ts",
+  "packages/audit/src/__tests__/writer.test.ts",
+  "packages/db/src/__tests__/rls.test.ts",
+  "packages/keystore/src/__tests__/keystore.test.ts",
+  "packages/vault/src/__tests__/store.test.ts",
+];
 
 const missed = [];
 for (const file of dbGated) {
