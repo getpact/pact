@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { fromBase64 } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { policies, workspaces } from "@getpact/db/schema";
 import {
@@ -8,6 +9,7 @@ import {
   issueTestToken,
   uniqueSlug,
 } from "@getpact/test-helpers";
+import { storeSecret } from "@getpact/vault";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
@@ -325,6 +327,46 @@ run("mcp server", () => {
     expect(names).toContain("pact.slack.auth.test");
     expect(names).toContain("pact.drive.files.list");
     expect(names).toContain("pact.drive.file.get");
+  });
+
+  it("does not expose orphaned Drive vault secrets without active connection metadata", async () => {
+    const { env, created } = await setup();
+    await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      storeSecret(tx, fromBase64(env.MEK), {
+        workspaceId: created.workspaceId,
+        kind: "google_drive_oauth",
+        target: `user:${created.adminUserId}`,
+        plaintext: JSON.stringify({ accessToken: "orphaned-drive-token" }),
+      }),
+    );
+
+    const body = await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 12,
+        method: "tools/call",
+        params: { name: "pact.drive.files.list", arguments: {} },
+      },
+      {
+        workspaceId: created.workspaceId,
+        userId: created.adminUserId,
+        email: "alice@example.com",
+        groups: [],
+        roles: ["admin"],
+        jti: "jti-1",
+        token: "token-1",
+      },
+      {
+        audience: env.MCP_AUDIENCE,
+        verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+        deps: { databaseUrl: env.DATABASE_URL, rawMek: fromBase64(env.MEK) },
+      },
+    );
+    expect(body.error).toBeUndefined();
+    expect(body.result).toEqual({
+      content: [{ type: "text", text: "Google Drive is not connected for this user." }],
+      isError: true,
+    });
   });
 
   it("refuses tool calls when verifier is not configured", async () => {
