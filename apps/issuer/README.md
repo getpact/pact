@@ -17,5 +17,9 @@ OIDC issuer. Mints Pact JWTs from Google identity, redeems refresh tokens, serve
 - `MEK` - workspace key-wrap master key, base64
 - `ISSUER_BASE_URL` - canonical issuer URL embedded in `iss` claim
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`
+- `WEB_ISSUER_SERVICE_TOKEN` - shared secret for dashboard session exchange
+- `WEB_OAUTH_REDIRECT_URI` - exact dashboard callback URI allowed for OAuth session exchange
 - `DEV_ISSUE_SECRET` - required outside `ENVIRONMENT=test`; callers must send it as `x-pact-dev-issue-secret`
 - `ENVIRONMENT` - `production` enables prod-only guards
+
+For production, set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `WEB_ISSUER_SERVICE_TOKEN` as Cloudflare secrets. Local development can use ignored `apps/issuer/.dev.vars` with the same names.

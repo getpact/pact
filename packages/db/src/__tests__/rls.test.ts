@@ -59,4 +59,49 @@ run("rls tenant isolation", () => {
     expect(rows.length).toBe(1);
     expect((rows[0] as { email: string }).email).toBe("b@example.com");
   });
+
+  it("has google subject migration artifacts", async () => {
+    const columns = await db.execute(
+      sql`SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'users'
+            AND column_name = 'google_sub'`,
+    );
+    expect(columns.length).toBe(1);
+
+    const indexes = await db.execute(
+      sql`SELECT indexname
+          FROM pg_indexes
+          WHERE schemaname = 'public'
+            AND tablename = 'users'
+            AND indexname = 'users_workspace_google_sub_idx'
+            AND indexdef ILIKE '%WHERE (google_sub IS NOT NULL)%'`,
+    );
+    expect(indexes.length).toBe(1);
+  });
+
+  it("enforces partial google subject uniqueness per workspace", async () => {
+    await withWorkspace(db, wsA, (tx) =>
+      tx.insert(users).values([
+        { workspaceId: wsA, email: "null-google-1@example.com" },
+        { workspaceId: wsA, email: "null-google-2@example.com" },
+      ]),
+    );
+    await expect(
+      withWorkspace(db, wsA, (tx) =>
+        tx.insert(users).values([
+          { workspaceId: wsA, email: "google-one@example.com", googleSub: "google-sub-unique" },
+          { workspaceId: wsA, email: "google-two@example.com", googleSub: "google-sub-unique" },
+        ]),
+      ),
+    ).rejects.toThrow();
+    await withWorkspace(db, wsB, (tx) =>
+      tx.insert(users).values({
+        workspaceId: wsB,
+        email: "google-other-workspace@example.com",
+        googleSub: "google-sub-unique",
+      }),
+    );
+  });
 });
