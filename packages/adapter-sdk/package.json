@@ -17,7 +17,10 @@
     "typecheck": "tsc --noEmit"
   },
   "files": [
-    "dist",
+    "dist/*.js",
+    "dist/*.js.map",
+    "dist/*.d.ts",
+    "dist/*.d.ts.map",
     "README.md",
     "LICENSE"
   ]
