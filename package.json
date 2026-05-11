@@ -16,6 +16,7 @@
     "typecheck": "turbo run typecheck",
     "dev": "turbo run dev",
     "check:cloudflare": "node scripts/validate-cloudflare-config.mjs issuer verifier mcp-server admin-api audit-api",
+    "check:cloudflare:gateway": "node scripts/validate-cloudflare-config.mjs issuer verifier mcp-server admin-api audit-api gateway",
     "check:openapi": "node scripts/check-openapi.mjs",
     "deploy:cloudflare": "sh scripts/deploy-cloudflare.sh",
     "smoke:cloudflare": "node scripts/smoke-cloudflare.mjs",

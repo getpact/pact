@@ -3,6 +3,7 @@ main = "src/worker.ts"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = false
+routes = [{ pattern = "issuer.getpact.dev", custom_domain = true }]
 
 [vars]
 ENVIRONMENT = "production"
