@@ -12,9 +12,20 @@ ADMIN_AUDIENCE = "pact-admin"
 UPSTREAM_HOST_ALLOWLIST = "replace-with-approved-upstream-hosts"
 GOOGLE_DRIVE_OAUTH_REDIRECT_URI = "https://app.getpact.dev/v1/connections/google-drive/callback"
 
+[env.local.vars]
+ENVIRONMENT = "development"
+ISSUER_BASE_URL = "http://127.0.0.1:8787"
+ADMIN_AUDIENCE = "pact-admin"
+UPSTREAM_HOST_ALLOWLIST = "example.com"
+GOOGLE_DRIVE_OAUTH_REDIRECT_URI = "http://127.0.0.1:19147/oauth/oidc/callback"
+
 [[kv_namespaces]]
 binding = "REVOCATION_CACHE"
 id = "replace-with-pact-revocation-kv-id"
+
+[[env.local.kv_namespaces]]
+binding = "REVOCATION_CACHE"
+id = "local-pact-revocation-cache"
 
 [observability]
 enabled = true
