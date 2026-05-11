@@ -11,3 +11,6 @@ coverage
 .dev.vars
 apps/*/.dev.vars
 *.tsbuildinfo
+.venv*
+__pycache__
+*.egg-info
