@@ -2,7 +2,7 @@
 
 Snapshot of what is shipped today vs the v1.0 plan in `_bmad-output/planning-artifacts/sprint-plan.md`. Updated as commits land. Useful for design-partner calls so you can answer "what works today" honestly.
 
-Last updated: 2026-05-11.
+Last updated: 2026-05-12.
 
 ## Ready to demo today
 
@@ -10,7 +10,7 @@ Last updated: 2026-05-11.
 - JWT verification with per-workspace JWKS, audience binding, mode binding (verifier)
 - Admin: users, groups, members, policies (versioned), revocations, invites, brains, brain credentials (admin-api)
 - Mode B Proxy: gateway forwards authorized requests to upstream brains, audits attempt and outcome, enforces SSRF guards, path traversal block, redirect block, configurable upstream timeout, request and response header allowlists, bearer credential injection
-- MCP server: tool registry with 4 built-in pact tools, Slack adapter with auth.test + channels.list, Google Drive adapter with files.list + file.get, workspace-scoped tool authorization, optional admin/auditor role guards on policy and audit tools
+- MCP server: tool registry with 4 built-in pact tools, Slack adapter with auth.test + channels.list, Google Drive adapter with files.list + file.get, Drive chunk indexing + lexical search, workspace-scoped tool authorization, optional admin/auditor role guards on policy and audit tools
 - Web dashboard: Google sign-in, Drive connect/disconnect, workspace status, MCP endpoint display, and same-origin `pact.whoami` MCP smoke test
 - Audit chain: hash-linked + Ed25519 signed events, advisory-lock ordered, transactional with mutations (fail-closed)
 - CLI: `pact init`, `pact login` (Google OAuth loopback), `pact refresh`, `pact mcp install` (Claude Code), `pact audit verify`, `pact audit checkpoint`
@@ -22,7 +22,7 @@ Last updated: 2026-05-11.
 
 ## What is not yet shipped
 
-- Drive RAG indexing/search (Drive OAuth, token refresh, and raw file MCP tools are shipped; chunking, embeddings, and retrieval are not)
+- Embedding-based Drive RAG (Drive OAuth, token refresh, raw file MCP tools, per-user chunk indexing, and lexical retrieval are shipped; vector embeddings and ranking are not)
 - Slack rate-limited mode + Marketplace submission (Week 7, not started)
 - Mode B partner SDK integration (Week 8, depends on signed LOI)
 - External invite redemption end-to-end (Week 9, admin POST exists, redeem flow stubbed)

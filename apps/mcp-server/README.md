@@ -25,3 +25,14 @@ Bearer JWT with `aud=pact-mcp` (Mode A). Workspace slug or id in path must match
 ## Adapters
 
 Wired adapters live in `@getpact/adapter-slack` and `@getpact/adapter-drive`; both consume `@getpact/adapter-sdk`. New adapters register tools via `buildToolRegistry`.
+
+## Drive Retrieval
+
+Drive MCP tools require the signed-in user to connect Google Drive in the web dashboard first.
+
+- `pact.drive.files.list` lists files visible to the connected Google account.
+- `pact.drive.file.get` exports one Drive file as text.
+- `pact.drive.file.index` exports a Drive file, chunks text, and stores workspace/user-scoped chunks in Postgres.
+- `pact.drive.search` runs lexical full-text search over indexed chunks and returns snippets for agent context.
+
+This is a minimal retrieval layer, not embedding-based RAG yet. Indexed chunks are scoped by `workspaceId` and `userId`; one user's Drive chunks are not shared with other users in the same workspace.
