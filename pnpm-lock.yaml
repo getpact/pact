@@ -249,6 +249,9 @@ importers:
       '@getpact/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@getpact/ratelimit':
+        specifier: workspace:*
+        version: link:../../packages/ratelimit
       '@getpact/vault':
         specifier: workspace:*
         version: link:../../packages/vault

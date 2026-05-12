@@ -2,6 +2,7 @@ import {
   createDriveAdapter,
   createDriveClient,
   type DriveConnection,
+  type DriveFile,
 } from "@getpact/adapter-drive";
 import {
   type Adapter,
@@ -21,6 +22,7 @@ import {
   workspaceOauthConnections,
   workspaces,
 } from "@getpact/db/schema";
+import { databaseRateLimiter } from "@getpact/ratelimit";
 import { loadSecretString, storeSecret } from "@getpact/vault";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
@@ -197,11 +199,17 @@ const slackAdapter = createSlackAdapter({
 const DRIVE_PROVIDER = "google_drive";
 const DRIVE_SECRET_KIND = "google_drive_oauth";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
-const DRIVE_REFRESH_SKEW_MS = 60_000;
+const DRIVE_REFRESH_SKEW_MS = 5 * 60_000;
 const DRIVE_INDEX_DEFAULT_CHUNK_CHARS = 1200;
 const DRIVE_INDEX_MAX_CHUNK_CHARS = 4000;
 const DRIVE_INDEX_MAX_CHUNKS = 80;
 const DRIVE_INDEX_MAX_CHARS = 250_000;
+const DRIVE_INDEX_FILE_RATE_LIMIT = 10;
+const DRIVE_INDEX_USER_RATE_LIMIT = 30;
+const DRIVE_INDEX_RATE_WINDOW_SECONDS = 10 * 60;
+const DRIVE_SEARCH_RATE_LIMIT = 60;
+const DRIVE_SEARCH_RATE_WINDOW_SECONDS = 10 * 60;
+const DRIVE_SEARCH_MAX_QUERY_CHARS = 200;
 const DRIVE_SEARCH_MAX_LIMIT = 20;
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const allowedDriveScopes = new Set([
@@ -226,9 +234,7 @@ const driveFileIndex: AdapterTool = {
       required: ["fileId"],
       properties: {
         fileId: { type: "string" },
-        fileName: { type: "string" },
         mimeType: { type: "string", enum: ["text/plain", "text/markdown"] },
-        modifiedTime: { type: "string" },
         maxChars: { type: "number", minimum: 1000, maximum: DRIVE_INDEX_MAX_CHARS },
         chunkChars: { type: "number", minimum: 400, maximum: DRIVE_INDEX_MAX_CHUNK_CHARS },
       },
@@ -269,13 +275,21 @@ const driveFileIndex: AdapterTool = {
     );
     const mimeType = stringInput(input, "mimeType") ?? "text/plain";
     const client = createDriveClient({ accessToken: connection.accessToken });
+    const rate = await hitDriveIndexRateLimit(deps.databaseUrl, ctx, fileId);
+    if (!rate.allowed) {
+      return {
+        content: [{ type: "text", text: "Drive indexing rate limit exceeded. Try again later." }],
+        isError: true,
+      };
+    }
+    const metadata = await client.getFile({ fileId });
     const exported = await client.exportText({ fileId, mimeType });
     const text = exported.slice(0, maxChars);
     const chunks = chunkText(text, chunkChars).slice(0, DRIVE_INDEX_MAX_CHUNKS);
     const db = createClient(deps.databaseUrl);
     const now = new Date();
-    const modifiedTime = parseOptionalDate(stringInput(input, "modifiedTime"));
-    const fileName = stringInput(input, "fileName");
+    const modifiedTime = parseOptionalDate(metadata.modifiedTime);
+    const fileName = cleanMetadataString(metadata.name, 300);
 
     await withWorkspace(db, ctx.workspaceId, async (tx) => {
       await tx
@@ -295,7 +309,7 @@ const driveFileIndex: AdapterTool = {
             userId: ctx.userId,
             fileId,
             fileName: fileName ?? null,
-            mimeType,
+            mimeType: metadata.mimeType ?? mimeType,
             modifiedTime,
             chunkIndex: index,
             content: chunk,
@@ -312,6 +326,10 @@ const driveFileIndex: AdapterTool = {
       chunks: chunks.length,
       indexedChars: chunks.reduce((sum, chunk) => sum + chunk.length, 0),
       truncated: exported.length > text.length || chunks.length === DRIVE_INDEX_MAX_CHUNKS,
+      rateLimit: {
+        remaining: rate.remaining,
+        resetAt: new Date(rate.resetAt).toISOString(),
+      },
     });
   },
 };
@@ -329,18 +347,30 @@ const driveSearch: AdapterTool = {
       },
     },
   },
-  authorize: (input, ctx) => {
-    const query = stringInput(input, "query")?.trim().replace(/\s+/g, " ");
-    const queryPart = query ? encodeURIComponent(query).slice(0, 200) : "empty";
+  authorize: (_input, ctx) => {
     return {
       action: "drive.search",
-      resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:search:${queryPart}`,
+      resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:search`,
     };
   },
   async handler(input, ctx, deps) {
-    const query = stringInput(input, "query")?.trim();
+    const query = stringInput(input, "query")?.trim().slice(0, DRIVE_SEARCH_MAX_QUERY_CHARS);
     if (!query) {
       return { content: [{ type: "text", text: "query is required" }], isError: true };
+    }
+    const rate = await hitDriveSearchRateLimit(deps.databaseUrl, ctx);
+    if (!rate.allowed) {
+      return {
+        content: [{ type: "text", text: "Drive search rate limit exceeded. Try again later." }],
+        isError: true,
+      };
+    }
+    const connection = await loadDriveConnection(ctx, deps);
+    if (!connection?.accessToken) {
+      return {
+        content: [{ type: "text", text: "Google Drive is not connected for this user." }],
+        isError: true,
+      };
     }
     const limit = clampNumber(numberInput(input, "limit"), 1, DRIVE_SEARCH_MAX_LIMIT, 5);
     const db = createClient(deps.databaseUrl);
@@ -369,13 +399,21 @@ const driveSearch: AdapterTool = {
       indexedAt: Date | string;
       rank: number;
     }>;
+    const accessibleRows = await filterAccessibleDriveRows(
+      createDriveClient({ accessToken: connection.accessToken }),
+      rows,
+    );
 
     return json({
       query,
-      results: rows.map((row) => ({
+      rateLimit: {
+        remaining: rate.remaining,
+        resetAt: new Date(rate.resetAt).toISOString(),
+      },
+      results: accessibleRows.map(({ row, metadata }) => ({
         fileId: row.fileId,
-        fileName: row.fileName,
-        mimeType: row.mimeType,
+        fileName: metadata.name ?? row.fileName,
+        mimeType: metadata.mimeType ?? row.mimeType,
         chunkIndex: row.chunkIndex,
         snippet: snippetFor(row.content, query),
         rank: row.rank,
@@ -390,7 +428,11 @@ const driveRagAdapter: Adapter = {
   tools: [driveFileIndex, driveSearch],
 };
 
-const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter, driveAdapter, driveRagAdapter];
+const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter, driveAdapter];
+
+export function isDriveRagEnabled(providerConfig?: Record<string, string | undefined>): boolean {
+  return providerConfig?.DRIVE_RAG_ENABLED === "true";
+}
 
 function parseDriveConnection(value: string | null): DriveConnection | null {
   if (!value) return null;
@@ -709,6 +751,55 @@ function parseOptionalDate(value: string | undefined): Date | null {
   return Number.isFinite(ms) ? new Date(ms) : null;
 }
 
+function cleanMetadataString(value: string | undefined, max: number): string | undefined {
+  if (!value) return undefined;
+  const cleaned = [...value]
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code < 32 || code === 127 ? " " : char;
+    })
+    .join("")
+    .trim()
+    .slice(0, max);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+async function hitDriveIndexRateLimit(
+  databaseUrl: string,
+  ctx: AdapterContext,
+  fileId: string,
+): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+  const limiter = databaseRateLimiter(databaseUrl);
+  const [user, file] = await Promise.all([
+    limiter.hit(
+      `mcp::drive-index::${ctx.workspaceId}::${ctx.userId}`,
+      DRIVE_INDEX_USER_RATE_LIMIT,
+      DRIVE_INDEX_RATE_WINDOW_SECONDS,
+    ),
+    limiter.hit(
+      `mcp::drive-index::${ctx.workspaceId}::${ctx.userId}::${fileId}`,
+      DRIVE_INDEX_FILE_RATE_LIMIT,
+      DRIVE_INDEX_RATE_WINDOW_SECONDS,
+    ),
+  ]);
+  return {
+    allowed: user.allowed && file.allowed,
+    remaining: Math.min(user.remaining, file.remaining),
+    resetAt: Math.max(user.resetAt, file.resetAt),
+  };
+}
+
+async function hitDriveSearchRateLimit(
+  databaseUrl: string,
+  ctx: AdapterContext,
+): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+  return databaseRateLimiter(databaseUrl).hit(
+    `mcp::drive-search::${ctx.workspaceId}::${ctx.userId}`,
+    DRIVE_SEARCH_RATE_LIMIT,
+    DRIVE_SEARCH_RATE_WINDOW_SECONDS,
+  );
+}
+
 function chunkText(input: string, chunkChars: number): string[] {
   const normalized = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (!normalized) return [];
@@ -735,6 +826,32 @@ function formatTimestamp(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+async function filterAccessibleDriveRows<T extends { fileId: string }>(
+  client: ReturnType<typeof createDriveClient>,
+  rows: T[],
+): Promise<Array<{ row: T; metadata: DriveFile }>> {
+  const metadataByFile = new Map<string, DriveFile | null>();
+  const fileIds = [...new Set(rows.map((row) => row.fileId))];
+  await Promise.all(
+    fileIds.map(async (fileId) => {
+      try {
+        metadataByFile.set(fileId, await client.getFile({ fileId }));
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "";
+        if (message.includes("(403)") || message.includes("(404)")) {
+          metadataByFile.set(fileId, null);
+          return;
+        }
+        throw e;
+      }
+    }),
+  );
+  return rows.flatMap((row) => {
+    const metadata = metadataByFile.get(row.fileId);
+    return metadata ? [{ row, metadata }] : [];
+  });
+}
+
 function snippetFor(content: string, query: string): string {
   const terms = query
     .toLowerCase()
@@ -742,9 +859,11 @@ function snippetFor(content: string, query: string): string {
     .map((term) => term.replace(/[^a-z0-9_-]/g, ""))
     .filter(Boolean);
   const lower = content.toLowerCase();
-  const firstHit = terms.map((term) => lower.indexOf(term)).find((idx) => idx >= 0) ?? 0;
-  const start = Math.max(0, firstHit - 180);
-  const end = Math.min(content.length, firstHit + 420);
+  const hits = terms.map((term) => lower.indexOf(term)).filter((idx) => idx >= 0);
+  const anchor =
+    hits.length > 1 ? Math.floor((Math.min(...hits) + Math.max(...hits)) / 2) : (hits[0] ?? 0);
+  const start = Math.max(0, anchor - 240);
+  const end = Math.min(content.length, anchor + 360);
   return content.slice(start, end).trim();
 }
 
@@ -752,7 +871,15 @@ export const createToolRegistry = (
   adapters: Adapter[] = defaultAdapters,
 ): Map<string, AdapterTool> => buildToolRegistry(adapters);
 
-export const registry: Map<string, AdapterTool> = createToolRegistry();
+export const createConfiguredToolRegistry = (
+  providerConfig?: Record<string, string | undefined>,
+): Map<string, AdapterTool> =>
+  createToolRegistry([
+    ...defaultAdapters,
+    ...(isDriveRagEnabled(providerConfig) ? [driveRagAdapter] : []),
+  ]);
+
+export const registry: Map<string, AdapterTool> = createConfiguredToolRegistry();
 
 export const listTools = (toolRegistry: Map<string, AdapterTool> = registry): ToolDescriptor[] =>
   [...toolRegistry.values()].map((t) => t.descriptor);

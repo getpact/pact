@@ -9,12 +9,14 @@ routes = [{ pattern = "mcp.getpact.dev", custom_domain = true }]
 ENVIRONMENT = "production"
 ISSUER_BASE_URL = "https://issuer.getpact.dev"
 MCP_AUDIENCE = "pact-mcp"
+DRIVE_RAG_ENABLED = "false"
 
 [env.local.vars]
 ENVIRONMENT = "development"
 ISSUER_BASE_URL = "http://127.0.0.1:8787"
 MCP_AUDIENCE = "pact-mcp"
 VERIFIER_URL = "http://127.0.0.1:8789"
+DRIVE_RAG_ENABLED = "true"
 
 [[services]]
 binding = "VERIFIER_SERVICE"

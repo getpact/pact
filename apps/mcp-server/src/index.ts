@@ -20,6 +20,7 @@ type Env = {
   GOOGLE_OAUTH_CLIENT_ID?: string;
   GOOGLE_OAUTH_CLIENT_SECRET?: string;
   GOOGLE_OAUTH_TOKEN_ENDPOINT?: string;
+  DRIVE_RAG_ENABLED?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -84,6 +85,7 @@ app.post("/:workspace/mcp", async (c) => {
         GOOGLE_OAUTH_CLIENT_ID: c.env.GOOGLE_OAUTH_CLIENT_ID,
         GOOGLE_OAUTH_CLIENT_SECRET: c.env.GOOGLE_OAUTH_CLIENT_SECRET,
         GOOGLE_OAUTH_TOKEN_ENDPOINT: c.env.GOOGLE_OAUTH_TOKEN_ENDPOINT,
+        DRIVE_RAG_ENABLED: c.env.DRIVE_RAG_ENABLED,
       },
     },
     ...(verify ? { verify } : {}),

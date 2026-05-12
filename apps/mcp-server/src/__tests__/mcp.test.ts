@@ -275,7 +275,7 @@ run("mcp server", () => {
     slug: string,
     token: string,
     body: unknown,
-    env: { DATABASE_URL: string },
+    env: { DATABASE_URL: string; DRIVE_RAG_ENABLED?: string },
   ) =>
     app.request(
       `/${slug}/mcp`,
@@ -353,8 +353,24 @@ run("mcp server", () => {
     expect(names).toContain("pact.slack.auth.test");
     expect(names).toContain("pact.drive.files.list");
     expect(names).toContain("pact.drive.file.get");
-    expect(names).toContain("pact.drive.file.index");
-    expect(names).toContain("pact.drive.search");
+    expect(names).not.toContain("pact.drive.file.index");
+    expect(names).not.toContain("pact.drive.search");
+
+    const enabledRes = await callMcp(
+      slug,
+      token,
+      { jsonrpc: "2.0", id: 3, method: "tools/list" },
+      {
+        DATABASE_URL: env.DATABASE_URL,
+        DRIVE_RAG_ENABLED: "true",
+      },
+    );
+    const enabledBody = (await enabledRes.json()) as {
+      result: { tools: Array<{ name: string }> };
+    };
+    const enabledNames = enabledBody.result.tools.map((t) => t.name);
+    expect(enabledNames).toContain("pact.drive.file.index");
+    expect(enabledNames).toContain("pact.drive.search");
   });
 
   it("does not expose orphaned Drive vault secrets without active connection metadata", async () => {
@@ -499,6 +515,14 @@ run("mcp server", () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(input, init);
         expect(request.headers.get("authorization")).toBe("Bearer active-drive-token");
+        if (request.url.includes("/files/doc_1?")) {
+          return Response.json({
+            id: "doc_1",
+            name: "Customer Notes",
+            mimeType: "application/vnd.google-apps.document",
+            modifiedTime: "2026-05-12T10:00:00.000Z",
+          });
+        }
         return new Response(
           [
             "Pact customer notes",
@@ -523,7 +547,11 @@ run("mcp server", () => {
         jti: "jti-1",
         token: "token-1",
       };
-      const deps = { databaseUrl: env.DATABASE_URL, rawMek };
+      const deps = {
+        databaseUrl: env.DATABASE_URL,
+        rawMek,
+        providerConfig: { DRIVE_RAG_ENABLED: "true" },
+      };
       const indexed = await handleMcp(
         {
           jsonrpc: "2.0",
@@ -550,6 +578,51 @@ run("mcp server", () => {
         (indexed.result as { content: Array<{ text: string }> }).content[0]?.text ?? "{}",
       ) as { chunks: number };
       expect(indexResult.chunks).toBeGreaterThan(1);
+
+      for (let i = 0; i < 9; i += 1) {
+        const repeated = await handleMcp(
+          {
+            jsonrpc: "2.0",
+            id: 180 + i,
+            method: "tools/call",
+            params: {
+              name: "pact.drive.file.index",
+              arguments: { fileId: "doc_1", chunkChars: 80 },
+            },
+          },
+          ctx,
+          {
+            audience: env.MCP_AUDIENCE,
+            verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+            deps,
+          },
+        );
+        expect(repeated.error).toBeUndefined();
+      }
+
+      const limited = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 199,
+          method: "tools/call",
+          params: {
+            name: "pact.drive.file.index",
+            arguments: { fileId: "doc_1", chunkChars: 80 },
+          },
+        },
+        ctx,
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps,
+        },
+      );
+      expect(limited.error).toBeUndefined();
+      expect(
+        (limited.result as { content: Array<{ text: string }>; isError?: boolean }).content[0]
+          ?.text,
+      ).toBe("Drive indexing rate limit exceeded. Try again later.");
+      expect((limited.result as { isError?: boolean }).isError).toBe(true);
 
       const stored = await withWorkspace(adminDb, created.workspaceId, (tx) =>
         tx
@@ -583,6 +656,34 @@ run("mcp server", () => {
       expect(searchResult.results[0]?.fileId).toBe("doc_1");
       expect(searchResult.results[0]?.snippet).toContain("searchable agent context");
 
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ error: { message: "not found" } }, { status: 404 })),
+      );
+      const inaccessibleSearch = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 21,
+          method: "tools/call",
+          params: {
+            name: "pact.drive.search",
+            arguments: { query: "searchable agent context", limit: 3 },
+          },
+        },
+        ctx,
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps,
+        },
+      );
+      expect(inaccessibleSearch.error).toBeUndefined();
+      const inaccessibleSearchResult = JSON.parse(
+        (inaccessibleSearch.result as { content: Array<{ text: string }> }).content[0]?.text ??
+          "{}",
+      ) as { results: unknown[] };
+      expect(inaccessibleSearchResult.results).toEqual([]);
+
       const otherUserSearch = await handleMcp(
         {
           jsonrpc: "2.0",
@@ -607,10 +708,13 @@ run("mcp server", () => {
         },
       );
       expect(otherUserSearch.error).toBeUndefined();
-      const otherUserSearchResult = JSON.parse(
-        (otherUserSearch.result as { content: Array<{ text: string }> }).content[0]?.text ?? "{}",
-      ) as { results: unknown[] };
-      expect(otherUserSearchResult.results).toEqual([]);
+      expect(
+        (otherUserSearch.result as { content: Array<{ text: string }>; isError?: boolean })
+          .content[0]?.text,
+      ).toBe("Google Drive is not connected for this user.");
+      expect(
+        (otherUserSearch.result as { content: Array<{ text: string }>; isError?: boolean }).isError,
+      ).toBe(true);
     } finally {
       vi.unstubAllGlobals();
     }

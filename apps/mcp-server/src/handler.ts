@@ -1,6 +1,6 @@
 import { defaultToolAuthorization } from "@getpact/adapter-sdk";
 import type { AuthContext } from "./auth.js";
-import { listTools, registry, type Tool, type ToolDeps } from "./tools.js";
+import { createConfiguredToolRegistry, listTools, type Tool, type ToolDeps } from "./tools.js";
 import type { VerifyClient } from "./verify-client.js";
 
 type JsonRpcRequest = {
@@ -47,7 +47,7 @@ export const handleMcp = async (
   opts: HandleOptions,
 ): Promise<JsonRpcResponse> => {
   const id = body.id ?? null;
-  const toolRegistry = opts.registry ?? registry;
+  const toolRegistry = opts.registry ?? createConfiguredToolRegistry(opts.deps.providerConfig);
   switch (body.method) {
     case "initialize":
       return ok(id, {
