@@ -10,7 +10,8 @@ Last updated: 2026-05-11.
 - JWT verification with per-workspace JWKS, audience binding, mode binding (verifier)
 - Admin: users, groups, members, policies (versioned), revocations, invites, brains, brain credentials (admin-api)
 - Mode B Proxy: gateway forwards authorized requests to upstream brains, audits attempt and outcome, enforces SSRF guards, path traversal block, redirect block, configurable upstream timeout, request and response header allowlists, bearer credential injection
-- MCP server: tool registry with 4 built-in pact tools, Slack adapter with auth.test + channels.list, workspace-scoped tool authorization, optional admin/auditor role guards on policy and audit tools
+- MCP server: tool registry with 4 built-in pact tools, Slack adapter with auth.test + channels.list, Google Drive adapter with files.list + file.get, workspace-scoped tool authorization, optional admin/auditor role guards on policy and audit tools
+- Web dashboard: Google sign-in, Drive connect/disconnect, workspace status, MCP endpoint display, and same-origin `pact.whoami` MCP smoke test
 - Audit chain: hash-linked + Ed25519 signed events, advisory-lock ordered, transactional with mutations (fail-closed)
 - CLI: `pact init`, `pact login` (Google OAuth loopback), `pact refresh`, `pact mcp install` (Claude Code), `pact audit verify`, `pact audit checkpoint`
 - Vault: per-secret DEK + AAD-bound MEK wrap; brain credentials keyed by brain id; refresh + rotate paths
@@ -21,7 +22,7 @@ Last updated: 2026-05-11.
 
 ## What is not yet shipped
 
-- Drive adapter (planned Week 6 in sprint plan, not started)
+- Drive RAG indexing/search (Drive OAuth, token refresh, and raw file MCP tools are shipped; chunking, embeddings, and retrieval are not)
 - Slack rate-limited mode + Marketplace submission (Week 7, not started)
 - Mode B partner SDK integration (Week 8, depends on signed LOI)
 - External invite redemption end-to-end (Week 9, admin POST exists, redeem flow stubbed)
