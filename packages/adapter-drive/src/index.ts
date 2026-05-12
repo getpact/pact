@@ -39,6 +39,7 @@ export type DriveClient = {
     pageToken?: string;
     q?: string;
   }): Promise<DriveListFilesResponse>;
+  getFile(input: { fileId: string }): Promise<DriveFile>;
   exportText(input: { fileId: string; mimeType?: string }): Promise<string>;
 };
 
@@ -95,6 +96,17 @@ export function createDriveClient(options: DriveClientOptions): DriveClient {
       return result;
     },
 
+    async getFile(input) {
+      assertSafeFileId(input.fileId);
+      const url = new URL(`${apiBaseUrl}/files/${input.fileId}`);
+      url.searchParams.set("fields", "id,name,mimeType,modifiedTime,size,webViewLink");
+      const body = (await (await driveFetch(url)).json()) as DriveFile;
+      if (typeof body.id !== "string" || body.id.length === 0) {
+        throw new Error("Google Drive API returned invalid file metadata");
+      }
+      return body;
+    },
+
     async exportText(input) {
       assertSafeFileId(input.fileId);
       const url = new URL(`${apiBaseUrl}/files/${input.fileId}/export`);
@@ -121,12 +133,10 @@ export function createDriveAdapter(options: DriveAdapterOptions = {}): Adapter {
         },
       },
     },
-    authorize: (args, ctx) => {
-      const q = stringInput(args, "q")?.trim().replace(/\s+/g, " ");
-      const queryPart = q ? `:query:${encodeURIComponent(q).slice(0, 200)}` : "";
+    authorize: (_args, ctx) => {
       return {
         action: "drive.files.list",
-        resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:files${queryPart}`,
+        resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:files`,
       };
     },
     async handler(input, ctx, deps) {
@@ -231,7 +241,7 @@ async function driveError(response: Response): Promise<string> {
   if (contentType.includes("application/json")) {
     const body = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
     if (body.error?.message) {
-      return `Google Drive API failed: ${body.error.message}`;
+      return `Google Drive API failed (${response.status}): ${body.error.message}`;
     }
   }
   return `Google Drive API failed with HTTP ${response.status}`;

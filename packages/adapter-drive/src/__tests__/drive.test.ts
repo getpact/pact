@@ -45,6 +45,30 @@ describe("createDriveClient", () => {
     expect(urls[0]).toContain("/files/abc_123/export");
     expect(urls[0]).toContain("mimeType=text%2Fplain");
   });
+
+  it("loads file metadata with bearer auth", async () => {
+    const requests: Request[] = [];
+    const client = createDriveClient({
+      accessToken: "drive-token",
+      apiBaseUrl: "https://drive.example/v3",
+      fetch: async (input, init) => {
+        requests.push(new Request(input, init));
+        return Response.json({
+          id: "file_1",
+          name: "Plan",
+          mimeType: "application/vnd.google-apps.document",
+          modifiedTime: "2026-05-12T10:00:00.000Z",
+        });
+      },
+    });
+
+    await expect(client.getFile({ fileId: "file_1" })).resolves.toMatchObject({
+      id: "file_1",
+      name: "Plan",
+    });
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer drive-token");
+    expect(requests[0]?.url).toContain("/files/file_1?");
+  });
 });
 
 describe("createDriveAdapter", () => {
@@ -124,6 +148,7 @@ describe("createDriveAdapter", () => {
       loadConnection: async () => connection,
       createClient: () => ({
         listFiles: async () => ({ files: [] }),
+        getFile: async () => ({ id: "file_1", name: "File" }),
         exportText: async () => "abcdef",
       }),
     });
