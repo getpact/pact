@@ -193,7 +193,7 @@ run("google oidc exchange", () => {
           code: "real-google-auth-code",
           codeVerifier: `v${"x".repeat(43)}`,
           redirectUri: "https://app.test/v1/auth/google/callback",
-          audiences: ["pact-admin", "pact-audit"],
+          audiences: ["pact-admin", "pact-audit", "pact-mcp"],
         }),
       },
       env,
@@ -205,6 +205,8 @@ run("google oidc exchange", () => {
     };
     expect(body.tokens["pact-admin"]?.token.split(".").length).toBe(3);
     expect(body.tokens["pact-audit"]?.token.split(".").length).toBe(3);
+    expect(body.tokens["pact-mcp"]?.token.split(".").length).toBe(3);
+    expect(body.tokens["pact-mcp"]?.refreshToken.length).toBeGreaterThan(20);
     expect(body.tokens["pact-admin"]?.refreshToken).not.toBe(
       body.tokens["pact-audit"]?.refreshToken,
     );
