@@ -877,6 +877,244 @@ describe("web dashboard auth", () => {
     });
   });
 
+  it("lists Drive files through the MCP dashboard BFF", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(requestUrl(input)).toBe(`https://mcp.test/${workspaceId}/mcp`);
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer mcp-token");
+        expect(await new Request(input, init).json()).toEqual({
+          jsonrpc: "2.0",
+          id: "drive-files",
+          method: "tools/call",
+          params: {
+            name: "pact.drive.files.list",
+            arguments: { pageSize: 20 },
+          },
+        });
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "drive-files",
+          result: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  files: [
+                    {
+                      id: "doc_1",
+                      name: "Customer Notes",
+                      mimeType: "application/vnd.google-apps.document",
+                      modifiedTime: "2026-05-12T10:00:00.000Z",
+                    },
+                  ],
+                }),
+              },
+            ],
+          },
+        });
+      }),
+    );
+    const res = await app.request(
+      "/v1/drive/files",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.test",
+          "content-type": "application/json",
+          "x-pact-csrf": "csrf-1",
+          cookie: [
+            "__Host-pact-mcp-access=mcp-token",
+            `__Host-pact-workspace=${workspaceId}`,
+            "__Host-pact-csrf=csrf-1",
+          ].join(";"),
+        },
+        body: JSON.stringify({ pageSize: 100 }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      files: [
+        {
+          id: "doc_1",
+          name: "Customer Notes",
+          mimeType: "application/vnd.google-apps.document",
+          modifiedTime: "2026-05-12T10:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  it("requires CSRF before Drive retrieval routes call MCP", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await app.request(
+      "/v1/drive/index",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.test",
+          "content-type": "application/json",
+          cookie: [
+            "__Host-pact-mcp-access=mcp-token",
+            `__Host-pact-workspace=${workspaceId}`,
+            "__Host-pact-csrf=csrf-1",
+          ].join(";"),
+        },
+        body: JSON.stringify({ fileId: "doc_1" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("indexes a Drive file through the MCP dashboard BFF", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(requestUrl(input)).toBe(`https://mcp.test/${workspaceId}/mcp`);
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer mcp-token");
+        expect(await new Request(input, init).json()).toEqual({
+          jsonrpc: "2.0",
+          id: "drive-index",
+          method: "tools/call",
+          params: {
+            name: "pact.drive.file.index",
+            arguments: {
+              fileId: "doc_1",
+              fileName: "Customer Notes",
+              mimeType: "text/plain",
+              modifiedTime: "2026-05-12T10:00:00.000Z",
+            },
+          },
+        });
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "drive-index",
+          result: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  fileId: "doc_1",
+                  fileName: "Customer Notes",
+                  chunks: 3,
+                  indexedChars: 2500,
+                  truncated: false,
+                }),
+              },
+            ],
+          },
+        });
+      }),
+    );
+    const res = await app.request(
+      "/v1/drive/index",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.test",
+          "content-type": "application/json",
+          "x-pact-csrf": "csrf-1",
+          cookie: [
+            "__Host-pact-mcp-access=mcp-token",
+            `__Host-pact-workspace=${workspaceId}`,
+            "__Host-pact-csrf=csrf-1",
+          ].join(";"),
+        },
+        body: JSON.stringify({
+          fileId: "doc_1",
+          fileName: "Customer Notes",
+          modifiedTime: "2026-05-12T10:00:00.000Z",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      fileId: "doc_1",
+      fileName: "Customer Notes",
+      chunks: 3,
+      indexedChars: 2500,
+      truncated: false,
+    });
+  });
+
+  it("searches indexed Drive context through the MCP dashboard BFF", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(requestUrl(input)).toBe(`https://mcp.test/${workspaceId}/mcp`);
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer mcp-token");
+        expect(await new Request(input, init).json()).toEqual({
+          jsonrpc: "2.0",
+          id: "drive-search",
+          method: "tools/call",
+          params: {
+            name: "pact.drive.search",
+            arguments: { query: "customer notes", limit: 10 },
+          },
+        });
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "drive-search",
+          result: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  query: "customer notes",
+                  results: [
+                    {
+                      fileId: "doc_1",
+                      fileName: "Customer Notes",
+                      chunkIndex: 0,
+                      snippet: "customer notes mention agent context",
+                      indexedAt: "2026-05-12T10:01:00.000Z",
+                    },
+                  ],
+                }),
+              },
+            ],
+          },
+        });
+      }),
+    );
+    const res = await app.request(
+      "/v1/drive/search",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.test",
+          "content-type": "application/json",
+          "x-pact-csrf": "csrf-1",
+          cookie: [
+            "__Host-pact-mcp-access=mcp-token",
+            `__Host-pact-workspace=${workspaceId}`,
+            "__Host-pact-csrf=csrf-1",
+          ].join(";"),
+        },
+        body: JSON.stringify({ query: " customer   notes ", limit: 50 }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      query: "customer notes",
+      results: [
+        {
+          fileId: "doc_1",
+          fileName: "Customer Notes",
+          chunkIndex: 0,
+          snippet: "customer notes mention agent context",
+          indexedAt: "2026-05-12T10:01:00.000Z",
+        },
+      ],
+    });
+  });
+
   it("rotates MCP refresh cookie when smoke test retries after 401", async () => {
     const calls: string[] = [];
     vi.stubGlobal(

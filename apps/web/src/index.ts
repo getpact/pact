@@ -581,6 +581,170 @@ const bearerFetch = async (url: string, token: string, init: RequestInit = {}): 
 const mcpEndpoint = (env: Env, workspaceId: string): string | null =>
   env.MCP_SERVER_BASE_URL ? `${baseUrl(env.MCP_SERVER_BASE_URL)}/${workspaceId}/mcp` : null;
 
+type McpPayload = {
+  jsonrpc?: unknown;
+  id?: unknown;
+  result?: unknown;
+  error?: { code?: unknown; message?: unknown };
+};
+
+type McpToolCall = {
+  endpoint: string;
+  payload: McpPayload;
+};
+
+const mcpResponseCookieMaxAge = (token: TokenResponse): number => {
+  const now = Math.floor(Date.now() / 1000);
+  return Math.max(token.exp - now, 1);
+};
+
+const mcpRefreshCookieMaxAge = (token: TokenResponse): number => {
+  const refreshExp = token.refreshExpiresAt
+    ? Math.floor(Date.parse(token.refreshExpiresAt) / 1000)
+    : null;
+  return refreshExp && Number.isFinite(refreshExp)
+    ? Math.max(refreshExp - Math.floor(Date.now() / 1000), 1)
+    : THIRTY_DAYS;
+};
+
+const sanitizeMcpPayload = (body: unknown): McpPayload => {
+  const payload = body as McpPayload;
+  const sanitized: McpPayload = {
+    jsonrpc: payload.jsonrpc === "2.0" ? "2.0" : undefined,
+    id: typeof payload.id === "string" || typeof payload.id === "number" ? payload.id : undefined,
+  };
+  if (payload.error) {
+    sanitized.error = {
+      code: typeof payload.error.code === "number" ? payload.error.code : undefined,
+      message: typeof payload.error.message === "string" ? payload.error.message : "MCP error",
+    };
+  } else {
+    sanitized.result = payload.result ?? null;
+  }
+  return sanitized;
+};
+
+const callMcpTool = async (
+  c: AppContext,
+  input: { name: string; arguments?: Record<string, unknown>; id?: string | number },
+): Promise<
+  | { ok: true; value: McpToolCall }
+  | { ok: false; body: Record<string, unknown>; status: 401 | 502 | 503 }
+> => {
+  const cookies = sessionCookies(c);
+  let token = cookies[MCP_ACCESS_COOKIE];
+  const workspaceId = cookies[WORKSPACE_COOKIE];
+  if (!token || !workspaceId || !isUuid(workspaceId)) {
+    return { ok: false, body: { error: "not_authenticated" }, status: 401 };
+  }
+  const endpoint = mcpEndpoint(c.env, workspaceId);
+  if (!endpoint) {
+    return {
+      ok: false,
+      body: { error: "misconfigured", message: "MCP server URL is not configured" },
+      status: 503,
+    };
+  }
+  const requestMcp = () =>
+    bearerFetch(endpoint, token as string, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: input.id ?? 1,
+        method: "tools/call",
+        params: { name: input.name, arguments: input.arguments ?? {} },
+      }),
+    });
+
+  let response = await requestMcp();
+  if (response.status === 401 && cookies[MCP_REFRESH_COOKIE]) {
+    const refreshed = await refreshPactToken(
+      c.env,
+      workspaceId,
+      cookies[MCP_REFRESH_COOKIE],
+      MCP_AUDIENCE,
+    );
+    if (refreshed) {
+      token = refreshed.token;
+      appendCookie(
+        c,
+        cookie(MCP_ACCESS_COOKIE, refreshed.token, {
+          env: c.env,
+          httpOnly: true,
+          maxAge: mcpResponseCookieMaxAge(refreshed),
+        }),
+      );
+      appendCookie(
+        c,
+        cookie(MCP_REFRESH_COOKIE, refreshed.refreshToken, {
+          env: c.env,
+          httpOnly: true,
+          maxAge: mcpRefreshCookieMaxAge(refreshed),
+        }),
+      );
+      response = await requestMcp();
+    }
+  }
+
+  const body = (await response.json().catch(() => ({}))) as unknown;
+  if (response.status === 401) {
+    return { ok: false, body: { error: "not_authenticated" }, status: 401 };
+  }
+  if (!response.ok) {
+    return { ok: false, body: { error: "mcp_unavailable", status: response.status }, status: 502 };
+  }
+  return { ok: true, value: { endpoint, payload: sanitizeMcpPayload(body) } };
+};
+
+const mcpToolText = (
+  payload: McpPayload,
+): { ok: true; text: string } | { ok: false; message: string } => {
+  if (payload.error) {
+    return {
+      ok: false,
+      message:
+        typeof payload.error.message === "string" ? payload.error.message : "MCP tool call failed",
+    };
+  }
+  const result = payload.result as {
+    content?: Array<{ type?: unknown; text?: unknown }>;
+    isError?: unknown;
+  } | null;
+  const text = result?.content?.find(
+    (item) => item.type === "text" && typeof item.text === "string",
+  )?.text as string | undefined;
+  if (!text) return { ok: false, message: "MCP tool returned no text content" };
+  if (result?.isError) return { ok: false, message: text };
+  return { ok: true, text };
+};
+
+const mcpToolJson = <T>(
+  payload: McpPayload,
+): { ok: true; value: T } | { ok: false; message: string } => {
+  const text = mcpToolText(payload);
+  if (!text.ok) return text;
+  try {
+    return { ok: true, value: JSON.parse(text.text) as T };
+  } catch {
+    return { ok: false, message: "MCP tool returned malformed JSON" };
+  }
+};
+
+const stringValue = (value: unknown, max = 500): string | undefined =>
+  typeof value === "string"
+    ? [...value]
+        .map((char) => {
+          const code = char.charCodeAt(0);
+          return code < 32 || code === 127 ? " " : char;
+        })
+        .join("")
+        .slice(0, max)
+    : undefined;
+
+const isSafeDriveFileId = (value: unknown): value is string =>
+  typeof value === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(value);
+
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (char) => {
     switch (char) {
@@ -1105,89 +1269,136 @@ app.get("/v1/workspace/status", async (c) => {
   });
 });
 
+app.post("/v1/drive/files", async (c) => {
+  if (!requireCsrf(c)) return c.json({ error: "csrf" }, 403);
+  const body = await c.req
+    .json<{ pageToken?: unknown; pageSize?: unknown }>()
+    .catch((): { pageToken?: unknown; pageSize?: unknown } => ({}));
+  const pageSize =
+    typeof body.pageSize === "number" && Number.isFinite(body.pageSize)
+      ? Math.max(1, Math.min(20, Math.floor(body.pageSize)))
+      : 10;
+  const args: Record<string, unknown> = { pageSize };
+  const pageToken = stringValue(body.pageToken, 500);
+  if (pageToken) args.pageToken = pageToken;
+
+  const called = await callMcpTool(c, {
+    id: "drive-files",
+    name: "pact.drive.files.list",
+    arguments: args,
+  });
+  if (!called.ok) return c.json(called.body, called.status);
+
+  const parsed = mcpToolJson<{
+    files?: Array<Record<string, unknown>>;
+    nextPageToken?: unknown;
+  }>(called.value.payload);
+  if (!parsed.ok) return c.json({ error: "drive_files_failed", message: parsed.message }, 502);
+  const files = Array.isArray(parsed.value.files)
+    ? parsed.value.files
+        .map((file) => ({
+          id: stringValue(file.id, 256),
+          name: stringValue(file.name, 300),
+          mimeType: stringValue(file.mimeType, 200),
+          modifiedTime: stringValue(file.modifiedTime, 80),
+          size: stringValue(file.size, 40),
+        }))
+        .filter((file) => isSafeDriveFileId(file.id))
+    : [];
+
+  return c.json({ files });
+});
+
+app.post("/v1/drive/index", async (c) => {
+  if (!requireCsrf(c)) return c.json({ error: "csrf" }, 403);
+  const body = await c.req
+    .json<{ fileId?: unknown; fileName?: unknown; modifiedTime?: unknown }>()
+    .catch((): { fileId?: unknown; fileName?: unknown; modifiedTime?: unknown } => ({}));
+  if (!isSafeDriveFileId(body.fileId)) {
+    return c.json({ error: "invalid_file", message: "Choose a valid Drive file." }, 400);
+  }
+  const args: Record<string, unknown> = {
+    fileId: body.fileId,
+    mimeType: "text/plain",
+  };
+  const fileName = stringValue(body.fileName, 300);
+  const modifiedTime = stringValue(body.modifiedTime, 80);
+  if (fileName) args.fileName = fileName;
+  if (modifiedTime) args.modifiedTime = modifiedTime;
+
+  const called = await callMcpTool(c, {
+    id: "drive-index",
+    name: "pact.drive.file.index",
+    arguments: args,
+  });
+  if (!called.ok) return c.json(called.body, called.status);
+
+  const parsed = mcpToolJson<{
+    fileId?: unknown;
+    fileName?: unknown;
+    chunks?: unknown;
+    indexedChars?: unknown;
+    truncated?: unknown;
+  }>(called.value.payload);
+  if (!parsed.ok) return c.json({ error: "drive_index_failed", message: parsed.message }, 502);
+  return c.json({
+    fileId: stringValue(parsed.value.fileId, 256) ?? body.fileId,
+    fileName: stringValue(parsed.value.fileName, 300) ?? fileName ?? null,
+    chunks: typeof parsed.value.chunks === "number" ? parsed.value.chunks : 0,
+    indexedChars: typeof parsed.value.indexedChars === "number" ? parsed.value.indexedChars : 0,
+    truncated: parsed.value.truncated === true,
+  });
+});
+
+app.post("/v1/drive/search", async (c) => {
+  if (!requireCsrf(c)) return c.json({ error: "csrf" }, 403);
+  const body = await c.req
+    .json<{ query?: unknown; limit?: unknown }>()
+    .catch((): { query?: unknown; limit?: unknown } => ({}));
+  const query = stringValue(body.query, 200)?.trim().replace(/\s+/g, " ");
+  if (!query) {
+    return c.json({ error: "invalid_query", message: "Enter a search query." }, 400);
+  }
+  const limit =
+    typeof body.limit === "number" && Number.isFinite(body.limit)
+      ? Math.max(1, Math.min(10, Math.floor(body.limit)))
+      : 5;
+  const called = await callMcpTool(c, {
+    id: "drive-search",
+    name: "pact.drive.search",
+    arguments: { query, limit },
+  });
+  if (!called.ok) return c.json(called.body, called.status);
+
+  const parsed = mcpToolJson<{
+    query?: unknown;
+    results?: Array<Record<string, unknown>>;
+  }>(called.value.payload);
+  if (!parsed.ok) return c.json({ error: "drive_search_failed", message: parsed.message }, 502);
+  const results = Array.isArray(parsed.value.results)
+    ? parsed.value.results
+        .map((item) => ({
+          fileId: stringValue(item.fileId, 256),
+          fileName: stringValue(item.fileName, 300),
+          mimeType: stringValue(item.mimeType, 200),
+          chunkIndex: typeof item.chunkIndex === "number" ? item.chunkIndex : null,
+          snippet: stringValue(item.snippet, 700) ?? "",
+          indexedAt: stringValue(item.indexedAt, 80),
+        }))
+        .filter((item) => isSafeDriveFileId(item.fileId))
+    : [];
+  return c.json({ query, results });
+});
+
 app.post("/v1/mcp/test", async (c) => {
   if (!requireCsrf(c)) return c.json({ error: "csrf" }, 403);
-  const cookies = sessionCookies(c);
-  let token = cookies[MCP_ACCESS_COOKIE];
-  const workspaceId = cookies[WORKSPACE_COOKIE];
-  if (!token || !workspaceId || !isUuid(workspaceId)) {
-    return c.json({ error: "not_authenticated" }, 401);
-  }
-  const endpoint = mcpEndpoint(c.env, workspaceId);
-  if (!endpoint) {
-    return c.json({ error: "misconfigured", message: "MCP server URL is not configured" }, 503);
-  }
-  const requestMcp = () =>
-    bearerFetch(endpoint, token as string, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "pact.whoami", arguments: {} },
-      }),
-    });
-  let response = await requestMcp();
-  if (response.status === 401 && cookies[MCP_REFRESH_COOKIE]) {
-    const refreshed = await refreshPactToken(
-      c.env,
-      workspaceId,
-      cookies[MCP_REFRESH_COOKIE],
-      MCP_AUDIENCE,
-    );
-    if (refreshed) {
-      token = refreshed.token;
-      const now = Math.floor(Date.now() / 1000);
-      const refreshExp = refreshed.refreshExpiresAt
-        ? Math.floor(Date.parse(refreshed.refreshExpiresAt) / 1000)
-        : null;
-      appendCookie(
-        c,
-        cookie(MCP_ACCESS_COOKIE, refreshed.token, {
-          env: c.env,
-          httpOnly: true,
-          maxAge: Math.max(refreshed.exp - now, 1),
-        }),
-      );
-      appendCookie(
-        c,
-        cookie(MCP_REFRESH_COOKIE, refreshed.refreshToken, {
-          env: c.env,
-          httpOnly: true,
-          maxAge:
-            refreshExp && Number.isFinite(refreshExp) ? Math.max(refreshExp - now, 1) : THIRTY_DAYS,
-        }),
-      );
-      response = await requestMcp();
-    }
-  }
-  const body = (await response.json().catch(() => ({}))) as unknown;
-  if (response.status === 401) {
-    return c.json({ error: "not_authenticated" }, 401);
-  }
-  if (!response.ok) {
-    return c.json({ error: "mcp_unavailable", status: response.status }, 502);
-  }
-  const payload = body as {
-    jsonrpc?: unknown;
-    id?: unknown;
-    result?: unknown;
-    error?: { code?: unknown; message?: unknown };
-  };
-  const sanitized: Record<string, unknown> = {
-    jsonrpc: payload.jsonrpc === "2.0" ? "2.0" : undefined,
-    id: typeof payload.id === "string" || typeof payload.id === "number" ? payload.id : undefined,
-  };
-  if (payload.error) {
-    sanitized.error = {
-      code: typeof payload.error.code === "number" ? payload.error.code : undefined,
-      message: typeof payload.error.message === "string" ? payload.error.message : "MCP error",
-    };
-  } else {
-    sanitized.result = payload.result ?? null;
-  }
-  return c.json({ endpoint, response: sanitized });
+  const called = await callMcpTool(c, {
+    id: 1,
+    name: "pact.whoami",
+    arguments: {},
+  });
+  if (!called.ok) return c.json(called.body, called.status);
+  return c.json({ endpoint: called.value.endpoint, response: called.value.payload });
 });
 
 const INDEX_HTML = `<!doctype html>
@@ -1276,6 +1487,34 @@ const INDEX_HTML = `<!doctype html>
               <p id="drive-help" class="help">Connect the signed-in Google account with read-only Drive access.</p>
             </div>
           </article>
+          <article class="panel wide">
+            <div class="panel-head"><span>drive retrieval</span><span class="panel-meta">index + search</span></div>
+            <div class="panel-body">
+              <div class="retrieval-grid">
+                <section>
+                  <div class="row">
+                    <button id="drive-files-refresh" class="ghost" type="button">Load files</button>
+                    <button id="drive-index" type="button" disabled>Index selected</button>
+                  </div>
+                  <label for="drive-files" class="select-label">Drive files</label>
+                  <select id="drive-files" disabled>
+                    <option value="">Connect Drive and load files</option>
+                  </select>
+                  <p id="drive-index-result" class="help">Index one Google Drive file before searching.</p>
+                </section>
+                <section>
+                  <form id="drive-search-form" class="search-form">
+                    <label for="drive-search-query">Search indexed context</label>
+                    <div class="row">
+                      <input id="drive-search-query" name="query" autocomplete="off" spellcheck="false" placeholder="customer notes, roadmap, contract terms">
+                      <button id="drive-search-submit" type="submit" disabled>Search</button>
+                    </div>
+                  </form>
+                  <div id="drive-search-results" class="results-list" aria-live="polite"></div>
+                </section>
+              </div>
+            </div>
+          </article>
           <article class="panel">
             <div class="panel-head"><span>agent access</span><span class="panel-meta">mcp</span></div>
             <div class="panel-body">
@@ -1348,7 +1587,7 @@ body {
 *, *::before, *::after {
   box-sizing: border-box;
 }
-button, input {
+button, input, select {
   font: inherit;
 }
 .shell {
@@ -1425,6 +1664,9 @@ h2 {
   border-radius: 8px;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22);
 }
+.wide {
+  grid-column: 1 / -1;
+}
 .panel-head {
   display: flex;
   align-items: center;
@@ -1464,6 +1706,15 @@ h2 {
   gap: 8px;
   align-items: stretch;
 }
+.retrieval-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+}
+.search-form {
+  display: grid;
+  gap: 8px;
+}
 .dots {
   display: inline-flex;
   gap: 5px;
@@ -1487,7 +1738,7 @@ label {
   font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   text-transform: uppercase;
 }
-input {
+input, select {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--line-strong);
@@ -1496,6 +1747,10 @@ input {
   background: #101010;
   color: var(--text);
   font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+select {
+  min-height: 42px;
+  margin-top: 8px;
 }
 button, .button-link {
   border: 0;
@@ -1536,7 +1791,8 @@ button:disabled {
 }
 button:focus-visible,
 .button-link:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 2px solid rgba(250, 250, 250, 0.42);
   outline-offset: 2px;
 }
@@ -1547,6 +1803,36 @@ input:focus-visible {
   margin: 8px 0 0;
   color: var(--faint);
   font-size: 12px;
+}
+.select-label {
+  margin-top: 14px;
+}
+.results-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.result-item {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #101010;
+}
+.result-title {
+  margin: 0 0 5px;
+  color: var(--text);
+  font-weight: 650;
+}
+.result-snippet {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.result-meta {
+  margin-top: 8px;
+  color: var(--faint);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 .notice {
   padding: 10px 12px;
@@ -1616,7 +1902,7 @@ dd {
   .shell {
     padding: 24px 14px;
   }
-  .topbar, .row, .login-grid {
+  .topbar, .row, .login-grid, .retrieval-grid {
     align-items: stretch;
     flex-direction: column;
     display: flex;
@@ -1635,6 +1921,8 @@ const $ = (id) => document.getElementById(id);
 let csrfToken = "";
 let refreshing = false;
 let appConfig = { mode: "production", oauthConfigured: false, defaultWorkspaceId: null };
+let driveFiles = [];
+let driveRetrievalReady = false;
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -1653,6 +1941,12 @@ const messageForError = (path, status, body) => {
     if (status === 403 || code === "csrf") return "Refresh the page before connecting Drive.";
     if (status === 401) return "Sign in again before connecting Drive.";
     if (status === 503 || code === "misconfigured") return "Drive connection is not configured for this environment.";
+  }
+  if (path.includes("/v1/drive/")) {
+    if (status === 403 || code === "csrf") return "Refresh the page before using Drive retrieval.";
+    if (status === 401) return "Sign in again before using Drive retrieval.";
+    if (status === 503 || code === "misconfigured") return "MCP is not configured for Drive retrieval.";
+    if (body?.message) return body.message;
   }
   if (status === 401) return "Your session expired. Sign in again.";
   if (status >= 500) return "A Pact service is unavailable. Try again in a moment.";
@@ -1749,6 +2043,79 @@ const renderSession = (session) => {
   }
 };
 
+const selectedDriveFile = () => {
+  const fileId = $("drive-files").value;
+  return driveFiles.find((file) => file.id === fileId) || null;
+};
+
+const renderDriveFileOptions = (files) => {
+  driveFiles = files;
+  const select = $("drive-files");
+  select.innerHTML = "";
+  if (!files.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = driveRetrievalReady ? "No files returned" : "Connect Drive and load files";
+    select.append(option);
+  } else {
+    for (const file of files) {
+      const option = document.createElement("option");
+      option.value = file.id;
+      option.textContent = file.name || file.id;
+      select.append(option);
+    }
+  }
+  select.disabled = !driveRetrievalReady || !files.length;
+  $("drive-index").disabled = !driveRetrievalReady || !files.length;
+};
+
+const renderDriveRetrievalState = (driveStatus, mcp) => {
+  driveRetrievalReady = driveStatus === "connected" && !!mcp?.configured && !!mcp?.endpoint;
+  $("drive-files-refresh").disabled = !driveRetrievalReady;
+  $("drive-search-submit").disabled = !driveRetrievalReady;
+  $("drive-search-query").disabled = !driveRetrievalReady;
+  if (!driveRetrievalReady) {
+    renderDriveFileOptions([]);
+    $("drive-index-result").textContent =
+      driveStatus === "connected"
+        ? "MCP must be configured before indexing Drive files."
+        : "Connect Drive before indexing files.";
+    $("drive-search-results").textContent = "";
+    return;
+  }
+  if (!driveFiles.length) renderDriveFileOptions([]);
+};
+
+const renderSearchResults = (results) => {
+  const container = $("drive-search-results");
+  container.innerHTML = "";
+  if (!results.length) {
+    const empty = document.createElement("p");
+    empty.className = "help";
+    empty.textContent = "No indexed chunks matched this query.";
+    container.append(empty);
+    return;
+  }
+  for (const result of results) {
+    const item = document.createElement("article");
+    item.className = "result-item";
+    const title = document.createElement("p");
+    title.className = "result-title";
+    title.textContent = result.fileName || result.fileId || "Drive file";
+    const snippet = document.createElement("p");
+    snippet.className = "result-snippet";
+    snippet.textContent = result.snippet || "";
+    const meta = document.createElement("p");
+    meta.className = "result-meta";
+    meta.textContent =
+      "chunk " +
+      (result.chunkIndex ?? "-") +
+      (result.indexedAt ? " / indexed " + result.indexedAt : "");
+    item.append(title, snippet, meta);
+    container.append(item);
+  }
+};
+
 const renderStatus = (status) => {
   const drive = status.connections?.drive;
   $("metric-users").textContent = String(status.users?.count ?? 0);
@@ -1767,6 +2134,7 @@ const renderStatus = (status) => {
   $("drive-disconnect").classList.toggle("hidden", !canDisconnect);
   $("drive-disconnect").disabled = !canDisconnect;
   renderMcpStatus(status.mcp, driveStatus);
+  renderDriveRetrievalState(driveStatus, status.mcp);
   $("audit-status").textContent = status.audit?.head
     ? "Audit log is receiving signed events."
     : "No audit log checkpoint found yet.";
@@ -1804,6 +2172,13 @@ const renderStatusUnavailable = (message) => {
   $("mcp-config").classList.add("hidden");
   $("mcp-test").disabled = true;
   $("mcp-test-result").textContent = "";
+  driveRetrievalReady = false;
+  renderDriveFileOptions([]);
+  $("drive-files-refresh").disabled = true;
+  $("drive-search-submit").disabled = true;
+  $("drive-search-query").disabled = true;
+  $("drive-index-result").textContent = "Workspace status is unavailable.";
+  $("drive-search-results").textContent = "";
   $("audit-status").textContent = message || "Audit log status is unavailable.";
 };
 
@@ -1900,6 +2275,93 @@ $("drive-disconnect").addEventListener("click", async () => {
   } catch (error) {
     button.disabled = false;
     setError(error instanceof Error ? error.message : "Drive disconnect failed");
+  }
+});
+
+$("drive-files-refresh").addEventListener("click", async () => {
+  setError();
+  const button = $("drive-files-refresh");
+  const result = $("drive-index-result");
+  button.disabled = true;
+  result.textContent = "Loading Drive files...";
+  try {
+    const body = await requestJson("/v1/drive/files", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-pact-csrf": csrfToken },
+      body: JSON.stringify({ pageSize: 10 }),
+    });
+    renderDriveFileOptions(body.files || []);
+    result.textContent = body.files?.length
+      ? "Select a file and index it for MCP search."
+      : "No Drive files were returned for this account.";
+  } catch (error) {
+    result.textContent = "";
+    setError(error instanceof Error ? error.message : "Drive file list failed");
+  } finally {
+    button.disabled = !driveRetrievalReady;
+  }
+});
+
+$("drive-index").addEventListener("click", async () => {
+  setError();
+  const file = selectedDriveFile();
+  if (!file) {
+    setError("Choose a Drive file to index.");
+    return;
+  }
+  const button = $("drive-index");
+  const result = $("drive-index-result");
+  button.disabled = true;
+  result.textContent = "Indexing " + (file.name || file.id) + "...";
+  try {
+    const body = await requestJson("/v1/drive/index", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-pact-csrf": csrfToken },
+      body: JSON.stringify({
+        fileId: file.id,
+        fileName: file.name,
+        modifiedTime: file.modifiedTime,
+      }),
+    });
+    result.textContent =
+      "Indexed " +
+      (body.fileName || file.name || body.fileId) +
+      " into " +
+      body.chunks +
+      " chunks" +
+      (body.truncated ? " (truncated)." : ".");
+  } catch (error) {
+    result.textContent = "";
+    setError(error instanceof Error ? error.message : "Drive indexing failed");
+  } finally {
+    button.disabled = !driveRetrievalReady || !driveFiles.length;
+  }
+});
+
+$("drive-search-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setError();
+  const query = String(new FormData(event.currentTarget).get("query") || "").trim();
+  if (!query) {
+    setError("Enter a Drive search query.");
+    $("drive-search-query").focus();
+    return;
+  }
+  const button = $("drive-search-submit");
+  button.disabled = true;
+  $("drive-search-results").textContent = "Searching indexed Drive context...";
+  try {
+    const body = await requestJson("/v1/drive/search", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-pact-csrf": csrfToken },
+      body: JSON.stringify({ query, limit: 5 }),
+    });
+    renderSearchResults(body.results || []);
+  } catch (error) {
+    $("drive-search-results").textContent = "";
+    setError(error instanceof Error ? error.message : "Drive search failed");
+  } finally {
+    button.disabled = !driveRetrievalReady;
   }
 });
 
