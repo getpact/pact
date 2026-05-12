@@ -276,6 +276,40 @@ export const workspaceOauthConnections = pgTable(
 export type WorkspaceOauthConnection = typeof workspaceOauthConnections.$inferSelect;
 export type NewWorkspaceOauthConnection = typeof workspaceOauthConnections.$inferInsert;
 
+export const driveDocumentChunks = pgTable(
+  "drive_document_chunks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fileId: text("file_id").notNull(),
+    fileName: text("file_name"),
+    mimeType: text("mime_type"),
+    modifiedTime: timestamp("modified_time", { withTimezone: true }),
+    chunkIndex: integer("chunk_index").notNull(),
+    content: text("content").notNull(),
+    contentSha256: text("content_sha256").notNull(),
+    indexedAt: timestamp("indexed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("drive_document_chunks_unique_idx").on(
+      t.workspaceId,
+      t.userId,
+      t.fileId,
+      t.chunkIndex,
+    ),
+    index("drive_document_chunks_workspace_user_idx").on(t.workspaceId, t.userId),
+    index("drive_document_chunks_file_idx").on(t.workspaceId, t.userId, t.fileId),
+  ],
+);
+
+export type DriveDocumentChunk = typeof driveDocumentChunks.$inferSelect;
+export type NewDriveDocumentChunk = typeof driveDocumentChunks.$inferInsert;
+
 export type Brain = typeof brains.$inferSelect;
 export type NewBrain = typeof brains.$inferInsert;
 
