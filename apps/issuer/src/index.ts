@@ -306,7 +306,7 @@ app.post("/v1/oauth/google/session", async (c) => {
     return c.json({ error: "invalid_redirect_uri" }, 400);
   }
   const audiences = [...new Set(body.audiences ?? [])];
-  const allowedDashboardAudiences = new Set(["pact-admin", "pact-audit"]);
+  const allowedDashboardAudiences = new Set(["pact-admin", "pact-audit", "pact-mcp"]);
   if (audiences.length === 0 || audiences.some((aud) => !allowedDashboardAudiences.has(aud))) {
     return c.json({ error: "invalid_audience" }, 400);
   }
