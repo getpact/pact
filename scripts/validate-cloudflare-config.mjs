@@ -205,6 +205,7 @@ if (apps.includes("web")) {
   requirePublicHttpsUrl("apps/web/wrangler.toml", "ISSUER_BASE_URL");
   requirePublicHttpsUrl("apps/web/wrangler.toml", "ADMIN_API_BASE_URL");
   requirePublicHttpsUrl("apps/web/wrangler.toml", "AUDIT_API_BASE_URL");
+  requirePublicHttpsUrl("apps/web/wrangler.toml", "MCP_SERVER_BASE_URL");
   rejectTomlValue(
     "apps/web/wrangler.toml",
     /^WEB_ISSUER_SERVICE_TOKEN\s*=/m,
