@@ -11,8 +11,8 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
   Worker envs accept `HYPERDRIVE.connectionString`.
 - KV namespace: `pact-revocation`
 - Custom domains configured by each Worker manifest:
-  `issuer.getpact.dev`, `verifier.getpact.dev`, `mcp.getpact.dev`,
-  `admin.getpact.dev`, `audit.getpact.dev`, and optionally
+  `app.getpact.dev`, `issuer.getpact.dev`, `verifier.getpact.dev`,
+  `mcp.getpact.dev`, `admin.getpact.dev`, `audit.getpact.dev`, and optionally
   `gateway.getpact.dev`
 - Vars on admin API and gateway: `UPSTREAM_HOST_ALLOWLIST` with comma-separated
   exact hosts or wildcard suffixes, for example `httpbin.org,*.slack.com`
@@ -26,19 +26,29 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
   gateway. Production verifier requests fail closed if this secret is missing.
   Non-production verifiers without this secret remain publicly callable and are
   only acceptable for disposable smoke environments.
+- Google OAuth for login and Drive: set `GOOGLE_OAUTH_CLIENT_ID` and
+  `GOOGLE_OAUTH_CLIENT_SECRET` on the issuer and admin API. Set the same
+  `GOOGLE_OAUTH_CLIENT_ID` on the web dashboard. Set both Google OAuth secrets
+  on MCP server as well; MCP uses them to refresh stored Google Drive access
+  tokens before executing Drive tools.
 - Gateway audit is required in production by default. Set
   `GATEWAY_AUDIT_MODE=best_effort` only for controlled non-critical smoke
   environments.
 - Secrets per environment are checked during deploy with `wrangler secret list`.
-  Required secrets include `DATABASE_URL`, `MEK`, `VERIFIER_SERVICE_TOKEN`, and
-  Google OAuth secrets for the issuer.
+  Required secrets include `DATABASE_URL`, `MEK`, `VERIFIER_SERVICE_TOKEN`,
+  `WEB_ISSUER_SERVICE_TOKEN`, and Google OAuth secrets for the issuer,
+  admin API, MCP server, and web dashboard.
 
 ## Deploy
 
 Run `pnpm deploy:cloudflare` from the repository root after bootstrap. The script
 validates Worker manifests, validates required Cloudflare secrets, runs
 `pnpm typecheck`, runs `pnpm build`, then deploys issuer, verifier, MCP server,
-admin API, and audit API in order.
+admin API, audit API, and web dashboard in order.
+
+Keep that order for dashboard MCP rollouts: the issuer must accept the
+`pact-mcp` dashboard audience before the web dashboard starts requesting MCP
+tokens during Google sign-in.
 
 The gateway Worker is opt-in while Mode B is being hardened. Deploy it only
 after configuring both the runtime host allowlist and platform egress controls.
@@ -103,5 +113,10 @@ The bootstrap is manual until we move to Terraform. Steps:
 3. Configure the custom domains listed in each per-app `wrangler.toml`
 4. Upload `DATABASE_URL` as a secret for every Worker that uses Postgres
 5. Set secrets via `wrangler secret put <NAME>` per Worker that needs it
+6. Configure Google OAuth redirect URIs:
+   `https://app.getpact.dev/v1/auth/google/callback` for dashboard sign-in and
+   `https://app.getpact.dev/v1/connections/google-drive/callback` for Drive
+   connection
+7. Set `GOOGLE_DRIVE_OAUTH_REDIRECT_URI` on admin API to the Drive callback URI
 
 The MEK is a 256-bit AES-GCM key. Generate locally with `openssl rand -base64 32` and upload via `wrangler secret put MEK`.
