@@ -26,6 +26,7 @@ export type AdapterContext = {
 export type ToolDeps = {
   databaseUrl: string;
   rawMek?: Uint8Array;
+  providerConfig?: Record<string, string | undefined>;
 };
 
 export type AdapterToolHandler = (

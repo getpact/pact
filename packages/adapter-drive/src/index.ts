@@ -121,10 +121,14 @@ export function createDriveAdapter(options: DriveAdapterOptions = {}): Adapter {
         },
       },
     },
-    authorize: (_args, ctx) => ({
-      action: "drive.files.list",
-      resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:files`,
-    }),
+    authorize: (args, ctx) => {
+      const q = stringInput(args, "q")?.trim().replace(/\s+/g, " ");
+      const queryPart = q ? `:query:${encodeURIComponent(q).slice(0, 200)}` : "";
+      return {
+        action: "drive.files.list",
+        resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:files${queryPart}`,
+      };
+    },
     async handler(input, ctx, deps) {
       const connection = await loadConnection(ctx, deps);
       const ready = validateUsableConnection(connection);

@@ -9,7 +9,7 @@ Google Drive adapter for Pact MCP tools.
 
 ## Requirements
 
-The adapter expects an OAuth connection in Vault under `kind=google_drive_oauth` and `target=user:<userId>`. Tokens must be created by the dashboard/admin OAuth flow; browser clients never receive Drive tokens.
+The adapter expects an OAuth connection in Vault under `kind=google_drive_oauth` and `target=user:<userId>`. Tokens must be created by the dashboard/admin OAuth flow; browser clients never receive Drive tokens. The MCP server refreshes expired Google access tokens before invoking the adapter.
 
 ## Commands
 
