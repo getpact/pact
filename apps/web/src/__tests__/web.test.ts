@@ -8,6 +8,7 @@ const env = {
   ISSUER_BASE_URL: "https://issuer.test",
   ADMIN_API_BASE_URL: "https://admin.test",
   AUDIT_API_BASE_URL: "https://audit.test",
+  MCP_SERVER_BASE_URL: "https://mcp.test",
   GOOGLE_OAUTH_CLIENT_ID: "google-client",
   GOOGLE_OAUTH_AUTHORIZATION_ENDPOINT: "https://accounts.test/oauth",
   WEB_ISSUER_SERVICE_TOKEN: "test-web-issuer-service-token-12345",
@@ -220,8 +221,8 @@ describe("web dashboard auth", () => {
     expect(cookies).toContain("__Host-pact-drive-state=");
     expect(cookies).toContain("__Host-pact-drive-verifier=");
     expect(cookies).toContain("__Host-pact-drive-nonce=");
-    const bridgeCookie = setCookieFor(cookies, "__Secure-pact-drive-admin-access");
-    expect(bridgeCookie).toContain("Path=/v1/connections/google-drive/callback");
+    const bridgeCookie = setCookieFor(cookies, "__Host-pact-drive-admin-access");
+    expect(bridgeCookie).toContain("Path=/");
     expect(bridgeCookie).toContain("SameSite=Lax");
     expect(bridgeCookie).toContain("Max-Age=600");
     expect(bridgeCookie).toContain("HttpOnly");
@@ -263,7 +264,7 @@ describe("web dashboard auth", () => {
             "__Host-pact-drive-verifier=verifier-1",
             `__Host-pact-drive-workspace=${workspaceId}`,
             "__Host-pact-drive-nonce=nonce-1",
-            "__Secure-pact-drive-admin-access=bridge-token",
+            "__Host-pact-drive-admin-access=bridge-token",
           ].join(";"),
         },
       },
@@ -272,9 +273,9 @@ describe("web dashboard auth", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/");
     const cookies = res.headers.get("set-cookie") ?? "";
-    const bridgeClear = setCookieFor(cookies, "__Secure-pact-drive-admin-access");
+    const bridgeClear = setCookieFor(cookies, "__Host-pact-drive-admin-access");
     expect(bridgeClear).toContain("Max-Age=0");
-    expect(bridgeClear).toContain("Path=/v1/connections/google-drive/callback");
+    expect(bridgeClear).toContain("Path=/");
   });
 
   it("routes shared local callback by Drive state even when stale login cookies exist", async () => {
@@ -294,7 +295,7 @@ describe("web dashboard auth", () => {
             "__Host-pact-drive-verifier=drive-verifier",
             `__Host-pact-drive-workspace=${workspaceId}`,
             "__Host-pact-drive-nonce=drive-nonce",
-            "__Secure-pact-drive-admin-access=bridge-token",
+            "__Host-pact-drive-admin-access=bridge-token",
           ].join(";"),
         },
       },
@@ -326,7 +327,7 @@ describe("web dashboard auth", () => {
             "__Host-pact-drive-verifier=drive-verifier",
             `__Host-pact-drive-workspace=${workspaceId}`,
             "__Host-pact-drive-nonce=drive-nonce",
-            "__Secure-pact-drive-admin-access=bridge-token",
+            "__Host-pact-drive-admin-access=bridge-token",
           ].join(";"),
         },
       },
@@ -384,7 +385,7 @@ describe("web dashboard auth", () => {
             "__Host-pact-drive-verifier=verifier-1",
             `__Host-pact-drive-workspace=${workspaceId}`,
             "__Host-pact-drive-nonce=nonce-1",
-            "__Secure-pact-drive-admin-access=bridge-token",
+            "__Host-pact-drive-admin-access=bridge-token",
           ].join(";"),
         },
       },
@@ -630,7 +631,7 @@ describe("web dashboard auth", () => {
     expect(html).toContain("The issuer is misconfigured or unavailable.");
   });
 
-  it("exchanges OAuth code and stores tokens in HttpOnly cookies", async () => {
+  it("renders a specific failure when issuer omits MCP credentials", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -659,12 +660,53 @@ describe("web dashboard auth", () => {
       },
       env,
     );
+    const html = await res.text();
+    expect(res.status).toBe(502);
+    expect(html).toContain("did not return MCP credentials");
+  });
+
+  it("exchanges OAuth code and stores tokens in HttpOnly cookies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          tokens: {
+            "pact-admin": {
+              token,
+              refreshToken: "admin-refresh-1",
+              exp: 1_800_000_000,
+            },
+            "pact-audit": {
+              token,
+              refreshToken: "audit-refresh-1",
+              exp: 1_800_000_000,
+            },
+            "pact-mcp": {
+              token,
+              refreshToken: "mcp-refresh-1",
+              exp: 1_800_000_000,
+            },
+          },
+        }),
+      ),
+    );
+    const res = await app.request(
+      "/v1/auth/google/callback?code=abc&state=state-1",
+      {
+        headers: {
+          cookie: `__Host-pact-oauth-state=state-1;__Host-pact-oauth-verifier=verifier-1;__Host-pact-oauth-workspace=${workspaceId}`,
+        },
+      },
+      env,
+    );
     expect(res.status).toBe(302);
     const cookies = res.headers.get("set-cookie") ?? "";
     expect(cookies).toContain("__Host-pact-admin-access=");
     expect(cookies).toContain("__Host-pact-admin-refresh=");
     expect(cookies).toContain("__Host-pact-audit-access=");
     expect(cookies).toContain("__Host-pact-audit-refresh=");
+    expect(cookies).toContain("__Host-pact-mcp-access=");
+    expect(cookies).toContain("__Host-pact-mcp-refresh=");
     expect(cookies).toContain("__Host-pact-workspace=");
     expect(cookies).toContain("HttpOnly");
     expect(cookies).toContain("__Host-pact-csrf=");
@@ -676,7 +718,7 @@ describe("web dashboard auth", () => {
         headers: expect.objectContaining({
           "x-pact-web-service-token": "test-web-issuer-service-token-12345",
         }),
-        body: expect.stringContaining('"audiences":["pact-admin","pact-audit"]'),
+        body: expect.stringContaining('"audiences":["pact-admin","pact-audit","pact-mcp"]'),
       }),
     );
   });
@@ -718,10 +760,10 @@ describe("web dashboard auth", () => {
     expect(res.status).toBe(200);
     const bridgeClear = setCookieFor(
       res.headers.get("set-cookie") ?? "",
-      "__Secure-pact-drive-admin-access",
+      "__Host-pact-drive-admin-access",
     );
     expect(bridgeClear).toContain("Max-Age=0");
-    expect(bridgeClear).toContain("Path=/v1/connections/google-drive/callback");
+    expect(bridgeClear).toContain("Path=/");
   });
 
   it("disconnects Drive through the dashboard BFF without exposing tokens", async () => {
@@ -783,11 +825,112 @@ describe("web dashboard auth", () => {
     const body = (await res.json()) as {
       brains: Array<{ authScheme?: string; kind: string }>;
       connections: { drive: { status: string } };
+      mcp: { configured: boolean; endpoint: string; audience: string };
     };
     expect(body.connections.drive.status).toBe("connected");
     expect(body.brains).toEqual([{ id: "b1", kind: "google-drive", status: "active" }]);
+    expect(body.mcp).toEqual({
+      configured: true,
+      endpoint: `https://mcp.test/${workspaceId}/mcp`,
+      audience: "pact-mcp",
+    });
     expect(calls).toHaveLength(4);
     expect(calls.every((call) => call.auth === `Bearer ${token}`)).toBe(true);
+  });
+
+  it("runs MCP smoke through the same-origin dashboard route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(requestUrl(input)).toBe(`https://mcp.test/${workspaceId}/mcp`);
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBe("Bearer mcp-token");
+        expect(await new Request(input, init).json()).toEqual({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "pact.whoami", arguments: {} },
+        });
+        return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [] } });
+      }),
+    );
+    const res = await app.request(
+      "/v1/mcp/test",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.test",
+          "x-pact-csrf": "csrf-1",
+          cookie: [
+            "__Host-pact-mcp-access=mcp-token",
+            `__Host-pact-workspace=${workspaceId}`,
+            "__Host-pact-csrf=csrf-1",
+          ].join(";"),
+        },
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      endpoint: `https://mcp.test/${workspaceId}/mcp`,
+      response: { jsonrpc: "2.0", id: 1, result: { content: [] } },
+    });
+  });
+
+  it("rotates MCP refresh cookie when smoke test retries after 401", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = requestUrl(input);
+        calls.push(url);
+        if (url === `https://mcp.test/${workspaceId}/mcp` && calls.length === 1) {
+          return Response.json({ error: "unauthorized" }, { status: 401 });
+        }
+        if (url === "https://issuer.test/v1/refresh") {
+          expect(await new Request(input, init).json()).toEqual({
+            workspaceId,
+            refreshToken: "old-mcp-refresh",
+            audience: "pact-mcp",
+          });
+          return Response.json({
+            token: "new-mcp-token",
+            refreshToken: "new-mcp-refresh",
+            exp: Math.floor(Date.now() / 1000) + 600,
+            refreshExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+          });
+        }
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBe("Bearer new-mcp-token");
+        return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [] } });
+      }),
+    );
+    const res = await app.request(
+      "/v1/mcp/test",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.test",
+          "x-pact-csrf": "csrf-1",
+          cookie: [
+            "__Host-pact-mcp-access=old-mcp-token",
+            "__Host-pact-mcp-refresh=old-mcp-refresh",
+            `__Host-pact-workspace=${workspaceId}`,
+            "__Host-pact-csrf=csrf-1",
+          ].join(";"),
+        },
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([
+      `https://mcp.test/${workspaceId}/mcp`,
+      "https://issuer.test/v1/refresh",
+      `https://mcp.test/${workspaceId}/mcp`,
+    ]);
+    const cookies = res.headers.get("set-cookie") ?? "";
+    expect(cookies).toContain("__Host-pact-mcp-access=new-mcp-token");
+    expect(cookies).toContain("__Host-pact-mcp-refresh=new-mcp-refresh");
   });
 
   it("reports decoded session summary from HttpOnly token cookie", async () => {

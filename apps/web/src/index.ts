@@ -13,6 +13,7 @@ type Env = {
   ISSUER_BASE_URL: string;
   ADMIN_API_BASE_URL: string;
   AUDIT_API_BASE_URL: string;
+  MCP_SERVER_BASE_URL?: string;
   GOOGLE_OAUTH_CLIENT_ID: string;
   GOOGLE_OAUTH_AUTHORIZATION_ENDPOINT?: string;
   WEB_ISSUER_SERVICE_TOKEN: string;
@@ -24,6 +25,8 @@ const ADMIN_ACCESS_COOKIE = "__Host-pact-admin-access";
 const ADMIN_REFRESH_COOKIE = "__Host-pact-admin-refresh";
 const AUDIT_ACCESS_COOKIE = "__Host-pact-audit-access";
 const AUDIT_REFRESH_COOKIE = "__Host-pact-audit-refresh";
+const MCP_ACCESS_COOKIE = "__Host-pact-mcp-access";
+const MCP_REFRESH_COOKIE = "__Host-pact-mcp-refresh";
 const WORKSPACE_COOKIE = "__Host-pact-workspace";
 const CSRF_COOKIE = "__Host-pact-csrf";
 const OAUTH_STATE_COOKIE = "__Host-pact-oauth-state";
@@ -33,11 +36,12 @@ const DRIVE_STATE_COOKIE = "__Host-pact-drive-state";
 const DRIVE_VERIFIER_COOKIE = "__Host-pact-drive-verifier";
 const DRIVE_WORKSPACE_COOKIE = "__Host-pact-drive-workspace";
 const DRIVE_NONCE_COOKIE = "__Host-pact-drive-nonce";
-const DRIVE_ADMIN_ACCESS_COOKIE = "__Secure-pact-drive-admin-access";
+const DRIVE_ADMIN_ACCESS_COOKIE = "__Host-pact-drive-admin-access";
 
 const GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const ADMIN_AUDIENCE = "pact-admin";
 const AUDIT_AUDIENCE = "pact-audit";
+const MCP_AUDIENCE = "pact-mcp";
 const TEN_MINUTES = 600;
 const THIRTY_DAYS = 30 * 24 * 60 * 60;
 const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -125,6 +129,25 @@ const fetchWithTimeout = async (
   } finally {
     clearTimeout(timeout);
   }
+};
+
+const refreshPactToken = async (
+  env: Env,
+  workspaceId: string,
+  refreshToken: string,
+  audience: string,
+): Promise<TokenResponse | null> => {
+  const res = await fetchWithTimeout(urlFor(env.ISSUER_BASE_URL, "/v1/refresh"), {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      workspaceId,
+      refreshToken,
+      audience,
+    }),
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as TokenResponse;
 };
 
 const randomBase64Url = (bytes = 32): string => {
@@ -290,22 +313,24 @@ const jwksKidMissCache = new Map<string, number>();
 const storeSession = (
   c: AppContext,
   workspaceId: string,
-  body: { admin: TokenResponse; audit: TokenResponse },
+  body: { admin: TokenResponse; audit: TokenResponse; mcp?: TokenResponse },
   csrfToken = randomBase64Url(24),
 ): void => {
   const now = Math.floor(Date.now() / 1000);
-  const accessMaxAge = Math.max(Math.min(body.admin.exp, body.audit.exp) - now, 1);
-  const refreshExp = [body.admin.refreshExpiresAt, body.audit.refreshExpiresAt]
-    .map((value) => (value ? Math.floor(Date.parse(value) / 1000) : null))
-    .filter((value): value is number => Number.isFinite(value));
-  const refreshMaxAge =
-    refreshExp.length > 0 ? Math.max(Math.min(...refreshExp) - now, 1) : THIRTY_DAYS;
+  const accessMaxAgeFor = (token: TokenResponse): number => Math.max(token.exp - now, 1);
+  const refreshMaxAgeFor = (token: TokenResponse): number => {
+    if (!token.refreshExpiresAt) {
+      return THIRTY_DAYS;
+    }
+    const exp = Math.floor(Date.parse(token.refreshExpiresAt) / 1000);
+    return Number.isFinite(exp) ? Math.max(exp - now, 1) : THIRTY_DAYS;
+  };
   appendCookie(
     c,
     cookie(ADMIN_ACCESS_COOKIE, body.admin.token, {
       env: c.env,
       httpOnly: true,
-      maxAge: accessMaxAge,
+      maxAge: accessMaxAgeFor(body.admin),
     }),
   );
   appendCookie(
@@ -313,7 +338,7 @@ const storeSession = (
     cookie(ADMIN_REFRESH_COOKIE, body.admin.refreshToken, {
       env: c.env,
       httpOnly: true,
-      maxAge: refreshMaxAge,
+      maxAge: refreshMaxAgeFor(body.admin),
     }),
   );
   appendCookie(
@@ -321,7 +346,7 @@ const storeSession = (
     cookie(AUDIT_ACCESS_COOKIE, body.audit.token, {
       env: c.env,
       httpOnly: true,
-      maxAge: accessMaxAge,
+      maxAge: accessMaxAgeFor(body.audit),
     }),
   );
   appendCookie(
@@ -329,9 +354,27 @@ const storeSession = (
     cookie(AUDIT_REFRESH_COOKIE, body.audit.refreshToken, {
       env: c.env,
       httpOnly: true,
-      maxAge: refreshMaxAge,
+      maxAge: refreshMaxAgeFor(body.audit),
     }),
   );
+  if (body.mcp) {
+    appendCookie(
+      c,
+      cookie(MCP_ACCESS_COOKIE, body.mcp.token, {
+        env: c.env,
+        httpOnly: true,
+        maxAge: accessMaxAgeFor(body.mcp),
+      }),
+    );
+    appendCookie(
+      c,
+      cookie(MCP_REFRESH_COOKIE, body.mcp.refreshToken, {
+        env: c.env,
+        httpOnly: true,
+        maxAge: refreshMaxAgeFor(body.mcp),
+      }),
+    );
+  }
   appendCookie(
     c,
     cookie(WORKSPACE_COOKIE, workspaceId, { env: c.env, httpOnly: true, maxAge: THIRTY_DAYS }),
@@ -353,6 +396,8 @@ const clearSession = (c: AppContext): void => {
     ADMIN_REFRESH_COOKIE,
     AUDIT_ACCESS_COOKIE,
     AUDIT_REFRESH_COOKIE,
+    MCP_ACCESS_COOKIE,
+    MCP_REFRESH_COOKIE,
     WORKSPACE_COOKIE,
     CSRF_COOKIE,
     OAUTH_STATE_COOKIE,
@@ -362,12 +407,15 @@ const clearSession = (c: AppContext): void => {
     DRIVE_VERIFIER_COOKIE,
     DRIVE_WORKSPACE_COOKIE,
     DRIVE_NONCE_COOKIE,
+    DRIVE_ADMIN_ACCESS_COOKIE,
   ]) {
     appendCookie(c, clearCookie(name, c.env));
   }
   appendCookie(
     c,
-    clearCookie(DRIVE_ADMIN_ACCESS_COOKIE, c.env, { path: driveCallbackCookiePath(c.env) }),
+    clearCookie("__Secure-pact-drive-admin-access", c.env, {
+      path: driveCallbackCookiePath(c.env),
+    }),
   );
 };
 
@@ -383,12 +431,15 @@ const clearDriveOAuthAttempt = (c: AppContext): void => {
     DRIVE_VERIFIER_COOKIE,
     DRIVE_WORKSPACE_COOKIE,
     DRIVE_NONCE_COOKIE,
+    DRIVE_ADMIN_ACCESS_COOKIE,
   ]) {
     appendCookie(c, clearCookie(name, c.env));
   }
   appendCookie(
     c,
-    clearCookie(DRIVE_ADMIN_ACCESS_COOKIE, c.env, { path: driveCallbackCookiePath(c.env) }),
+    clearCookie("__Secure-pact-drive-admin-access", c.env, {
+      path: driveCallbackCookiePath(c.env),
+    }),
   );
 };
 
@@ -526,6 +577,9 @@ const bearerFetch = async (url: string, token: string, init: RequestInit = {}): 
       authorization: `Bearer ${token}`,
     },
   });
+
+const mcpEndpoint = (env: Env, workspaceId: string): string | null =>
+  env.MCP_SERVER_BASE_URL ? `${baseUrl(env.MCP_SERVER_BASE_URL)}/${workspaceId}/mcp` : null;
 
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/g, (char) => {
@@ -665,7 +719,7 @@ const handleGoogleCallback = async (c: AppContext) => {
         code,
         codeVerifier: verifier,
         redirectUri: callbackUrl(c.env),
-        audiences: [ADMIN_AUDIENCE, AUDIT_AUDIENCE],
+        audiences: [ADMIN_AUDIENCE, AUDIT_AUDIENCE, MCP_AUDIENCE],
       }),
     });
   } catch (err) {
@@ -714,11 +768,21 @@ const handleGoogleCallback = async (c: AppContext) => {
   const body = (await exchange.json()) as TokenBundleResponse;
   const admin = body.tokens[ADMIN_AUDIENCE];
   const audit = body.tokens[AUDIT_AUDIENCE];
+  const mcp = body.tokens[MCP_AUDIENCE];
   if (!admin || !audit) {
     clearOAuthAttempt(c);
     return c.html(loginFailedHtml("The issuer returned an incomplete dashboard session."), 502);
   }
-  storeSession(c, workspaceId, { admin, audit });
+  if (!mcp) {
+    clearOAuthAttempt(c);
+    return c.html(
+      loginFailedHtml(
+        "The issuer did not return MCP credentials. Update the issuer to allow the pact-mcp dashboard audience, then sign in again.",
+      ),
+      502,
+    );
+  }
+  storeSession(c, workspaceId, { admin, audit, mcp });
   clearOAuthAttempt(c);
   return c.redirect("/", 302);
 };
@@ -802,7 +866,6 @@ app.post("/v1/connections/google-drive/start", async (c) => {
       httpOnly: true,
       maxAge: TEN_MINUTES,
       sameSite: "Lax",
-      path: driveCallbackCookiePath(c.env),
     }),
   );
 
@@ -937,31 +1000,33 @@ app.post("/v1/session/refresh", async (c) => {
   const cookies = sessionCookies(c);
   const adminRefreshToken = cookies[ADMIN_REFRESH_COOKIE];
   const auditRefreshToken = cookies[AUDIT_REFRESH_COOKIE];
+  const mcpRefreshToken = cookies[MCP_REFRESH_COOKIE];
   const workspaceId = cookies[WORKSPACE_COOKIE];
   if (!adminRefreshToken || !auditRefreshToken || !workspaceId) {
     return c.json({ error: "not_authenticated" }, 401);
   }
-  const refresh = (refreshToken: string, audience: string) =>
-    fetchWithTimeout(urlFor(c.env.ISSUER_BASE_URL, "/v1/refresh"), {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        refreshToken,
-        audience,
-      }),
-    });
   const [adminRes, auditRes] = await Promise.all([
-    refresh(adminRefreshToken, ADMIN_AUDIENCE),
-    refresh(auditRefreshToken, AUDIT_AUDIENCE),
+    refreshPactToken(c.env, workspaceId, adminRefreshToken, ADMIN_AUDIENCE),
+    refreshPactToken(c.env, workspaceId, auditRefreshToken, AUDIT_AUDIENCE),
   ]);
-  if (!adminRes.ok || !auditRes.ok) {
+  if (!adminRes || !auditRes) {
     clearSession(c);
     return c.json({ error: "not_authenticated" }, 401);
   }
-  const admin = (await adminRes.json()) as TokenResponse;
-  const audit = (await auditRes.json()) as TokenResponse;
-  storeSession(c, workspaceId, { admin, audit }, cookies[CSRF_COOKIE]);
+  let mcp: TokenResponse | undefined;
+  if (mcpRefreshToken) {
+    mcp = (await refreshPactToken(c.env, workspaceId, mcpRefreshToken, MCP_AUDIENCE)) ?? undefined;
+  }
+  storeSession(
+    c,
+    workspaceId,
+    { admin: adminRes, audit: auditRes, ...(mcp ? { mcp } : {}) },
+    cookies[CSRF_COOKIE],
+  );
+  if (mcpRefreshToken && !mcp) {
+    appendCookie(c, clearCookie(MCP_ACCESS_COOKIE, c.env));
+    appendCookie(c, clearCookie(MCP_REFRESH_COOKIE, c.env));
+  }
   return c.json({ ok: true });
 });
 
@@ -1032,7 +1097,97 @@ app.get("/v1/workspace/status", async (c) => {
       drive: driveBody.connection ?? { status: "not_configured" },
     },
     audit: { head: chainBody.head ?? null },
+    mcp: {
+      configured: !!mcpEndpoint(c.env, workspaceId),
+      endpoint: mcpEndpoint(c.env, workspaceId),
+      audience: MCP_AUDIENCE,
+    },
   });
+});
+
+app.post("/v1/mcp/test", async (c) => {
+  if (!requireCsrf(c)) return c.json({ error: "csrf" }, 403);
+  const cookies = sessionCookies(c);
+  let token = cookies[MCP_ACCESS_COOKIE];
+  const workspaceId = cookies[WORKSPACE_COOKIE];
+  if (!token || !workspaceId || !isUuid(workspaceId)) {
+    return c.json({ error: "not_authenticated" }, 401);
+  }
+  const endpoint = mcpEndpoint(c.env, workspaceId);
+  if (!endpoint) {
+    return c.json({ error: "misconfigured", message: "MCP server URL is not configured" }, 503);
+  }
+  const requestMcp = () =>
+    bearerFetch(endpoint, token as string, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "pact.whoami", arguments: {} },
+      }),
+    });
+  let response = await requestMcp();
+  if (response.status === 401 && cookies[MCP_REFRESH_COOKIE]) {
+    const refreshed = await refreshPactToken(
+      c.env,
+      workspaceId,
+      cookies[MCP_REFRESH_COOKIE],
+      MCP_AUDIENCE,
+    );
+    if (refreshed) {
+      token = refreshed.token;
+      const now = Math.floor(Date.now() / 1000);
+      const refreshExp = refreshed.refreshExpiresAt
+        ? Math.floor(Date.parse(refreshed.refreshExpiresAt) / 1000)
+        : null;
+      appendCookie(
+        c,
+        cookie(MCP_ACCESS_COOKIE, refreshed.token, {
+          env: c.env,
+          httpOnly: true,
+          maxAge: Math.max(refreshed.exp - now, 1),
+        }),
+      );
+      appendCookie(
+        c,
+        cookie(MCP_REFRESH_COOKIE, refreshed.refreshToken, {
+          env: c.env,
+          httpOnly: true,
+          maxAge:
+            refreshExp && Number.isFinite(refreshExp) ? Math.max(refreshExp - now, 1) : THIRTY_DAYS,
+        }),
+      );
+      response = await requestMcp();
+    }
+  }
+  const body = (await response.json().catch(() => ({}))) as unknown;
+  if (response.status === 401) {
+    return c.json({ error: "not_authenticated" }, 401);
+  }
+  if (!response.ok) {
+    return c.json({ error: "mcp_unavailable", status: response.status }, 502);
+  }
+  const payload = body as {
+    jsonrpc?: unknown;
+    id?: unknown;
+    result?: unknown;
+    error?: { code?: unknown; message?: unknown };
+  };
+  const sanitized: Record<string, unknown> = {
+    jsonrpc: payload.jsonrpc === "2.0" ? "2.0" : undefined,
+    id: typeof payload.id === "string" || typeof payload.id === "number" ? payload.id : undefined,
+  };
+  if (payload.error) {
+    sanitized.error = {
+      code: typeof payload.error.code === "number" ? payload.error.code : undefined,
+      message: typeof payload.error.message === "string" ? payload.error.message : "MCP error",
+    };
+  } else {
+    sanitized.result = payload.result ?? null;
+  }
+  return c.json({ endpoint, response: sanitized });
 });
 
 const INDEX_HTML = `<!doctype html>
@@ -1123,7 +1278,14 @@ const INDEX_HTML = `<!doctype html>
           </article>
           <article class="panel">
             <div class="panel-head"><span>agent access</span><span class="panel-meta">mcp</span></div>
-            <div class="panel-body"><p id="mcp-status">Connect Google Drive before enabling agent access.</p></div>
+            <div class="panel-body">
+              <p id="mcp-status">Checking MCP setup...</p>
+              <pre id="mcp-config" class="config-block hidden"></pre>
+              <div class="row">
+                <button id="mcp-test" class="ghost" type="button">Test MCP</button>
+              </div>
+              <p id="mcp-test-result" class="help"></p>
+            </div>
           </article>
           <article class="panel">
             <div class="panel-head"><span>audit log</span><span class="panel-meta">proof</span></div>
@@ -1408,6 +1570,20 @@ input:focus-visible {
   color: var(--muted);
   font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
+.config-block {
+  overflow: auto;
+  max-width: 100%;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #101010;
+  color: var(--muted);
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 dl {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -1590,13 +1766,30 @@ const renderStatus = (status) => {
   const canDisconnect = !["not_configured", "unknown", "disconnected"].includes(driveStatus);
   $("drive-disconnect").classList.toggle("hidden", !canDisconnect);
   $("drive-disconnect").disabled = !canDisconnect;
-  $("mcp-status").textContent =
-    driveStatus === "connected"
-      ? "Agent access can use this workspace once MCP credentials are issued."
-      : "Connect Google Drive before enabling agent access.";
+  renderMcpStatus(status.mcp, driveStatus);
   $("audit-status").textContent = status.audit?.head
     ? "Audit log is receiving signed events."
     : "No audit log checkpoint found yet.";
+};
+
+const renderMcpStatus = (mcp, driveStatus) => {
+  const config = $("mcp-config");
+  const test = $("mcp-test");
+  $("mcp-test-result").textContent = "";
+  if (!mcp?.configured || !mcp.endpoint) {
+    $("mcp-status").textContent = "MCP server URL is not configured for this dashboard.";
+    config.classList.add("hidden");
+    test.disabled = true;
+    return;
+  }
+  $("mcp-status").textContent =
+    driveStatus === "connected"
+      ? "MCP is ready for this workspace. Test the signed session before using Drive tools."
+      : "MCP is configured. Connect Drive before using Drive tools.";
+  config.textContent =
+    "endpoint: " + mcp.endpoint + "\\n" + "audience: " + (mcp.audience || "pact-mcp");
+  config.classList.remove("hidden");
+  test.disabled = false;
 };
 
 const renderStatusUnavailable = (message) => {
@@ -1608,6 +1801,9 @@ const renderStatusUnavailable = (message) => {
   $("drive-disconnect").classList.add("hidden");
   $("drive-disconnect").disabled = true;
   $("mcp-status").textContent = "Agent access status is unavailable.";
+  $("mcp-config").classList.add("hidden");
+  $("mcp-test").disabled = true;
+  $("mcp-test-result").textContent = "";
   $("audit-status").textContent = message || "Audit log status is unavailable.";
 };
 
@@ -1704,6 +1900,32 @@ $("drive-disconnect").addEventListener("click", async () => {
   } catch (error) {
     button.disabled = false;
     setError(error instanceof Error ? error.message : "Drive disconnect failed");
+  }
+});
+
+$("mcp-test").addEventListener("click", async () => {
+  setError();
+  const button = $("mcp-test");
+  const result = $("mcp-test-result");
+  button.disabled = true;
+  result.textContent = "Testing MCP...";
+  try {
+    const body = await requestJson("/v1/mcp/test", {
+      method: "POST",
+      headers: { "x-pact-csrf": csrfToken },
+    });
+    if (body.response?.error) {
+      result.textContent =
+        "MCP denied the test call: " +
+        (body.response.error.message || body.response.error.code || "unknown error");
+    } else {
+      result.textContent = "MCP test passed with pact.whoami.";
+    }
+  } catch (error) {
+    result.textContent = "";
+    setError(error instanceof Error ? error.message : "MCP test failed");
+  } finally {
+    button.disabled = false;
   }
 });
 
