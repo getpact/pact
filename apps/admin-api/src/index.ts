@@ -357,6 +357,15 @@ type DriveExchangeResult = DriveTokenPayload & {
   scopes: string[];
 };
 
+class DriveConnectionRejectedError extends ValidationError {
+  constructor(
+    message: string,
+    readonly auditTarget: { reason: string; email: string },
+  ) {
+    super(message);
+  }
+}
+
 const driveVaultTarget = (userId: string): string => `user:${userId}`;
 
 const connectionStatus = (expiresAt: Date | null, status: string): string => {
@@ -501,14 +510,21 @@ const exchangeDriveCode = async (
   return result;
 };
 
-const revokeGoogleToken = async (env: Env, token: string): Promise<boolean> => {
+type GoogleRevokeResult =
+  | { ok: true; alreadyInvalid: false }
+  | { ok: false; alreadyInvalid: boolean; error: string };
+
+const revokeGoogleToken = async (env: Env, token: string): Promise<GoogleRevokeResult> => {
   const response = await fetch(env.GOOGLE_OAUTH_REVOKE_ENDPOINT ?? GOOGLE_REVOKE_ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     signal: AbortSignal.timeout(10_000),
     body: new URLSearchParams({ token }),
   });
-  return response.ok;
+  if (response.ok) return { ok: true, alreadyInvalid: false };
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const error = typeof body.error === "string" ? body.error : `http_${response.status}`;
+  return { ok: false, alreadyInvalid: error === "invalid_token", error };
 };
 
 app.get("/v1/workspaces/:id/connections/google-drive", async (c) => {
@@ -596,15 +612,10 @@ app.post("/v1/workspaces/:id/connections/google-drive/oauth", async (c) => {
       const user = lockedUsers[0];
       if (!user) throw new ValidationError("user not found");
       if (!user.googleSub || user.googleSub !== exchanged.googleSub) {
-        await auditInTx(
-          tx,
-          c,
-          ctx,
-          "admin.connection.google_drive.rejected",
+        throw new DriveConnectionRejectedError(
+          "google drive identity does not match signed-in user",
           { reason: "google_sub_mismatch", email: exchanged.email },
-          "deny",
         );
-        throw new ValidationError("google drive identity does not match signed-in user");
       }
 
       const existingSecret = await loadSecretString(tx, rawMek, {
@@ -628,7 +639,13 @@ app.post("/v1/workspaces/:id/connections/google-drive/oauth", async (c) => {
         email: exchanged.email,
       };
       const refreshToken = exchanged.refreshToken ?? existingRefreshToken;
-      if (refreshToken) tokenPayload.refreshToken = refreshToken;
+      if (!refreshToken) {
+        throw new DriveConnectionRejectedError(
+          "google drive did not return an offline refresh token; reconnect and approve offline access",
+          { reason: "missing_refresh_token", email: exchanged.email },
+        );
+      }
+      tokenPayload.refreshToken = refreshToken;
       if (exchanged.expiresAt) tokenPayload.expiresAt = exchanged.expiresAt;
       if (exchanged.scope) tokenPayload.scope = exchanged.scope;
       await storeSecret(tx, rawMek, {
@@ -704,6 +721,22 @@ app.post("/v1/workspaces/:id/connections/google-drive/oauth", async (c) => {
       },
     });
   } catch (e) {
+    if (e instanceof DriveConnectionRejectedError) {
+      try {
+        await withWorkspace(createClient(c.env.DATABASE_URL), workspaceId, (tx) =>
+          auditInTx(tx, c, ctx, "admin.connection.google_drive.rejected", e.auditTarget, "deny"),
+        );
+      } catch {
+        return c.json({ error: "audit_unavailable" }, 503);
+      }
+      return c.json({ error: e.code, message: e.message }, e.status as 400);
+    }
+    if (isUniqueViolation(e)) {
+      return c.json(
+        { error: "conflict", message: "active Google Drive connection already exists" },
+        409,
+      );
+    }
     if (e instanceof PactError) {
       return c.json({ error: e.code, message: e.message }, e.status as 400 | 401 | 403 | 404);
     }
@@ -735,8 +768,21 @@ app.delete("/v1/workspaces/:id/connections/google-drive", async (c) => {
       }
     } catch {}
     if (revokeToken) {
-      const revoked = await revokeGoogleToken(c.env, revokeToken).catch(() => false);
-      if (!revoked) {
+      try {
+        await withWorkspace(db, workspaceId, (tx) =>
+          auditInTx(tx, c, ctx, "admin.connection.google_drive.disconnect_attempt", {
+            hasGoogleToken: true,
+          }),
+        );
+      } catch {
+        return c.json({ error: "audit_unavailable" }, 503);
+      }
+      const revoked = await revokeGoogleToken(c.env, revokeToken).catch((error) => ({
+        ok: false as const,
+        alreadyInvalid: false,
+        error: error instanceof Error ? error.message : "google_revoke_failed",
+      }));
+      if (!revoked.ok && !revoked.alreadyInvalid) {
         try {
           await withWorkspace(db, workspaceId, (tx) =>
             auditInTx(
@@ -744,7 +790,7 @@ app.delete("/v1/workspaces/:id/connections/google-drive", async (c) => {
               c,
               ctx,
               "admin.connection.google_drive.disconnect_rejected",
-              { reason: "google_revoke_failed" },
+              { reason: "google_revoke_failed", error: revoked.error },
               "deny",
             ),
           );

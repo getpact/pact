@@ -1,3 +1,4 @@
+import { fromBase64 } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import {
   auditEvents,
@@ -7,6 +8,7 @@ import {
   revokedJtis,
   users,
   vaultSecrets,
+  workspaceOauthConnections,
   workspaces,
 } from "@getpact/db/schema";
 import {
@@ -15,6 +17,7 @@ import {
   issueTestToken,
   uniqueSlug,
 } from "@getpact/test-helpers";
+import { storeSecret } from "@getpact/vault";
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
@@ -407,6 +410,75 @@ run("admin api", () => {
     const body = (await res.json()) as { error?: string; message?: string };
     expect(body.error).toBe("invalid_request");
     expect(body.message).toContain("google drive oauth is not configured");
+  });
+
+  it("audits Drive disconnect before revoke and clears already-revoked grants", async () => {
+    const { env, created, token } = await setup();
+    const vaultTarget = `user:${created.adminUserId}`;
+    await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      await tx.insert(workspaceOauthConnections).values({
+        workspaceId: created.workspaceId,
+        provider: "google_drive",
+        userId: created.adminUserId,
+        providerSubject: "google-sub-1",
+        email: "alice@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget,
+      });
+      await storeSecret(tx, fromBase64(env.MEK), {
+        workspaceId: created.workspaceId,
+        kind: "google_drive_oauth",
+        target: vaultTarget,
+        plaintext: JSON.stringify({
+          accessToken: "drive-access",
+          refreshToken: "drive-refresh",
+          googleSub: "google-sub-1",
+          email: "alice@example.com",
+        }),
+      });
+    });
+
+    const fetchMock = vi.fn(async () => Response.json({ error: "invalid_token" }, { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const res = await callAdmin(
+        `/v1/workspaces/${created.workspaceId}/connections/google-drive`,
+        token,
+        "DELETE",
+        undefined,
+        { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
+      );
+      expect(res.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const [connection] = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        tx
+          .select({
+            status: workspaceOauthConnections.status,
+            disconnectedAt: workspaceOauthConnections.disconnectedAt,
+          })
+          .from(workspaceOauthConnections)
+          .where(eq(workspaceOauthConnections.workspaceId, created.workspaceId))
+          .limit(1),
+      );
+      expect(connection?.status).toBe("disconnected");
+      expect(connection?.disconnectedAt).toBeTruthy();
+
+      const events = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        tx
+          .select({ action: auditEvents.action })
+          .from(auditEvents)
+          .where(eq(auditEvents.workspaceId, created.workspaceId)),
+      );
+      expect(events.map((event) => event.action)).toEqual(
+        expect.arrayContaining([
+          "admin.connection.google_drive.disconnect_attempt",
+          "admin.connection.google_drive.disconnected",
+        ]),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("rejects brain delete from a different workspace", async () => {
