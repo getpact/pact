@@ -1,4 +1,8 @@
-import { createDriveAdapter, type DriveConnection } from "@getpact/adapter-drive";
+import {
+  createDriveAdapter,
+  createDriveClient,
+  type DriveConnection,
+} from "@getpact/adapter-drive";
 import {
   type Adapter,
   type AdapterContext,
@@ -10,7 +14,13 @@ import {
 } from "@getpact/adapter-sdk";
 import { createSlackAdapter } from "@getpact/adapter-slack";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
-import { auditEvents, policies, workspaceOauthConnections, workspaces } from "@getpact/db/schema";
+import {
+  auditEvents,
+  driveDocumentChunks,
+  policies,
+  workspaceOauthConnections,
+  workspaces,
+} from "@getpact/db/schema";
 import { loadSecretString, storeSecret } from "@getpact/vault";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
@@ -188,6 +198,11 @@ const DRIVE_PROVIDER = "google_drive";
 const DRIVE_SECRET_KIND = "google_drive_oauth";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 const DRIVE_REFRESH_SKEW_MS = 60_000;
+const DRIVE_INDEX_DEFAULT_CHUNK_CHARS = 1200;
+const DRIVE_INDEX_MAX_CHUNK_CHARS = 4000;
+const DRIVE_INDEX_MAX_CHUNKS = 80;
+const DRIVE_INDEX_MAX_CHARS = 250_000;
+const DRIVE_SEARCH_MAX_LIMIT = 20;
 const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const allowedDriveScopes = new Set([
   "openid",
@@ -202,7 +217,180 @@ const driveAdapter = createDriveAdapter({
   loadConnection: loadDriveConnection,
 });
 
-const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter, driveAdapter];
+const driveFileIndex: AdapterTool = {
+  descriptor: {
+    name: "pact.drive.file.index",
+    description: "Export a Google Drive file, chunk it, and store snippets for retrieval.",
+    inputSchema: {
+      type: "object",
+      required: ["fileId"],
+      properties: {
+        fileId: { type: "string" },
+        fileName: { type: "string" },
+        mimeType: { type: "string", enum: ["text/plain", "text/markdown"] },
+        modifiedTime: { type: "string" },
+        maxChars: { type: "number", minimum: 1000, maximum: DRIVE_INDEX_MAX_CHARS },
+        chunkChars: { type: "number", minimum: 400, maximum: DRIVE_INDEX_MAX_CHUNK_CHARS },
+      },
+    },
+  },
+  authorize: (input, ctx) => {
+    const fileId = stringInput(input, "fileId");
+    return {
+      action: "drive.file.index",
+      resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:file:${isSafeDriveFileId(fileId) ? fileId : "invalid"}`,
+    };
+  },
+  async handler(input, ctx, deps) {
+    const fileId = stringInput(input, "fileId");
+    if (!isSafeDriveFileId(fileId)) {
+      return { content: [{ type: "text", text: "valid fileId is required" }], isError: true };
+    }
+
+    const connection = await loadDriveConnection(ctx, deps);
+    if (!connection?.accessToken) {
+      return {
+        content: [{ type: "text", text: "Google Drive is not connected for this user." }],
+        isError: true,
+      };
+    }
+
+    const maxChars = clampNumber(
+      numberInput(input, "maxChars"),
+      1_000,
+      DRIVE_INDEX_MAX_CHARS,
+      80_000,
+    );
+    const chunkChars = clampNumber(
+      numberInput(input, "chunkChars"),
+      400,
+      DRIVE_INDEX_MAX_CHUNK_CHARS,
+      DRIVE_INDEX_DEFAULT_CHUNK_CHARS,
+    );
+    const mimeType = stringInput(input, "mimeType") ?? "text/plain";
+    const client = createDriveClient({ accessToken: connection.accessToken });
+    const exported = await client.exportText({ fileId, mimeType });
+    const text = exported.slice(0, maxChars);
+    const chunks = chunkText(text, chunkChars).slice(0, DRIVE_INDEX_MAX_CHUNKS);
+    const db = createClient(deps.databaseUrl);
+    const now = new Date();
+    const modifiedTime = parseOptionalDate(stringInput(input, "modifiedTime"));
+    const fileName = stringInput(input, "fileName");
+
+    await withWorkspace(db, ctx.workspaceId, async (tx) => {
+      await tx
+        .delete(driveDocumentChunks)
+        .where(
+          and(
+            eq(driveDocumentChunks.workspaceId, ctx.workspaceId),
+            eq(driveDocumentChunks.userId, ctx.userId),
+            eq(driveDocumentChunks.fileId, fileId),
+          ),
+        );
+      if (chunks.length === 0) return;
+      await tx.insert(driveDocumentChunks).values(
+        await Promise.all(
+          chunks.map(async (chunk, index) => ({
+            workspaceId: ctx.workspaceId,
+            userId: ctx.userId,
+            fileId,
+            fileName: fileName ?? null,
+            mimeType,
+            modifiedTime,
+            chunkIndex: index,
+            content: chunk,
+            contentSha256: await sha256Hex(chunk),
+            indexedAt: now,
+          })),
+        ),
+      );
+    });
+
+    return json({
+      fileId,
+      fileName,
+      chunks: chunks.length,
+      indexedChars: chunks.reduce((sum, chunk) => sum + chunk.length, 0),
+      truncated: exported.length > text.length || chunks.length === DRIVE_INDEX_MAX_CHUNKS,
+    });
+  },
+};
+
+const driveSearch: AdapterTool = {
+  descriptor: {
+    name: "pact.drive.search",
+    description: "Search indexed Google Drive chunks for agent context.",
+    inputSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string" },
+        limit: { type: "number", minimum: 1, maximum: DRIVE_SEARCH_MAX_LIMIT },
+      },
+    },
+  },
+  authorize: (input, ctx) => {
+    const query = stringInput(input, "query")?.trim().replace(/\s+/g, " ");
+    const queryPart = query ? encodeURIComponent(query).slice(0, 200) : "empty";
+    return {
+      action: "drive.search",
+      resource: `workspace:${ctx.workspaceId}:drive:user:${ctx.userId}:search:${queryPart}`,
+    };
+  },
+  async handler(input, ctx, deps) {
+    const query = stringInput(input, "query")?.trim();
+    if (!query) {
+      return { content: [{ type: "text", text: "query is required" }], isError: true };
+    }
+    const limit = clampNumber(numberInput(input, "limit"), 1, DRIVE_SEARCH_MAX_LIMIT, 5);
+    const db = createClient(deps.databaseUrl);
+    const rows = (await withWorkspace(db, ctx.workspaceId, (tx) =>
+      tx.execute(sql`
+        SELECT file_id AS "fileId",
+               file_name AS "fileName",
+               mime_type AS "mimeType",
+               chunk_index AS "chunkIndex",
+               content,
+               indexed_at AS "indexedAt",
+               ts_rank_cd(to_tsvector('english', content), websearch_to_tsquery('english', ${query})) AS rank
+        FROM drive_document_chunks
+        WHERE workspace_id = ${ctx.workspaceId}
+          AND user_id = ${ctx.userId}
+          AND to_tsvector('english', content) @@ websearch_to_tsquery('english', ${query})
+        ORDER BY rank DESC, indexed_at DESC
+        LIMIT ${limit}
+      `),
+    )) as Array<{
+      fileId: string;
+      fileName: string | null;
+      mimeType: string | null;
+      chunkIndex: number;
+      content: string;
+      indexedAt: Date | string;
+      rank: number;
+    }>;
+
+    return json({
+      query,
+      results: rows.map((row) => ({
+        fileId: row.fileId,
+        fileName: row.fileName,
+        mimeType: row.mimeType,
+        chunkIndex: row.chunkIndex,
+        snippet: snippetFor(row.content, query),
+        rank: row.rank,
+        indexedAt: formatTimestamp(row.indexedAt),
+      })),
+    });
+  },
+};
+
+const driveRagAdapter: Adapter = {
+  name: "google-drive-rag",
+  tools: [driveFileIndex, driveSearch],
+};
+
+const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter, driveAdapter, driveRagAdapter];
 
 function parseDriveConnection(value: string | null): DriveConnection | null {
   if (!value) return null;
@@ -487,6 +675,77 @@ function validateRefreshedDriveScope(scope: string): void {
   if (!scopes.includes(DRIVE_SCOPE) || scopes.some((value) => !allowedDriveScopes.has(value))) {
     throw new DriveRefreshError("google refresh returned unexpected Drive scopes", true);
   }
+}
+
+function stringInput(input: unknown, key: string): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberInput(input: unknown, key: string): number | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function clampNumber(
+  value: number | undefined,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function isSafeDriveFileId(fileId: string | undefined): fileId is string {
+  return !!fileId && /^[A-Za-z0-9_-]+$/.test(fileId);
+}
+
+function parseOptionalDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? new Date(ms) : null;
+}
+
+function chunkText(input: string, chunkChars: number): string[] {
+  const normalized = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!normalized) return [];
+  const chunks: string[] = [];
+  let cursor = 0;
+  while (cursor < normalized.length && chunks.length < DRIVE_INDEX_MAX_CHUNKS) {
+    const target = Math.min(normalized.length, cursor + chunkChars);
+    const nextBreak = normalized.lastIndexOf("\n\n", target);
+    const end = nextBreak > cursor + Math.floor(chunkChars * 0.5) ? nextBreak : target;
+    const chunk = normalized.slice(cursor, end).trim();
+    if (chunk) chunks.push(chunk);
+    cursor = end;
+    while (cursor < normalized.length && /\s/.test(normalized[cursor] ?? "")) cursor++;
+  }
+  return chunks;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function formatTimestamp(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function snippetFor(content: string, query: string): string {
+  const terms = query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((term) => term.replace(/[^a-z0-9_-]/g, ""))
+    .filter(Boolean);
+  const lower = content.toLowerCase();
+  const firstHit = terms.map((term) => lower.indexOf(term)).find((idx) => idx >= 0) ?? 0;
+  const start = Math.max(0, firstHit - 180);
+  const end = Math.min(content.length, firstHit + 420);
+  return content.slice(start, end).trim();
 }
 
 export const createToolRegistry = (

@@ -2,7 +2,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { fromBase64 } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { policies, workspaceOauthConnections, workspaces } from "@getpact/db/schema";
+import {
+  driveDocumentChunks,
+  policies,
+  workspaceOauthConnections,
+  workspaces,
+} from "@getpact/db/schema";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -348,6 +353,8 @@ run("mcp server", () => {
     expect(names).toContain("pact.slack.auth.test");
     expect(names).toContain("pact.drive.files.list");
     expect(names).toContain("pact.drive.file.get");
+    expect(names).toContain("pact.drive.file.index");
+    expect(names).toContain("pact.drive.search");
   });
 
   it("does not expose orphaned Drive vault secrets without active connection metadata", async () => {
@@ -453,6 +460,157 @@ run("mcp server", () => {
       expect(JSON.parse(result.content[0]?.text ?? "{}")).toEqual({
         files: [{ id: "file_1", name: "Plan" }],
       });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("indexes and searches Drive file chunks for retrieval", async () => {
+    const { env, created } = await setup();
+    const rawMek = fromBase64(env.MEK);
+    const vaultTarget = `user:${created.adminUserId}`;
+    await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      await tx.insert(workspaceOauthConnections).values({
+        workspaceId: created.workspaceId,
+        provider: "google_drive",
+        userId: created.adminUserId,
+        providerSubject: "google-sub-1",
+        email: "alice@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget,
+        expiresAt: new Date(Date.now() + 600_000),
+      });
+      await storeSecret(tx, rawMek, {
+        workspaceId: created.workspaceId,
+        kind: "google_drive_oauth",
+        target: vaultTarget,
+        plaintext: JSON.stringify({
+          accessToken: "active-drive-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date(Date.now() + 600_000).toISOString(),
+          googleSub: "google-sub-1",
+          email: "alice@example.com",
+        }),
+      });
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        expect(request.headers.get("authorization")).toBe("Bearer active-drive-token");
+        return new Response(
+          [
+            "Pact customer notes",
+            "",
+            "Brandon asked for Google Drive documents to become searchable agent context.".repeat(
+              8,
+            ),
+            "",
+            "The retrieval layer should return relevant snippets with file metadata.".repeat(8),
+          ].join("\n"),
+          { headers: { "content-type": "text/plain" } },
+        );
+      }),
+    );
+    try {
+      const ctx = {
+        workspaceId: created.workspaceId,
+        userId: created.adminUserId,
+        email: "alice@example.com",
+        groups: [],
+        roles: ["admin"],
+        jti: "jti-1",
+        token: "token-1",
+      };
+      const deps = { databaseUrl: env.DATABASE_URL, rawMek };
+      const indexed = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 18,
+          method: "tools/call",
+          params: {
+            name: "pact.drive.file.index",
+            arguments: {
+              fileId: "doc_1",
+              fileName: "Customer Notes",
+              chunkChars: 80,
+            },
+          },
+        },
+        ctx,
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps,
+        },
+      );
+      expect(indexed.error).toBeUndefined();
+      const indexResult = JSON.parse(
+        (indexed.result as { content: Array<{ text: string }> }).content[0]?.text ?? "{}",
+      ) as { chunks: number };
+      expect(indexResult.chunks).toBeGreaterThan(1);
+
+      const stored = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        tx
+          .select()
+          .from(driveDocumentChunks)
+          .where(eq(driveDocumentChunks.workspaceId, created.workspaceId)),
+      );
+      expect(stored.length).toBe(indexResult.chunks);
+
+      const searched = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 19,
+          method: "tools/call",
+          params: {
+            name: "pact.drive.search",
+            arguments: { query: "searchable agent context", limit: 3 },
+          },
+        },
+        ctx,
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps,
+        },
+      );
+      expect(searched.error).toBeUndefined();
+      const searchResult = JSON.parse(
+        (searched.result as { content: Array<{ text: string }> }).content[0]?.text ?? "{}",
+      ) as { results: Array<{ fileId: string; snippet: string }> };
+      expect(searchResult.results[0]?.fileId).toBe("doc_1");
+      expect(searchResult.results[0]?.snippet).toContain("searchable agent context");
+
+      const otherUserSearch = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 20,
+          method: "tools/call",
+          params: {
+            name: "pact.drive.search",
+            arguments: { query: "searchable agent context", limit: 3 },
+          },
+        },
+        {
+          ...ctx,
+          userId: "00000000-0000-0000-0000-000000000099",
+          email: "bob@example.com",
+          token: "token-2",
+          jti: "jti-2",
+        },
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps,
+        },
+      );
+      expect(otherUserSearch.error).toBeUndefined();
+      const otherUserSearchResult = JSON.parse(
+        (otherUserSearch.result as { content: Array<{ text: string }> }).content[0]?.text ?? "{}",
+      ) as { results: unknown[] };
+      expect(otherUserSearchResult.results).toEqual([]);
     } finally {
       vi.unstubAllGlobals();
     }
