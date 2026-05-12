@@ -59,6 +59,13 @@ Threat model and accepted gaps for the gateway, verifier, admin, audit, and issu
 - XSS would still allow same-origin UI actions during the victim's session and can read the CSRF token returned by `/v1/session`.
 - Treat any dashboard XSS as high severity. Do not add inline scripts, third-party scripts, broad `connect-src`, or token-bearing JSON responses to browser code.
 
+### 7. Drive retrieval plaintext index
+- `pact.drive.file.index` stores extracted Drive text chunks in Postgres so `pact.drive.search` can use native full-text search.
+- This is plaintext customer document content, not Vault-encrypted content. Encrypting the chunk body without a separate search service would break the current Postgres FTS retrieval path.
+- Mitigations in v1 beta: chunks are scoped by workspace and user, protected by RLS, purged on Drive disconnect, search requires an active Drive connection, and each returned file is revalidated against Google Drive before snippets are returned.
+- The Drive RAG MCP tools are gated by `DRIVE_RAG_ENABLED=true`; production defaults to disabled until a workspace has explicitly accepted this beta data-processing boundary.
+- Do not treat Drive retrieval as production-ready for regulated customer data until encrypted retrieval or a dedicated vector/search service with an explicit data-processing boundary is implemented.
+
 ## Out of scope
 
 - DDoS protection at the L3/L4 layer (Cloudflare responsibility).
