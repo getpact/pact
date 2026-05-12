@@ -17,10 +17,13 @@ Dashboard Worker for Pact users. It owns Google login, session cookies, workspac
 - `ISSUER_BASE_URL`
 - `ADMIN_API_BASE_URL`
 - `AUDIT_API_BASE_URL`
+- `MCP_SERVER_BASE_URL`
 - `GOOGLE_OAUTH_CLIENT_ID`
 - `WEB_ISSUER_SERVICE_TOKEN`
 
 Set `GOOGLE_OAUTH_CLIENT_ID` and `WEB_ISSUER_SERVICE_TOKEN` with `wrangler secret put` for production. The issuer must use the same `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `WEB_ISSUER_SERVICE_TOKEN`, and set `WEB_OAUTH_REDIRECT_URI` to `${WEB_BASE_URL}${WEB_OAUTH_CALLBACK_PATH}`. Provider tokens and Pact tokens must stay in HttpOnly cookies or server-side services. Browser JavaScript should only call same-origin dashboard endpoints.
+
+The dashboard requests `pact-admin`, `pact-audit`, and `pact-mcp` tokens during Google login. MCP tokens stay in HttpOnly cookies and are used only by same-origin dashboard routes such as `POST /v1/mcp/test`; they are not exposed to browser JavaScript.
 
 ## Local OAuth Caveat
 
