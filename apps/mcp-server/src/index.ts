@@ -17,6 +17,9 @@ type Env = {
   VERIFIER_URL?: string;
   VERIFIER_SERVICE?: { fetch: (request: Request) => Promise<Response> };
   VERIFIER_SERVICE_TOKEN?: string;
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+  GOOGLE_OAUTH_TOKEN_ENDPOINT?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -45,6 +48,12 @@ app.post("/:workspace/mcp", async (c) => {
     }
     throw e;
   }
+  if (
+    c.env.ENVIRONMENT === "production" &&
+    (!c.env.GOOGLE_OAUTH_CLIENT_ID || !c.env.GOOGLE_OAUTH_CLIENT_SECRET)
+  ) {
+    return c.json({ error: "misconfigured", message: "google oauth is not configured" }, 503);
+  }
 
   let ctx: Awaited<ReturnType<typeof authenticate>>;
   try {
@@ -71,6 +80,11 @@ app.post("/:workspace/mcp", async (c) => {
     deps: {
       databaseUrl: c.env.DATABASE_URL,
       ...(c.env.MEK ? { rawMek: fromBase64(c.env.MEK) } : {}),
+      providerConfig: {
+        GOOGLE_OAUTH_CLIENT_ID: c.env.GOOGLE_OAUTH_CLIENT_ID,
+        GOOGLE_OAUTH_CLIENT_SECRET: c.env.GOOGLE_OAUTH_CLIENT_SECRET,
+        GOOGLE_OAUTH_TOKEN_ENDPOINT: c.env.GOOGLE_OAUTH_TOKEN_ENDPOINT,
+      },
     },
     ...(verify ? { verify } : {}),
   });

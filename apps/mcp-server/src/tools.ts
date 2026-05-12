@@ -1,16 +1,18 @@
 import { createDriveAdapter, type DriveConnection } from "@getpact/adapter-drive";
 import {
   type Adapter,
+  type AdapterContext,
   type AdapterTool,
   buildToolRegistry,
   json,
+  type ToolDeps,
   type ToolDescriptor,
 } from "@getpact/adapter-sdk";
 import { createSlackAdapter } from "@getpact/adapter-slack";
-import { createClient, withWorkspace } from "@getpact/db";
+import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { auditEvents, policies, workspaceOauthConnections, workspaces } from "@getpact/db/schema";
-import { loadSecretString } from "@getpact/vault";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { loadSecretString, storeSecret } from "@getpact/vault";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 export type { ToolDeps, ToolDescriptor, ToolResult } from "@getpact/adapter-sdk";
 export type Tool = AdapterTool;
@@ -182,37 +184,22 @@ const slackAdapter = createSlackAdapter({
   },
 });
 
+const DRIVE_PROVIDER = "google_drive";
+const DRIVE_SECRET_KIND = "google_drive_oauth";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const DRIVE_REFRESH_SKEW_MS = 60_000;
+const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const allowedDriveScopes = new Set([
+  "openid",
+  "email",
+  "profile",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  DRIVE_SCOPE,
+]);
+
 const driveAdapter = createDriveAdapter({
-  loadConnection: async (ctx, deps) => {
-    if (!deps.rawMek) return null;
-    const db = createClient(deps.databaseUrl);
-    const value = await withWorkspace(db, ctx.workspaceId, async (tx) => {
-      const [connection] = await tx
-        .select({
-          vaultTarget: workspaceOauthConnections.vaultTarget,
-          status: workspaceOauthConnections.status,
-          expiresAt: workspaceOauthConnections.expiresAt,
-        })
-        .from(workspaceOauthConnections)
-        .where(
-          and(
-            eq(workspaceOauthConnections.workspaceId, ctx.workspaceId),
-            eq(workspaceOauthConnections.provider, "google_drive"),
-            eq(workspaceOauthConnections.userId, ctx.userId),
-            isNull(workspaceOauthConnections.disconnectedAt),
-          ),
-        )
-        .limit(1);
-      if (!connection || connection.status !== "connected") return null;
-      if (connection.expiresAt && connection.expiresAt.getTime() <= Date.now()) return null;
-      return loadSecretString(tx, deps.rawMek as Uint8Array, {
-        workspaceId: ctx.workspaceId,
-        kind: "google_drive_oauth",
-        target: connection.vaultTarget,
-      });
-    });
-    return parseDriveConnection(value);
-  },
+  loadConnection: loadDriveConnection,
 });
 
 const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter, driveAdapter];
@@ -235,6 +222,270 @@ function parseDriveConnection(value: string | null): DriveConnection | null {
     return connection;
   } catch {
     return null;
+  }
+}
+
+type DriveConnectionRow = {
+  id: string;
+  vaultTarget: string;
+  status: string;
+  expiresAt: Date | string | null;
+};
+
+type LoadedDriveConnection = {
+  row: DriveConnectionRow;
+  connection: DriveConnection;
+};
+
+async function loadDriveConnection(
+  ctx: AdapterContext,
+  deps: ToolDeps,
+): Promise<DriveConnection | null> {
+  if (!deps.rawMek) throw new Error("Drive credential store is not configured");
+  const db = createClient(deps.databaseUrl);
+  const snapshot = await withWorkspace(db, ctx.workspaceId, (tx) =>
+    loadDriveConnectionSnapshot(tx, ctx, deps, false),
+  );
+  if (!snapshot) return null;
+  if (!shouldRefreshDriveConnection(snapshot.row, snapshot.connection)) {
+    return snapshot.connection;
+  }
+  if (!snapshot.connection.refreshToken) {
+    await withWorkspace(db, ctx.workspaceId, (tx) =>
+      markDriveRefreshFailure(tx, snapshot.row.id, "drive refresh token is missing", {
+        permanent: true,
+      }),
+    );
+    return null;
+  }
+
+  const locked = await withWorkspace(db, ctx.workspaceId, async (tx) => {
+    const locked = await loadDriveConnectionSnapshot(tx, ctx, deps, true);
+    if (!locked) return null;
+    if (!shouldRefreshDriveConnection(locked.row, locked.connection)) {
+      return locked;
+    }
+    if (!locked.connection.refreshToken) {
+      await markDriveRefreshFailure(tx, locked.row.id, "drive refresh token is missing", {
+        permanent: true,
+      });
+      return null;
+    }
+    return locked;
+  });
+  if (!locked) return null;
+  if (!shouldRefreshDriveConnection(locked.row, locked.connection)) {
+    return locked.connection;
+  }
+
+  const refreshed = await refreshDriveConnection(locked.connection, deps).catch(async (error) => {
+    const latest = await withWorkspace(db, ctx.workspaceId, async (tx) => {
+      const latest = await loadDriveConnectionSnapshot(tx, ctx, deps, true);
+      if (!latest) return null;
+      if (!sameDriveRefreshAttempt(locked.connection, latest.connection)) {
+        return latest;
+      }
+      if (!shouldRefreshDriveConnection(latest.row, latest.connection)) {
+        return latest;
+      }
+      await markDriveRefreshFailure(tx, latest.row.id, refreshErrorMessage(error), {
+        permanent: isPermanentDriveRefreshError(error),
+      });
+      return null;
+    });
+    if (latest && !shouldRefreshDriveConnection(latest.row, latest.connection)) {
+      return latest.connection;
+    }
+    return null;
+  });
+  if (!refreshed) return null;
+
+  return withWorkspace(db, ctx.workspaceId, async (tx) => {
+    const latest = await loadDriveConnectionSnapshot(tx, ctx, deps, true);
+    if (!latest) return null;
+    if (!shouldRefreshDriveConnection(latest.row, latest.connection)) {
+      return latest.connection;
+    }
+    await storeSecret(tx, deps.rawMek as Uint8Array, {
+      workspaceId: ctx.workspaceId,
+      kind: DRIVE_SECRET_KIND,
+      target: latest.row.vaultTarget,
+      plaintext: JSON.stringify(refreshed),
+    });
+    await tx
+      .update(workspaceOauthConnections)
+      .set({
+        status: "connected",
+        expiresAt: refreshed.expiresAt ? new Date(refreshed.expiresAt) : null,
+        lastRefreshAt: new Date(),
+        lastError: null,
+      })
+      .where(eq(workspaceOauthConnections.id, latest.row.id));
+    return refreshed;
+  });
+}
+
+async function loadDriveConnectionSnapshot(
+  tx: Tx,
+  ctx: AdapterContext,
+  deps: ToolDeps,
+  forUpdate: boolean,
+): Promise<LoadedDriveConnection | null> {
+  const lockClause = forUpdate ? sql`FOR UPDATE` : sql``;
+  const rows = (await tx.execute(sql`
+      SELECT id, vault_target AS "vaultTarget", status, expires_at AS "expiresAt"
+      FROM workspace_oauth_connections
+      WHERE workspace_id = ${ctx.workspaceId}
+        AND provider = ${DRIVE_PROVIDER}
+        AND user_id = ${ctx.userId}
+        AND disconnected_at IS NULL
+      LIMIT 1
+      ${lockClause}
+    `)) as DriveConnectionRow[];
+  const row = rows[0];
+  if (!row || row.status !== "connected") return null;
+
+  const value = await loadSecretString(tx, deps.rawMek as Uint8Array, {
+    workspaceId: ctx.workspaceId,
+    kind: DRIVE_SECRET_KIND,
+    target: row.vaultTarget,
+  });
+  const connection = parseDriveConnection(value);
+  if (!connection) {
+    await markDriveRefreshFailure(tx, row.id, "drive credentials were missing or invalid");
+    return null;
+  }
+  return { row, connection };
+}
+
+function shouldRefreshDriveConnection(row: DriveConnectionRow, connection: DriveConnection) {
+  const expiresAtMs = earliestExpirationMs(row.expiresAt, connection.expiresAt);
+  return expiresAtMs !== null && expiresAtMs <= Date.now() + DRIVE_REFRESH_SKEW_MS;
+}
+
+function sameDriveRefreshAttempt(a: DriveConnection, b: DriveConnection): boolean {
+  return (
+    a.accessToken === b.accessToken &&
+    a.refreshToken === b.refreshToken &&
+    a.expiresAt === b.expiresAt
+  );
+}
+
+function earliestExpirationMs(
+  rowExpiresAt: Date | string | null,
+  secretExpiresAt: string | undefined,
+) {
+  const values = [
+    rowExpiresAt instanceof Date
+      ? rowExpiresAt.getTime()
+      : typeof rowExpiresAt === "string"
+        ? Date.parse(rowExpiresAt)
+        : undefined,
+    secretExpiresAt ? Date.parse(secretExpiresAt) : undefined,
+  ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (values.length === 0) return null;
+  return Math.min(...values);
+}
+
+class DriveRefreshError extends Error {
+  constructor(
+    message: string,
+    readonly permanent: boolean,
+  ) {
+    super(message);
+    this.name = "DriveRefreshError";
+  }
+}
+
+async function refreshDriveConnection(
+  connection: DriveConnection,
+  deps: ToolDeps,
+): Promise<DriveConnection> {
+  const clientId = deps.providerConfig?.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = deps.providerConfig?.GOOGLE_OAUTH_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error("google oauth client credentials are not configured");
+  }
+  if (!connection.refreshToken) {
+    throw new Error("drive refresh token is missing");
+  }
+
+  const response = await fetch(
+    deps.providerConfig?.GOOGLE_OAUTH_TOKEN_ENDPOINT ?? GOOGLE_TOKEN_ENDPOINT,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      signal: AbortSignal.timeout(10_000),
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: connection.refreshToken,
+      }),
+    },
+  );
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    const error = typeof body.error === "string" ? body.error : `http_${response.status}`;
+    throw new DriveRefreshError(
+      `google refresh failed: ${error}`,
+      permanentGoogleRefreshError(error),
+    );
+  }
+  if (typeof body.access_token !== "string") {
+    throw new Error("google refresh response missing access_token");
+  }
+
+  const refreshed: DriveConnection = {
+    ...connection,
+    accessToken: body.access_token,
+  };
+  if (typeof body.refresh_token === "string") refreshed.refreshToken = body.refresh_token;
+  if (typeof body.expires_in === "number" && Number.isFinite(body.expires_in)) {
+    refreshed.expiresAt = new Date(Date.now() + body.expires_in * 1000).toISOString();
+  }
+  if (typeof body.scope !== "string") {
+    throw new DriveRefreshError("google refresh response missing scope", true);
+  }
+  validateRefreshedDriveScope(body.scope);
+  refreshed.scope = body.scope;
+  return refreshed;
+}
+
+async function markDriveRefreshFailure(
+  tx: Tx,
+  id: string,
+  message: string,
+  opts: { permanent?: boolean } = {},
+): Promise<void> {
+  await tx
+    .update(workspaceOauthConnections)
+    .set({
+      ...(opts.permanent ? { status: "expired" } : {}),
+      lastError: message.slice(0, 500),
+    })
+    .where(eq(workspaceOauthConnections.id, id));
+}
+
+function refreshErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "google refresh failed";
+}
+
+function permanentGoogleRefreshError(error: string): boolean {
+  return new Set(["invalid_grant", "unauthorized_client", "invalid_client"]).has(error);
+}
+
+function isPermanentDriveRefreshError(error: unknown): boolean {
+  return error instanceof DriveRefreshError && error.permanent;
+}
+
+function validateRefreshedDriveScope(scope: string): void {
+  const scopes = scope
+    .split(/\s+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!scopes.includes(DRIVE_SCOPE) || scopes.some((value) => !allowedDriveScopes.has(value))) {
+    throw new DriveRefreshError("google refresh returned unexpected Drive scopes", true);
   }
 }
 

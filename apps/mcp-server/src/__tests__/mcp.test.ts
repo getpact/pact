@@ -2,14 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { fromBase64 } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { policies, workspaces } from "@getpact/db/schema";
+import { policies, workspaceOauthConnections, workspaces } from "@getpact/db/schema";
 import {
   buildTestEnv,
   createTestWorkspace,
   issueTestToken,
   uniqueSlug,
 } from "@getpact/test-helpers";
-import { storeSecret } from "@getpact/vault";
+import { loadSecretString, storeSecret } from "@getpact/vault";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
@@ -211,6 +211,27 @@ describe("mcp builtin tool guards", () => {
       isError: true,
     });
   });
+
+  it("reports Drive credential store misconfiguration when MEK is missing", async () => {
+    const body = await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "pact.drive.files.list", arguments: {} },
+      },
+      { ...baseCtx, roles: ["admin"] },
+      {
+        audience: "pact-mcp",
+        verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+        deps: { databaseUrl: "postgres://unused" },
+      },
+    );
+    expect(body.error).toEqual({
+      code: -32000,
+      message: "Drive credential store is not configured",
+    });
+  });
 });
 
 run("mcp server", () => {
@@ -367,6 +388,450 @@ run("mcp server", () => {
       content: [{ type: "text", text: "Google Drive is not connected for this user." }],
       isError: true,
     });
+  });
+
+  it("loads an active Drive connection and calls Google Drive with the stored access token", async () => {
+    const { env, created } = await setup();
+    const rawMek = fromBase64(env.MEK);
+    await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      await tx.insert(workspaceOauthConnections).values({
+        workspaceId: created.workspaceId,
+        provider: "google_drive",
+        userId: created.adminUserId,
+        providerSubject: "google-sub-1",
+        email: "alice@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget: `user:${created.adminUserId}`,
+        expiresAt: new Date(Date.now() + 600_000),
+      });
+      await storeSecret(tx, rawMek, {
+        workspaceId: created.workspaceId,
+        kind: "google_drive_oauth",
+        target: `user:${created.adminUserId}`,
+        plaintext: JSON.stringify({
+          accessToken: "active-drive-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date(Date.now() + 600_000).toISOString(),
+          googleSub: "google-sub-1",
+          email: "alice@example.com",
+        }),
+      });
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      expect(request.headers.get("authorization")).toBe("Bearer active-drive-token");
+      return Response.json({ files: [{ id: "file_1", name: "Plan" }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const body = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 13,
+          method: "tools/call",
+          params: { name: "pact.drive.files.list", arguments: {} },
+        },
+        {
+          workspaceId: created.workspaceId,
+          userId: created.adminUserId,
+          email: "alice@example.com",
+          groups: [],
+          roles: ["admin"],
+          jti: "jti-1",
+          token: "token-1",
+        },
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps: { databaseUrl: env.DATABASE_URL, rawMek },
+        },
+      );
+      expect(body.error).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const result = body.result as { content: Array<{ text: string }> };
+      expect(JSON.parse(result.content[0]?.text ?? "{}")).toEqual({
+        files: [{ id: "file_1", name: "Plan" }],
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refreshes an expired Drive access token before calling Google Drive", async () => {
+    const { env, created } = await setup();
+    const rawMek = fromBase64(env.MEK);
+    const vaultTarget = `user:${created.adminUserId}`;
+    await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      await tx.insert(workspaceOauthConnections).values({
+        workspaceId: created.workspaceId,
+        provider: "google_drive",
+        userId: created.adminUserId,
+        providerSubject: "google-sub-1",
+        email: "alice@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget,
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      await storeSecret(tx, rawMek, {
+        workspaceId: created.workspaceId,
+        kind: "google_drive_oauth",
+        target: vaultTarget,
+        plaintext: JSON.stringify({
+          accessToken: "expired-drive-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date(Date.now() - 60_000).toISOString(),
+          googleSub: "google-sub-1",
+          email: "alice@example.com",
+        }),
+      });
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (request.url.includes("oauth2.googleapis.com/token")) {
+        const body = await request.text();
+        expect(body).toContain("grant_type=refresh_token");
+        expect(body).toContain("refresh_token=refresh-token");
+        return Response.json({
+          access_token: "fresh-drive-token",
+          expires_in: 3600,
+          scope: "https://www.googleapis.com/auth/drive.readonly",
+        });
+      }
+      expect(request.headers.get("authorization")).toBe("Bearer fresh-drive-token");
+      return Response.json({ files: [{ id: "file_2", name: "Fresh" }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const body = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 14,
+          method: "tools/call",
+          params: { name: "pact.drive.files.list", arguments: {} },
+        },
+        {
+          workspaceId: created.workspaceId,
+          userId: created.adminUserId,
+          email: "alice@example.com",
+          groups: [],
+          roles: ["admin"],
+          jti: "jti-1",
+          token: "token-1",
+        },
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps: {
+            databaseUrl: env.DATABASE_URL,
+            rawMek,
+            providerConfig: {
+              GOOGLE_OAUTH_CLIENT_ID: "google-client",
+              GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+            },
+          },
+        },
+      );
+      expect(body.error).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const result = body.result as { content: Array<{ text: string }> };
+      expect(JSON.parse(result.content[0]?.text ?? "{}")).toEqual({
+        files: [{ id: "file_2", name: "Fresh" }],
+      });
+
+      const stored = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        loadSecretString(tx, rawMek, {
+          workspaceId: created.workspaceId,
+          kind: "google_drive_oauth",
+          target: vaultTarget,
+        }),
+      );
+      expect(stored).toContain("fresh-drive-token");
+      const [connection] = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        tx
+          .select({
+            status: workspaceOauthConnections.status,
+            lastRefreshAt: workspaceOauthConnections.lastRefreshAt,
+            lastError: workspaceOauthConnections.lastError,
+          })
+          .from(workspaceOauthConnections)
+          .where(eq(workspaceOauthConnections.workspaceId, created.workspaceId))
+          .limit(1),
+      );
+      expect(connection?.status).toBe("connected");
+      expect(connection?.lastRefreshAt).toBeTruthy();
+      expect(connection?.lastError).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("marks Drive connection expired when Google refresh fails", async () => {
+    const { env, created } = await setup();
+    const rawMek = fromBase64(env.MEK);
+    const vaultTarget = `user:${created.adminUserId}`;
+    await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      await tx.insert(workspaceOauthConnections).values({
+        workspaceId: created.workspaceId,
+        provider: "google_drive",
+        userId: created.adminUserId,
+        providerSubject: "google-sub-1",
+        email: "alice@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget,
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      await storeSecret(tx, rawMek, {
+        workspaceId: created.workspaceId,
+        kind: "google_drive_oauth",
+        target: vaultTarget,
+        plaintext: JSON.stringify({
+          accessToken: "expired-drive-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date(Date.now() - 60_000).toISOString(),
+          googleSub: "google-sub-1",
+          email: "alice@example.com",
+        }),
+      });
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ error: "invalid_grant" }, { status: 400 })),
+    );
+    try {
+      const body = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 15,
+          method: "tools/call",
+          params: { name: "pact.drive.files.list", arguments: {} },
+        },
+        {
+          workspaceId: created.workspaceId,
+          userId: created.adminUserId,
+          email: "alice@example.com",
+          groups: [],
+          roles: ["admin"],
+          jti: "jti-1",
+          token: "token-1",
+        },
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps: {
+            databaseUrl: env.DATABASE_URL,
+            rawMek,
+            providerConfig: {
+              GOOGLE_OAUTH_CLIENT_ID: "google-client",
+              GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+            },
+          },
+        },
+      );
+      expect(body.error).toBeUndefined();
+      expect(body.result).toEqual({
+        content: [{ type: "text", text: "Google Drive is not connected for this user." }],
+        isError: true,
+      });
+      const [connection] = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        tx
+          .select({
+            status: workspaceOauthConnections.status,
+            lastError: workspaceOauthConnections.lastError,
+          })
+          .from(workspaceOauthConnections)
+          .where(eq(workspaceOauthConnections.workspaceId, created.workspaceId))
+          .limit(1),
+      );
+      expect(connection?.status).toBe("expired");
+      expect(connection?.lastError).toContain("invalid_grant");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not expire a Drive connection when another request already refreshed it", async () => {
+    const { env, created } = await setup();
+    const rawMek = fromBase64(env.MEK);
+    const vaultTarget = `user:${created.adminUserId}`;
+    await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      await tx.insert(workspaceOauthConnections).values({
+        workspaceId: created.workspaceId,
+        provider: "google_drive",
+        userId: created.adminUserId,
+        providerSubject: "google-sub-1",
+        email: "alice@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget,
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      await storeSecret(tx, rawMek, {
+        workspaceId: created.workspaceId,
+        kind: "google_drive_oauth",
+        target: vaultTarget,
+        plaintext: JSON.stringify({
+          accessToken: "expired-drive-token",
+          refreshToken: "refresh-token",
+          expiresAt: new Date(Date.now() - 60_000).toISOString(),
+          googleSub: "google-sub-1",
+          email: "alice@example.com",
+        }),
+      });
+    });
+
+    const freshExpiresAt = new Date(Date.now() + 600_000).toISOString();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (request.url.includes("oauth2.googleapis.com/token")) {
+        await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+          await storeSecret(tx, rawMek, {
+            workspaceId: created.workspaceId,
+            kind: "google_drive_oauth",
+            target: vaultTarget,
+            plaintext: JSON.stringify({
+              accessToken: "concurrent-fresh-token",
+              refreshToken: "refresh-token",
+              expiresAt: freshExpiresAt,
+              googleSub: "google-sub-1",
+              email: "alice@example.com",
+            }),
+          });
+          await tx
+            .update(workspaceOauthConnections)
+            .set({ status: "connected", expiresAt: new Date(freshExpiresAt), lastError: null })
+            .where(eq(workspaceOauthConnections.workspaceId, created.workspaceId));
+        });
+        return Response.json({ error: "invalid_grant" }, { status: 400 });
+      }
+      expect(request.headers.get("authorization")).toBe("Bearer concurrent-fresh-token");
+      return Response.json({ files: [{ id: "file_3", name: "Concurrent" }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const body = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 17,
+          method: "tools/call",
+          params: { name: "pact.drive.files.list", arguments: {} },
+        },
+        {
+          workspaceId: created.workspaceId,
+          userId: created.adminUserId,
+          email: "alice@example.com",
+          groups: [],
+          roles: ["admin"],
+          jti: "jti-1",
+          token: "token-1",
+        },
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps: {
+            databaseUrl: env.DATABASE_URL,
+            rawMek,
+            providerConfig: {
+              GOOGLE_OAUTH_CLIENT_ID: "google-client",
+              GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+            },
+          },
+        },
+      );
+      expect(body.error).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const [connection] = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        tx
+          .select({
+            status: workspaceOauthConnections.status,
+            lastError: workspaceOauthConnections.lastError,
+          })
+          .from(workspaceOauthConnections)
+          .where(eq(workspaceOauthConnections.workspaceId, created.workspaceId))
+          .limit(1),
+      );
+      expect(connection?.status).toBe("connected");
+      expect(connection?.lastError).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("marks Drive connection expired without calling Drive when refresh token is missing", async () => {
+    const { env, created } = await setup();
+    const rawMek = fromBase64(env.MEK);
+    const vaultTarget = `user:${created.adminUserId}`;
+    await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      await tx.insert(workspaceOauthConnections).values({
+        workspaceId: created.workspaceId,
+        provider: "google_drive",
+        userId: created.adminUserId,
+        providerSubject: "google-sub-1",
+        email: "alice@example.com",
+        scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+        vaultTarget,
+        expiresAt: new Date(Date.now() + 30_000),
+      });
+      await storeSecret(tx, rawMek, {
+        workspaceId: created.workspaceId,
+        kind: "google_drive_oauth",
+        target: vaultTarget,
+        plaintext: JSON.stringify({
+          accessToken: "near-expiry-drive-token",
+          expiresAt: new Date(Date.now() + 30_000).toISOString(),
+          googleSub: "google-sub-1",
+          email: "alice@example.com",
+        }),
+      });
+    });
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const body = await handleMcp(
+        {
+          jsonrpc: "2.0",
+          id: 16,
+          method: "tools/call",
+          params: { name: "pact.drive.files.list", arguments: {} },
+        },
+        {
+          workspaceId: created.workspaceId,
+          userId: created.adminUserId,
+          email: "alice@example.com",
+          groups: [],
+          roles: ["admin"],
+          jti: "jti-1",
+          token: "token-1",
+        },
+        {
+          audience: env.MCP_AUDIENCE,
+          verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+          deps: { databaseUrl: env.DATABASE_URL, rawMek },
+        },
+      );
+      expect(body.error).toBeUndefined();
+      expect(body.result).toEqual({
+        content: [{ type: "text", text: "Google Drive is not connected for this user." }],
+        isError: true,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      const [connection] = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        tx
+          .select({
+            status: workspaceOauthConnections.status,
+            lastError: workspaceOauthConnections.lastError,
+          })
+          .from(workspaceOauthConnections)
+          .where(eq(workspaceOauthConnections.workspaceId, created.workspaceId))
+          .limit(1),
+      );
+      expect(connection?.status).toBe("expired");
+      expect(connection?.lastError).toContain("refresh token is missing");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("refuses tool calls when verifier is not configured", async () => {
