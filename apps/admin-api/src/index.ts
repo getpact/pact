@@ -18,6 +18,7 @@ import {
 } from "@getpact/db";
 import {
   brains,
+  driveDocumentChunks,
   groupMembers,
   groups,
   invites,
@@ -826,16 +827,28 @@ app.delete("/v1/workspaces/:id/connections/google-drive", async (c) => {
         kind: DRIVE_SECRET_KIND,
         target: rows[0].vaultTarget,
       });
+    }
+    const purgedChunks = await tx
+      .delete(driveDocumentChunks)
+      .where(
+        and(
+          eq(driveDocumentChunks.workspaceId, workspaceId),
+          eq(driveDocumentChunks.userId, ctx.userId),
+        ),
+      )
+      .returning({ id: driveDocumentChunks.id });
+    if (rows[0] || purgedChunks.length > 0) {
       await auditInTx(tx, c, ctx, "admin.connection.google_drive.disconnected", {
-        connectionId: rows[0].id,
+        connectionId: rows[0]?.id,
+        purgedDriveChunks: purgedChunks.length,
       });
     }
-    return rows;
+    return { rows, purgedChunks };
   });
-  if (removed.length === 0) {
+  if (removed.rows.length === 0 && removed.purgedChunks.length === 0) {
     return c.json({ connection: { status: "not_configured" } });
   }
-  return c.json({ ok: true });
+  return c.json({ ok: true, purgedDriveChunks: removed.purgedChunks.length });
 });
 
 app.post("/v1/workspaces/:id/brains", async (c) => {

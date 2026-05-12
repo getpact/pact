@@ -3,6 +3,7 @@ import { createClient, withWorkspace } from "@getpact/db";
 import {
   auditEvents,
   brains,
+  driveDocumentChunks,
   invites,
   policies,
   revokedJtis,
@@ -415,7 +416,13 @@ run("admin api", () => {
   it("audits Drive disconnect before revoke and clears already-revoked grants", async () => {
     const { env, created, token } = await setup();
     const vaultTarget = `user:${created.adminUserId}`;
+    const otherUserId = "00000000-0000-0000-0000-000000000099";
     await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      await tx.insert(users).values({
+        id: otherUserId,
+        workspaceId: created.workspaceId,
+        email: "bob@example.com",
+      });
       await tx.insert(workspaceOauthConnections).values({
         workspaceId: created.workspaceId,
         provider: "google_drive",
@@ -435,6 +442,26 @@ run("admin api", () => {
           googleSub: "google-sub-1",
           email: "alice@example.com",
         }),
+      });
+      await tx.insert(driveDocumentChunks).values({
+        workspaceId: created.workspaceId,
+        userId: created.adminUserId,
+        fileId: "doc_1",
+        fileName: "Customer Notes",
+        mimeType: "text/plain",
+        chunkIndex: 0,
+        content: "sensitive cached Drive text",
+        contentSha256: "sha",
+      });
+      await tx.insert(driveDocumentChunks).values({
+        workspaceId: created.workspaceId,
+        userId: otherUserId,
+        fileId: "doc_2",
+        fileName: "Other Notes",
+        mimeType: "text/plain",
+        chunkIndex: 0,
+        content: "other user cached Drive text",
+        contentSha256: "sha2",
       });
     });
 
@@ -463,6 +490,14 @@ run("admin api", () => {
       );
       expect(connection?.status).toBe("disconnected");
       expect(connection?.disconnectedAt).toBeTruthy();
+      const chunks = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+        tx
+          .select()
+          .from(driveDocumentChunks)
+          .where(eq(driveDocumentChunks.workspaceId, created.workspaceId)),
+      );
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]?.userId).toBe(otherUserId);
 
       const events = await withWorkspace(adminDb, created.workspaceId, (tx) =>
         tx
