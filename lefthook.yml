@@ -40,3 +40,8 @@ pre-commit:
           echo "Review staged files. Move secrets to env or vault."
           exit 1
         fi
+
+pre-push:
+  commands:
+    typecheck:
+      run: pnpm typecheck

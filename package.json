@@ -20,6 +20,7 @@
     "check:openapi": "node scripts/check-openapi.mjs",
     "deploy:cloudflare": "sh scripts/deploy-cloudflare.sh",
     "smoke:cloudflare": "node scripts/smoke-cloudflare.mjs",
+    "verify": "bash scripts/verify-clean.sh",
     "prepare": "lefthook install"
   },
   "devDependencies": {
