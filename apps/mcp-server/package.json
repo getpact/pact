@@ -32,6 +32,7 @@
     "@cloudflare/workers-types": "^4.20250101.0",
     "@getpact/policy": "workspace:*",
     "@getpact/test-helpers": "workspace:*",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.0.0",
+    "@types/node": "^22.0.0"
   }
 }
