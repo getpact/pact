@@ -143,7 +143,10 @@ export class BrainAdapter implements SearchAdapter {
     const text = query.trim();
     if (text.length === 0) return [];
     const audienceFilter = normalizeAudienceFilter(opts.audienceFilter);
-    const audienceLiteral = audienceFilter ? formatTextArray(audienceFilter) : null;
+    const audiencePredicate =
+      audienceFilter === null
+        ? sql`TRUE`
+        : sql`(p.audience = '{}'::text[] OR p.audience && ${formatTextArray(audienceFilter)}::text[])`;
     const rows = (await this.withTx((tx) =>
       tx.execute(sql`
         SELECT
@@ -158,11 +161,7 @@ export class BrainAdapter implements SearchAdapter {
         WHERE c.workspace_id = ${this.deps.workspaceId}
           AND c.deleted_at IS NULL
           AND to_tsvector('english', c.content) @@ websearch_to_tsquery('english', ${text})
-          AND (
-            ${audienceLiteral === null}::boolean
-            OR p.audience = '{}'::text[]
-            OR p.audience && ${audienceLiteral}::text[]
-          )
+          AND ${audiencePredicate}
         ORDER BY score DESC, c.created_at DESC
         LIMIT ${limit}
       `),
@@ -176,7 +175,10 @@ export class BrainAdapter implements SearchAdapter {
     const limit = clampLimit(opts.limit, 20, 200);
     const vector = formatVector(embedding);
     const audienceFilter = normalizeAudienceFilter(opts.audienceFilter);
-    const audienceLiteral = audienceFilter ? formatTextArray(audienceFilter) : null;
+    const audiencePredicate =
+      audienceFilter === null
+        ? sql`TRUE`
+        : sql`(p.audience = '{}'::text[] OR p.audience && ${formatTextArray(audienceFilter)}::text[])`;
     const rows = (await this.withTx((tx) =>
       tx.execute(sql`
         SELECT
@@ -190,11 +192,7 @@ export class BrainAdapter implements SearchAdapter {
         JOIN brain_chunks c ON c.id = e.chunk_id AND c.deleted_at IS NULL
         JOIN brain_pages p ON p.id = c.page_id AND p.deleted_at IS NULL
         WHERE e.workspace_id = ${this.deps.workspaceId}
-          AND (
-            ${audienceLiteral === null}::boolean
-            OR p.audience = '{}'::text[]
-            OR p.audience && ${audienceLiteral}::text[]
-          )
+          AND ${audiencePredicate}
         ORDER BY e.embedding <=> ${vector}::vector
         LIMIT ${limit}
       `),
