@@ -8,9 +8,9 @@ import {
 } from "@getpact/test-helpers";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-import adminApp from "../../../../apps/admin-api/src/index.js";
 import issuer from "../../../../apps/issuer/src/index.js";
 import app from "../index.js";
+import { type AuditQueryRow, formatCursor, parseCursor } from "../routes/audit.js";
 
 const url = process.env.DATABASE_URL;
 const run = url ? describe : describe.skip;
@@ -22,7 +22,35 @@ const tokenWithBadHeader = (claims: Record<string, unknown>) =>
     "sig",
   ].join(".");
 
-describe("audit api auth hardening", () => {
+const cursorRow = {
+  id: "event-1",
+  workspaceId: "00000000-0000-0000-0000-000000000000",
+  auditSeq: 42,
+  ts: new Date("2026-05-10T12:34:56.789Z"),
+  actorKind: "user",
+  actorId: "user-1",
+  action: "verify.read",
+  target: { resource: "doc:1" },
+  decision: "allow",
+  supporting: null,
+  signingKeyId: "key-1",
+  prevHash: "prev",
+  thisHash: "hash",
+  signature: "sig",
+} satisfies AuditQueryRow;
+
+describe("audit query cursors", () => {
+  it("parses server-formatted sequence cursors", () => {
+    expect(parseCursor(formatCursor(cursorRow))).toEqual({ auditSeq: cursorRow.auditSeq });
+  });
+
+  it("rejects malformed cursors", () => {
+    expect(parseCursor("not-a-cursor")).toBeUndefined();
+    expect(parseCursor("42junk")).toBeUndefined();
+  });
+});
+
+describe("admin audit routes auth hardening", () => {
   it("rejects malformed token headers as unauthorized", async () => {
     const workspaceId = "00000000-0000-0000-0000-000000000000";
     const token = tokenWithBadHeader({
@@ -35,7 +63,9 @@ describe("audit api auth hardening", () => {
       { method: "GET", headers: { Authorization: `Bearer ${token}` } },
       {
         DATABASE_URL: "postgres://unused",
+        MEK: "unused",
         ISSUER_BASE_URL: "https://issuer.test/acme",
+        ADMIN_AUDIENCE: "pact-admin",
         AUDIT_AUDIENCE: "pact-audit",
       },
     );
@@ -43,7 +73,7 @@ describe("audit api auth hardening", () => {
   });
 });
 
-run("audit api", () => {
+run("admin audit routes", () => {
   const adminDb = createClient(url as string);
   const cleanup: string[] = [];
 
@@ -80,9 +110,8 @@ run("audit api", () => {
     const adminToken = admin.token;
     const auditToken = audit.token;
 
-    // Generate a few audit events via admin user.created.
     for (const email of ["a@example.com", "b@example.com", "c@example.com"]) {
-      await adminApp.request(
+      await app.request(
         `/v1/workspaces/${created.workspaceId}/users`,
         {
           method: "POST",
@@ -101,12 +130,14 @@ run("audit api", () => {
       );
     }
 
-    return { env, created, auditToken };
+    return { env, created, auditToken, adminToken };
   };
 
   const auditEnv = (env: Record<string, unknown>) => ({
     DATABASE_URL: env.DATABASE_URL,
+    MEK: env.MEK,
     ISSUER_BASE_URL: env.ISSUER_BASE_URL,
+    ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
     AUDIT_AUDIENCE: env.AUDIT_AUDIENCE,
   });
 
@@ -120,7 +151,7 @@ run("audit api", () => {
     expect(res.status).toBe(401);
   });
 
-  it("lists audit events for a workspace", async () => {
+  it("lists audit events with an audit-audience token", async () => {
     const { created, env, auditToken } = await setup();
     const res = await app.request(
       `/v1/workspaces/${created.workspaceId}/audit/events`,
@@ -131,6 +162,18 @@ run("audit api", () => {
     const body = (await res.json()) as { events: Array<{ action: string }>; nextCursor: null };
     const actions = body.events.map((e) => e.action);
     expect(actions.filter((a) => a === "admin.user.created").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("lists audit events with an admin-audience token", async () => {
+    const { created, env, adminToken } = await setup();
+    const res = await app.request(
+      `/v1/workspaces/${created.workspaceId}/audit/events`,
+      { method: "GET", headers: { Authorization: `Bearer ${adminToken}` } },
+      auditEnv(env),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { events: Array<{ action: string }> };
+    expect(body.events.length).toBeGreaterThan(0);
   });
 
   it("filters events by action", async () => {
@@ -181,5 +224,16 @@ run("audit api", () => {
     };
     expect(body.head).not.toBeNull();
     expect(body.head?.lastHash.length).toBeGreaterThan(0);
+  });
+
+  it("isolates events across workspaces", async () => {
+    const first = await setup();
+    const second = await setup();
+    const res = await app.request(
+      `/v1/workspaces/${first.created.workspaceId}/audit/events`,
+      { method: "GET", headers: { Authorization: `Bearer ${second.auditToken}` } },
+      auditEnv(first.env),
+    );
+    expect(res.status).toBe(401);
   });
 });

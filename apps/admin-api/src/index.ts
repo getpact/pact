@@ -27,7 +27,15 @@ import {
   users,
   workspaceOauthConnections,
 } from "@getpact/db/schema";
-import { createLogger, requestLogger } from "@getpact/logger";
+import {
+  type AnalyticsEngineDataset,
+  createLogger,
+  type MetricsClient,
+  metricsFromEnv,
+  requestLogger,
+  type SentryClient,
+  sentryFromEnv,
+} from "@getpact/logger";
 import { tryParsePolicy } from "@getpact/policy";
 import { deleteSecret, loadSecretString, storeSecret } from "@getpact/vault";
 import { and, desc, eq, max, sql } from "drizzle-orm";
@@ -38,6 +46,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { writeAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
+import { registerAuditRoutes } from "./routes/audit.js";
 
 type Env = {
   DATABASE_URL: string;
@@ -45,6 +54,7 @@ type Env = {
   ISSUER_BASE_URL: string;
   ENVIRONMENT?: string;
   ADMIN_AUDIENCE?: string;
+  AUDIT_AUDIENCE?: string;
   UPSTREAM_HOST_ALLOWLIST?: string;
   GOOGLE_OAUTH_CLIENT_ID?: string;
   GOOGLE_OAUTH_CLIENT_SECRET?: string;
@@ -54,13 +64,34 @@ type Env = {
   GOOGLE_OAUTH_REVOKE_ENDPOINT?: string;
   GOOGLE_DRIVE_OAUTH_REDIRECT_URI?: string;
   REVOCATION_CACHE?: KVNamespace;
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  SENTRY_RELEASE?: string;
+  METRICS?: AnalyticsEngineDataset;
 };
-type AppCtx = Context<{ Bindings: Env }>;
+type AppVariables = {
+  sentry: SentryClient;
+  metrics: MetricsClient;
+};
 
-const app = new Hono<{ Bindings: Env }>();
+type AppCtx = Context<{ Bindings: Env; Variables: AppVariables }>;
+
+const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const logger = createLogger({ base: { app: "admin-api" } });
 app.use("*", requestLogger(logger, "admin-api"));
+app.use("*", async (c, next) => {
+  const sentry = sentryFromEnv(c.env, "admin-api");
+  const metrics = metricsFromEnv(c.env, "admin-api");
+  c.set("sentry", sentry);
+  c.set("metrics", metrics);
+  try {
+    await next();
+  } catch (err) {
+    sentry.captureRequest(c.req.raw, err);
+    throw err;
+  }
+});
 app.use("*", async (c, next) => {
   await next();
   const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
@@ -69,6 +100,8 @@ app.use("*", async (c, next) => {
 app.use("/v1/*", bodyLimit({ maxSize: 64 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
+
+registerAuditRoutes(app);
 
 const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Response> => {
   const audience = c.env.ADMIN_AUDIENCE ?? "pact-admin";

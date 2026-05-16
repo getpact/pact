@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-apps="issuer verifier mcp-server admin-api audit-api web"
+apps="issuer verifier mcp-server admin-api web"
 if [ "${PACT_DEPLOY_GATEWAY:-}" = "true" ]; then
   apps="$apps gateway"
 fi

@@ -12,8 +12,8 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 - KV namespace: `pact-revocation`
 - Custom domains configured by each Worker manifest:
   `app.getpact.dev`, `issuer.getpact.dev`, `verifier.getpact.dev`,
-  `mcp.getpact.dev`, `admin.getpact.dev`, `audit.getpact.dev`, and optionally
-  `gateway.getpact.dev`
+  `mcp.getpact.dev`, `admin.getpact.dev`, and optionally
+  `gateway.getpact.dev`. Audit read endpoints live under `admin.getpact.dev`.
 - Vars on admin API and gateway: `UPSTREAM_HOST_ALLOWLIST` with comma-separated
   exact hosts or wildcard suffixes, for example `httpbin.org,*.slack.com`
 - Platform SSRF control for the gateway: outbound Worker traffic must be pinned
@@ -44,7 +44,7 @@ Per-Worker `wrangler.toml` lives under `apps/<name>/wrangler.toml`.
 Run `pnpm deploy:cloudflare` from the repository root after bootstrap. The script
 validates Worker manifests, validates required Cloudflare secrets, runs
 `pnpm typecheck`, runs `pnpm build`, then deploys issuer, verifier, MCP server,
-admin API, audit API, and web dashboard in order.
+admin API, and web dashboard in order.
 
 Keep that order for dashboard MCP rollouts: the issuer must accept the
 `pact-mcp` dashboard audience before the web dashboard starts requesting MCP
@@ -97,7 +97,6 @@ PACT_SMOKE_WORKSPACE_ID=<workspace-id> \
 PACT_SMOKE_WORKSPACE_SLUG=<workspace-slug> \
 PACT_GATEWAY_URL=https://gateway.getpact.dev \
 PACT_ADMIN_API_URL=https://admin.getpact.dev \
-PACT_AUDIT_API_URL=https://audit.getpact.dev \
 PACT_SMOKE_GATEWAY_BRAIN=smoke-http \
 PACT_SMOKE_GATEWAY_PATH=get \
 PACT_SMOKE_GATEWAY_BASE_URL=https://httpbin.org \
