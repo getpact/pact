@@ -245,7 +245,8 @@ const consumeSendCapsForAudience = async (
         ),
       )
       .orderBy(sendCaps.createdAt)
-      .limit(1);
+      .limit(1)
+      .for("update", { skipLocked: true });
     if (!cap) {
       return {
         result: { kind: "deny", audienceUserId: entry, reason: "send_cap_required" },
