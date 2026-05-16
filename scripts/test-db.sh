@@ -39,10 +39,8 @@ if [ "$EXTERNAL_DB" = "false" ]; then
     exit 1
   fi
 
-  if ! docker ps --format '{{.Names}}' | grep -q "compose[-_]postgres"; then
-    echo "[test-db] starting local postgres via docker compose"
-    docker compose -f "$COMPOSE" up -d
-  fi
+  echo "[test-db] ensuring local postgres is up via docker compose (idempotent)"
+  docker compose -f "$COMPOSE" up -d
 
   echo "[test-db] waiting for postgres on ${DB_HOST}:${DB_PORT}"
   ready=false

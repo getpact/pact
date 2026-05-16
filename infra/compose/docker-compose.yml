@@ -2,6 +2,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    command: ["postgres", "-c", "max_connections=300"]
     environment:
       POSTGRES_USER: pact
       POSTGRES_PASSWORD: pact
