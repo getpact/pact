@@ -1,0 +1,185 @@
+{
+  "title": "Pact Workers Observability",
+  "uid": "pact-workers",
+  "schemaVersion": 38,
+  "version": 1,
+  "editable": true,
+  "tags": ["pact", "cloudflare", "workers"],
+  "timezone": "utc",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "cloudflare-app",
+        "current": {
+          "selected": false,
+          "text": "Cloudflare",
+          "value": "cloudflare-app"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Issuer mint latency p95 (ms)",
+      "datasource": "${datasource}",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 250 },
+              { "color": "red", "value": 750 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "raw",
+          "rawQuery": "SELECT quantileWeighted(0.95)(double1, _sample_interval) AS mint_p95, blob5 AS audience FROM metrics WHERE blob1 = 'issuer.mint_latency_p95' AND blob2 = 'histogram' GROUP BY audience, time(1m)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Verifier verify latency p95 (ms)",
+      "datasource": "${datasource}",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 75 },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "raw",
+          "rawQuery": "SELECT quantileWeighted(0.95)(double1, _sample_interval) AS verify_p95, blob5 AS audience FROM metrics WHERE blob1 = 'verifier.verify_latency_p95' AND blob2 = 'histogram' GROUP BY audience, time(1m)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Refresh reuse count (5m sum)",
+      "datasource": "${datasource}",
+      "gridPos": { "x": 0, "y": 8, "w": 8, "h": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "raw",
+          "rawQuery": "SELECT sum(double1 * _sample_interval) AS reuse_sum FROM metrics WHERE blob1 = 'refresh.reuse_count' AND blob2 = 'counter' AND timestamp >= now() - INTERVAL '5' MINUTE"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Keystore AAD mismatch (1h sum)",
+      "datasource": "${datasource}",
+      "gridPos": { "x": 8, "y": 8, "w": 8, "h": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "raw",
+          "rawQuery": "SELECT sum(double1 * _sample_interval) AS aad_mismatch_sum FROM metrics WHERE blob1 = 'keystore.aad_mismatch' AND blob2 = 'counter' AND timestamp >= now() - INTERVAL '1' HOUR"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "MCP tool error rate (errors/min by tool_name)",
+      "datasource": "${datasource}",
+      "gridPos": { "x": 0, "y": 14, "w": 24, "h": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "raw",
+          "rawQuery": "SELECT sum(double1 * _sample_interval) AS errors, blob5 AS tool_name FROM metrics WHERE blob1 = 'mcp.tool_error_rate' AND blob2 = 'counter' GROUP BY tool_name, time(1m)"
+        }
+      ]
+    }
+  ]
+}
