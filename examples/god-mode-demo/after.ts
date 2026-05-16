@@ -272,31 +272,6 @@ export const searchBrain = async (
   return { hits: fixtureFallbackHits(cap, fixture, k), source: "fixture" };
 };
 
-const sourceUriToFileId = (uri: string): string | null => {
-  const prefix = "gdrive://";
-  return uri.startsWith(prefix) ? uri.slice(prefix.length) : null;
-};
-
-export const applyScopeFilter = (
-  hits: SearchHit[],
-  cap: ScopedCapability,
-  fixture: DriveFixture,
-): SearchHit[] => {
-  const allowed = new Set(cap.scope.folder_id);
-  const byId = new Map(fixture.files.map((f) => [f.id, f]));
-  const out: SearchHit[] = [];
-  for (const hit of hits) {
-    const id = sourceUriToFileId(hit.source_uri);
-    if (!id) continue;
-    const file = byId.get(id);
-    if (!file) continue;
-    if (file.parents.some((parent) => allowed.has(parent))) {
-      out.push(hit);
-    }
-  }
-  return out;
-};
-
 export type AuditEntry = {
   ts: string;
   actor: string;

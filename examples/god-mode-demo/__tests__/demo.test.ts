@@ -3,7 +3,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
-  applyScopeFilter,
   buildAuditChain,
   buildMintBody,
   buildOutput,
@@ -330,23 +329,6 @@ describe("scope filtering", () => {
     audience: "mcp-server.local",
     source: "stub",
   };
-
-  it("applyScopeFilter is retained for back-compat but the live path no longer calls it", () => {
-    const allHits = fixture.files.slice(0, 200).map((f) => ({
-      source_uri: `gdrive://${f.id}`,
-      snippet: "",
-      score: 0,
-      page_id: null,
-      chunk_id: null,
-    }));
-    const filtered = applyScopeFilter(allHits, cap, fixture);
-    for (const hit of filtered) {
-      const id = hit.source_uri.replace("gdrive://", "");
-      const file = fixture.files.find((f) => f.id === id);
-      expect(file).toBeDefined();
-      expect(file!.parents.some((p) => cap.scope.folder_id.includes(p))).toBe(true);
-    }
-  });
 
   it("fixtureFallbackHits yields exactly 12 files for folder_X", () => {
     const hits = fixtureFallbackHits(cap, fixture, 50);
