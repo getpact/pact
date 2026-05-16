@@ -12,7 +12,15 @@ import {
   UnsafeRuntimeDbRoleError,
   withWorkspace,
 } from "@getpact/db";
-import { createLogger, requestLogger } from "@getpact/logger";
+import {
+  type AnalyticsEngineDataset,
+  createLogger,
+  type MetricsClient,
+  metricsFromEnv,
+  requestLogger,
+  type SentryClient,
+  sentryFromEnv,
+} from "@getpact/logger";
 import { databaseRateLimiter } from "@getpact/ratelimit";
 import { loadSecretString } from "@getpact/vault";
 import { and, eq } from "drizzle-orm";
@@ -36,9 +44,18 @@ type Env = {
   GATEWAY_FORWARD_HEADER_ALLOWLIST?: string;
   GATEWAY_RESPONSE_HEADER_ALLOWLIST?: string;
   UPSTREAM_HOST_ALLOWLIST?: string;
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  SENTRY_RELEASE?: string;
+  METRICS?: AnalyticsEngineDataset;
 };
 
-const app = new Hono<{ Bindings: Env }>();
+type AppVariables = {
+  sentry: SentryClient;
+  metrics: MetricsClient;
+};
+
+const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 const maxBodyBytes = 1024 * 1024;
 const DEFAULT_UPSTREAM_TIMEOUT_MS = 5000;
 const MAX_UPSTREAM_TIMEOUT_MS = 30000;
@@ -253,6 +270,18 @@ export const forwardedResponseHeaders = (headers: Headers, allowlist?: string): 
 };
 
 app.use("*", requestLogger(logger, "gateway"));
+app.use("*", async (c, next) => {
+  const sentry = sentryFromEnv(c.env, "gateway");
+  const metrics = metricsFromEnv(c.env, "gateway");
+  c.set("sentry", sentry);
+  c.set("metrics", metrics);
+  try {
+    await next();
+  } catch (err) {
+    sentry.captureRequest(c.req.raw, err);
+    throw err;
+  }
+});
 app.use("*", async (c, next) => {
   await next();
   const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
