@@ -98,3 +98,26 @@ export const newRequestId = (): string => {
   }
   return Math.random().toString(36).slice(2, 14);
 };
+
+export {
+  type AnalyticsEngineDataPoint,
+  type AnalyticsEngineDataset,
+  createMetrics,
+  METRIC_NAMES,
+  type MetricsClient,
+  type MetricsEnv,
+  type MetricsOptions,
+  type MetricsSink,
+  type MetricTags,
+  metricsFromEnv,
+} from "./metrics.js";
+export {
+  createSentry,
+  type SentryClient,
+  type SentryEnv,
+  type SentryEvent,
+  type SentryLevel,
+  type SentryOptions,
+  scrubPii,
+  sentryFromEnv,
+} from "./sentry.js";
