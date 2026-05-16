@@ -507,6 +507,9 @@ importers:
 
   packages/verifier-sdk-node:
     dependencies:
+      canonicalize:
+        specifier: ^2.0.0
+        version: 2.1.0
       jose:
         specifier: ^5.9.0
         version: 5.10.0

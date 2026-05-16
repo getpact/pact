@@ -12,6 +12,13 @@ export type {
   VerifyResult,
 } from "./verifyPactToken.js";
 export { verifyPactToken } from "./verifyPactToken.js";
+export {
+  type ProvenanceSigned,
+  type SearchHit,
+  type VerifyProvenanceOptions,
+  type VerifyProvenanceResult,
+  verifyProvenance,
+} from "./verifyProvenance.js";
 
 export type VerifierOptions = {
   jwksUrl: string;
