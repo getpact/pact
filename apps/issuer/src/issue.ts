@@ -11,7 +11,7 @@ import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { groupMembers, groups, roles, userRoles, users, workspaces } from "@getpact/db/schema";
 import { loadActiveSigningKey } from "@getpact/keystore";
 import { and, eq, sql } from "drizzle-orm";
-import { type IssuedRefresh, issueRefresh } from "./refresh.js";
+import { type IssuedRefresh, issueRefresh, redeemRefreshDetailed } from "./refresh.js";
 
 export type IssueTokenInput = {
   workspaceId: string;
@@ -69,6 +69,15 @@ const pgErrorCode = (value: unknown): string | null => {
 
 const isUniqueViolation = (value: unknown): boolean => pgErrorCode(value) === "23505";
 
+const refreshActionFor = (
+  decision: "allow" | "deny",
+  reason: string,
+): "issuer.refresh.succeeded" | "issuer.refresh.denied" | "issuer.refresh.reuse_detected" => {
+  if (decision === "allow") return "issuer.refresh.succeeded";
+  if (reason === "reuse_detected") return "issuer.refresh.reuse_detected";
+  return "issuer.refresh.denied";
+};
+
 const tryAuditRefresh = async (
   tx: Tx,
   input: {
@@ -80,6 +89,8 @@ const tryAuditRefresh = async (
     reason: string;
     oldAccessJti?: string | null;
     newAccessJti?: string;
+    familyId?: string;
+    offendingTokenId?: string;
   },
 ): Promise<void> => {
   try {
@@ -98,13 +109,15 @@ const tryAuditRefresh = async (
       event: {
         actorKind: input.userId ? "user" : "system",
         ...(input.userId ? { actorId: input.userId } : {}),
-        action: input.decision === "allow" ? "issuer.refresh.succeeded" : "issuer.refresh.denied",
+        action: refreshActionFor(input.decision, input.reason),
         target: { audience: input.audience },
         decision: input.decision,
         supporting: {
           reason: input.reason,
           oldAccessJti: input.oldAccessJti ?? null,
           newAccessJti: input.newAccessJti ?? null,
+          familyId: input.familyId ?? null,
+          offendingTokenId: input.offendingTokenId ?? null,
         },
       },
     });
@@ -409,11 +422,30 @@ export const redeemRefreshAndIssue = async (
   rawMek: Uint8Array,
   input: RedeemTokenInput,
 ): Promise<IssueTokenResult | null> => {
-  const { redeemRefresh } = await import("./refresh.js");
   const db = createClient(databaseUrl);
   return withWorkspace(db, input.workspaceId, async (tx) => {
-    const redeemed = await redeemRefresh(tx, input.workspaceId, input.refreshToken, input.audience);
-    if (!redeemed) {
+    const outcome = await redeemRefreshDetailed(
+      tx,
+      input.workspaceId,
+      input.refreshToken,
+      input.audience,
+    );
+
+    if (outcome.kind === "reuse") {
+      await tryAuditRefresh(tx, {
+        workspaceId: input.workspaceId,
+        rawMek,
+        decision: "deny",
+        userId: outcome.detection.userId,
+        audience: input.audience,
+        reason: "reuse_detected",
+        familyId: outcome.detection.familyId,
+        offendingTokenId: outcome.detection.refreshTokenId,
+      });
+      return null;
+    }
+
+    if (outcome.kind === "miss") {
       await tryAuditRefresh(tx, {
         workspaceId: input.workspaceId,
         rawMek,
@@ -424,6 +456,7 @@ export const redeemRefreshAndIssue = async (
       return null;
     }
 
+    const redeemed = outcome.redeemed;
     const [user] = await tx.select().from(users).where(eq(users.id, redeemed.userId)).limit(1);
     if (!user) {
       await tryAuditRefresh(tx, {
@@ -434,6 +467,7 @@ export const redeemRefreshAndIssue = async (
         audience: input.audience,
         reason: "user_not_found",
         oldAccessJti: redeemed.accessJti,
+        familyId: redeemed.familyId,
       });
       return null;
     }
@@ -454,6 +488,8 @@ export const redeemRefreshAndIssue = async (
       audience: input.audience,
       accessJti: access.jti,
       ttlSeconds: input.refreshTtlSeconds ?? DEFAULT_REFRESH_TTL,
+      familyId: redeemed.familyId,
+      parentId: redeemed.refreshTokenId,
     });
 
     await tryAuditRefresh(tx, {
@@ -465,6 +501,7 @@ export const redeemRefreshAndIssue = async (
       reason: "rotated",
       oldAccessJti: redeemed.accessJti,
       newAccessJti: access.jti,
+      familyId: redeemed.familyId,
     });
 
     return {

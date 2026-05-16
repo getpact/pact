@@ -1,6 +1,6 @@
 import { exportAesKey, generateAesKey, toBase64, verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { auditEvents, workspaces } from "@getpact/db/schema";
+import { auditEvents, refreshTokens, workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
 import { eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
@@ -430,15 +430,126 @@ run("issuer end-to-end", () => {
     );
     const refreshEvents = events.filter((event) => event.action.startsWith("issuer.refresh."));
     expect(refreshEvents.map((event) => event.action).sort()).toEqual([
-      "issuer.refresh.denied",
+      "issuer.refresh.reuse_detected",
       "issuer.refresh.succeeded",
     ]);
     expect(
       refreshEvents.find((event) => event.action === "issuer.refresh.succeeded")?.decision,
     ).toBe("allow");
-    expect(refreshEvents.find((event) => event.action === "issuer.refresh.denied")?.decision).toBe(
-      "deny",
+    expect(
+      refreshEvents.find((event) => event.action === "issuer.refresh.reuse_detected")?.decision,
+    ).toBe("deny");
+  });
+
+  it("revokes the entire refresh family when a prior token is replayed", async () => {
+    const env = await buildEnv();
+    const slug = `iss-fam-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, name: "Family", adminEmail: "alice@example.com" }),
+      },
+      env,
     );
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+
+    const issueRes = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    const r1 = (await issueRes.json()) as { refreshToken: string };
+
+    const rotate = async (token: string): Promise<{ refreshToken: string }> => {
+      const res = await app.request(
+        "/v1/refresh",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workspaceId: created.workspaceId,
+            refreshToken: token,
+            audience: "pact-mcp",
+          }),
+        },
+        env,
+      );
+      expect(res.status).toBe(200);
+      return (await res.json()) as { refreshToken: string };
+    };
+
+    const r2 = await rotate(r1.refreshToken);
+    const r3 = await rotate(r2.refreshToken);
+    const r4 = await rotate(r3.refreshToken);
+
+    const replayRes = await app.request(
+      "/v1/refresh",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          refreshToken: r2.refreshToken,
+          audience: "pact-mcp",
+        }),
+      },
+      env,
+    );
+    expect(replayRes.status).toBe(401);
+
+    const tokens = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({
+          id: refreshTokens.id,
+          familyId: refreshTokens.familyId,
+          parentId: refreshTokens.parentId,
+          lastUsedAt: refreshTokens.lastUsedAt,
+          revokedAt: refreshTokens.revokedAt,
+          createdAt: refreshTokens.createdAt,
+        })
+        .from(refreshTokens)
+        .where(eq(refreshTokens.workspaceId, created.workspaceId)),
+    );
+    const ordered = [...tokens].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+    expect(ordered.length).toBe(4);
+    const familyIds = new Set(ordered.map((t) => t.familyId));
+    expect(familyIds.size).toBe(1);
+    expect(ordered[1]?.parentId).toBe(ordered[0]?.id);
+    expect(ordered[2]?.parentId).toBe(ordered[1]?.id);
+    expect(ordered[3]?.parentId).toBe(ordered[2]?.id);
+
+    const [t1, _t2, t3, t4] = ordered;
+    expect(t1?.lastUsedAt).not.toBeNull();
+    expect(t3?.revokedAt).not.toBeNull();
+    expect(t4?.revokedAt).not.toBeNull();
+
+    const events = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ action: auditEvents.action, supporting: auditEvents.supporting })
+        .from(auditEvents)
+        .where(eq(auditEvents.workspaceId, created.workspaceId)),
+    );
+    const reuse = events.find((e) => e.action === "issuer.refresh.reuse_detected");
+    expect(reuse).toBeDefined();
+    const supporting = reuse?.supporting as {
+      familyId?: string;
+      offendingTokenId?: string;
+    } | null;
+    expect(supporting?.familyId).toBe(ordered[0]?.familyId);
+    expect(supporting?.offendingTokenId).toBe(ordered[1]?.id);
   });
 
   it("redeems a refresh token at most once under concurrent requests", async () => {
