@@ -12,9 +12,15 @@ import {
 } from "@getpact/crypto";
 import { createClient, type DbClient, schema, withWorkspace } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createSigningKey, listVerifyingKeys, loadActiveSigningKey } from "../index.js";
+import {
+  createSigningKey,
+  getKeystoreMetrics,
+  listVerifyingKeys,
+  loadActiveSigningKey,
+  resetKeystoreMetricsForTests,
+} from "../index.js";
 
 const url = process.env.RLS_TEST_DB;
 const run = url ? describe : describe.skip;
@@ -84,7 +90,7 @@ run("keystore", () => {
     expect(jwt.id).not.toBe(audit.id);
   });
 
-  it("loads and rewraps legacy keys encrypted without AAD", async () => {
+  const insertLegacyAadStrippedKey = async (): Promise<{ id: string; wrappedBlob: string }> => {
     const pair = await generateEd25519Keypair();
     const privBytes = await exportPrivatePkcs8(pair.privateKey);
     const pubBytes = await exportPublicSpki(pair.publicKey);
@@ -93,6 +99,20 @@ run("keystore", () => {
     const merged = new Uint8Array(wrapped.iv.length + wrapped.ciphertext.length);
     merged.set(wrapped.iv, 0);
     merged.set(wrapped.ciphertext, wrapped.iv.length);
+    const wrappedBlob = toBase64(merged);
+
+    await withWorkspace(db, workspaceId, (tx) =>
+      tx
+        .update(schema.workspaceSigningKeys)
+        .set({ validForSigningUntil: sql`NOW()` })
+        .where(
+          and(
+            eq(schema.workspaceSigningKeys.workspaceId, workspaceId),
+            eq(schema.workspaceSigningKeys.kind, "jwt"),
+            isNull(schema.workspaceSigningKeys.validForSigningUntil),
+          ),
+        ),
+    );
 
     const [legacy] = await withWorkspace(db, workspaceId, (tx) =>
       tx
@@ -101,29 +121,165 @@ run("keystore", () => {
           workspaceId,
           kind: "jwt",
           publicKeySpki: toBase64(pubBytes),
-          privateKeyWrapped: toBase64(merged),
+          privateKeyWrapped: wrappedBlob,
         })
         .returning({ id: schema.workspaceSigningKeys.id }),
     );
     if (!legacy) throw new Error("legacy key insert failed");
+    return { id: legacy.id, wrappedBlob };
+  };
 
-    const active = await withWorkspace(db, workspaceId, (tx) =>
-      loadActiveSigningKey(tx, workspaceId, "jwt", rawMek),
-    );
-    expect(active.id).toBe(legacy.id);
+  it("throws on AAD-stripped ciphertext when KEYSTORE_LEGACY_REWRAP is unset", async () => {
+    const prev = process.env.KEYSTORE_LEGACY_REWRAP;
+    delete process.env.KEYSTORE_LEGACY_REWRAP;
+    resetKeystoreMetricsForTests();
+
+    const { id, wrappedBlob } = await insertLegacyAadStrippedKey();
+
+    await expect(
+      withWorkspace(db, workspaceId, (tx) => loadActiveSigningKey(tx, workspaceId, "jwt", rawMek)),
+    ).rejects.toThrow(/AAD verification failed/);
+
+    expect(getKeystoreMetrics().aadMismatch).toBeGreaterThan(0);
 
     await withWorkspace(db, workspaceId, async (tx) => {
       const [row] = await tx
         .select({ wrapped: schema.workspaceSigningKeys.privateKeyWrapped })
         .from(schema.workspaceSigningKeys)
-        .where(eq(schema.workspaceSigningKeys.id, legacy.id))
+        .where(eq(schema.workspaceSigningKeys.id, id))
         .limit(1);
-      expect(row?.wrapped).not.toBe(toBase64(merged));
+      expect(row?.wrapped).toBe(wrappedBlob);
     });
+
+    await withWorkspace(db, workspaceId, (tx) =>
+      tx.delete(schema.workspaceSigningKeys).where(eq(schema.workspaceSigningKeys.id, id)),
+    );
+
+    if (prev !== undefined) process.env.KEYSTORE_LEGACY_REWRAP = prev;
+  });
+
+  it("rewraps AAD-stripped ciphertext + warns on stderr when KEYSTORE_LEGACY_REWRAP=1", async () => {
+    const prev = process.env.KEYSTORE_LEGACY_REWRAP;
+    process.env.KEYSTORE_LEGACY_REWRAP = "1";
+    resetKeystoreMetricsForTests();
+
+    const { id, wrappedBlob } = await insertLegacyAadStrippedKey();
+
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    let captured = "";
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      captured += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      const active = await withWorkspace(db, workspaceId, (tx) =>
+        loadActiveSigningKey(tx, workspaceId, "jwt", rawMek),
+      );
+      expect(active.id).toBe(id);
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+
+    expect(captured).toMatch(/legacy AAD rewrap engaged/);
+    expect(getKeystoreMetrics().aadMismatch).toBeGreaterThan(0);
+
+    await withWorkspace(db, workspaceId, async (tx) => {
+      const [row] = await tx
+        .select({ wrapped: schema.workspaceSigningKeys.privateKeyWrapped })
+        .from(schema.workspaceSigningKeys)
+        .where(eq(schema.workspaceSigningKeys.id, id))
+        .limit(1);
+      expect(row?.wrapped).not.toBe(wrappedBlob);
+    });
+
+    await withWorkspace(db, workspaceId, (tx) =>
+      tx.delete(schema.workspaceSigningKeys).where(eq(schema.workspaceSigningKeys.id, id)),
+    );
+
+    if (prev === undefined) delete process.env.KEYSTORE_LEGACY_REWRAP;
+    else process.env.KEYSTORE_LEGACY_REWRAP = prev;
+  });
+
+  it("throws on tampered ciphertext regardless of KEYSTORE_LEGACY_REWRAP", async () => {
+    const pair = await generateEd25519Keypair();
+    const privBytes = await exportPrivatePkcs8(pair.privateKey);
+    const pubBytes = await exportPublicSpki(pair.publicKey);
+    const mek = await importAesKey(rawMek);
+    const aad = new TextEncoder().encode(`keystore:v1:${workspaceId}:jwt`);
+    const wrapped = await encryptAesGcm(mek, privBytes, aad);
+    const merged = new Uint8Array(wrapped.iv.length + wrapped.ciphertext.length);
+    merged.set(wrapped.iv, 0);
+    merged.set(wrapped.ciphertext, wrapped.iv.length);
+    const tampered = new Uint8Array(merged);
+    const tamperIndex = tampered.length - 1;
+    const last = tampered[tamperIndex] ?? 0;
+    tampered[tamperIndex] = last ^ 0xff;
+    const tamperedBlob = toBase64(tampered);
+
+    await withWorkspace(db, workspaceId, (tx) =>
+      tx
+        .update(schema.workspaceSigningKeys)
+        .set({ validForSigningUntil: sql`NOW()` })
+        .where(
+          and(
+            eq(schema.workspaceSigningKeys.workspaceId, workspaceId),
+            eq(schema.workspaceSigningKeys.kind, "jwt"),
+            isNull(schema.workspaceSigningKeys.validForSigningUntil),
+          ),
+        ),
+    );
+
+    const [bad] = await withWorkspace(db, workspaceId, (tx) =>
+      tx
+        .insert(schema.workspaceSigningKeys)
+        .values({
+          workspaceId,
+          kind: "jwt",
+          publicKeySpki: toBase64(pubBytes),
+          privateKeyWrapped: tamperedBlob,
+        })
+        .returning({ id: schema.workspaceSigningKeys.id }),
+    );
+    if (!bad) throw new Error("tampered key insert failed");
+
+    for (const flag of [undefined, "1"]) {
+      const prev = process.env.KEYSTORE_LEGACY_REWRAP;
+      if (flag === undefined) delete process.env.KEYSTORE_LEGACY_REWRAP;
+      else process.env.KEYSTORE_LEGACY_REWRAP = flag;
+      resetKeystoreMetricsForTests();
+
+      const originalWrite = process.stderr.write.bind(process.stderr);
+      process.stderr.write = (() => true) as typeof process.stderr.write;
+      try {
+        await expect(
+          withWorkspace(db, workspaceId, (tx) =>
+            loadActiveSigningKey(tx, workspaceId, "jwt", rawMek),
+          ),
+        ).rejects.toThrow();
+      } finally {
+        process.stderr.write = originalWrite;
+      }
+
+      await withWorkspace(db, workspaceId, async (tx) => {
+        const [row] = await tx
+          .select({ wrapped: schema.workspaceSigningKeys.privateKeyWrapped })
+          .from(schema.workspaceSigningKeys)
+          .where(eq(schema.workspaceSigningKeys.id, bad.id))
+          .limit(1);
+        expect(row?.wrapped).toBe(tamperedBlob);
+      });
+
+      if (prev === undefined) delete process.env.KEYSTORE_LEGACY_REWRAP;
+      else process.env.KEYSTORE_LEGACY_REWRAP = prev;
+    }
+
+    await withWorkspace(db, workspaceId, (tx) =>
+      tx.delete(schema.workspaceSigningKeys).where(eq(schema.workspaceSigningKeys.id, bad.id)),
+    );
   });
 });
 
-import { sql } from "drizzle-orm";
 import { findStaleSigningKeys, rotateSigningKey, rotateStaleKeys } from "../index.js";
 
 const adminUrl = process.env.DATABASE_URL;
