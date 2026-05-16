@@ -47,6 +47,7 @@ import { writeAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
 import { registerAuditRoutes } from "./routes/audit.js";
+import { registerSendCapRoutes } from "./routes/send-caps.js";
 
 type Env = {
   DATABASE_URL: string;
@@ -102,6 +103,7 @@ app.use("/v1/*", bodyLimit({ maxSize: 64 * 1024 }));
 app.get("/health", (c) => c.json({ ok: true }));
 
 registerAuditRoutes(app);
+registerSendCapRoutes(app);
 
 const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Response> => {
   const audience = c.env.ADMIN_AUDIENCE ?? "pact-admin";
