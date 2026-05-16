@@ -224,6 +224,7 @@ async function hybridSearchInner(
     ...((opts?.until ?? opts?.beforeDate) ? { beforeDate: opts.until ?? opts.beforeDate } : {}),
     ...(opts?.sourceId !== undefined ? { sourceId: opts.sourceId } : {}),
     ...(opts?.sourceIds !== undefined ? { sourceIds: opts.sourceIds } : {}),
+    ...(opts?.audienceFilter !== undefined ? { audienceFilter: opts.audienceFilter } : {}),
   };
 
   let expansionApplied = false;

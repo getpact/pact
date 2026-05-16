@@ -113,6 +113,14 @@ export interface SearchOpts {
   expansion?: boolean;
   tokenBudget?: number;
   useCache?: boolean;
+  /**
+   * Allow-list of audience labels the caller can see. The adapter must
+   * apply this BEFORE ranking. A page whose audience array overlaps this
+   * set is visible; pages with an empty audience array are public and
+   * always visible. When undefined or empty, no audience filter is
+   * applied (caller is trusted to gate visibility upstream).
+   */
+  audienceFilter?: string[];
 }
 
 /** Edge in a code or page graph. Used by two-pass structural expansion. */
