@@ -2,6 +2,7 @@
 import { writeFileSync } from "node:fs";
 import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
 import { runAuditCheckpoint, runAuditVerify } from "./audit-verify.js";
+import { runAgent } from "./commands/agent.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { type ClientId, installMcpServer } from "./mcp-install.js";
 import { serveStdio } from "./mcp-serve.js";
@@ -38,6 +39,9 @@ const help = () => {
       "  mcp serve        run the Pact MCP stdio proxy (used by clients)",
       "  audit verify     verify the workspace audit chain end to end",
       "  audit checkpoint export a signed audit head checkpoint",
+      "  agent mint       mint an agent capability token",
+      "  agent revoke     revoke an agent capability by jti",
+      "  agent list       list agents in a workspace",
       "  mek rewrap       rewrap stored secrets with a new MEK",
       "",
       "env:",
@@ -47,7 +51,9 @@ const help = () => {
       "  PACT_AUDIT_CHECKPOINT_FILE signed checkpoint path",
       "  PACT_AUDIT_CHECKPOINT_SECRET HMAC key for checkpoints",
       "  PACT_GOOGLE_CLIENT  Google OAuth client id (required for login)",
-      "  PACT_WORKSPACE_ID   workspace id (required for login)",
+      "  PACT_WORKSPACE_ID   workspace id (required for login and agent list)",
+      "  PACT_API_BASE       issuer base for agent commands (default https://issuer.getpact.dev)",
+      "  PACT_ADMIN_TOKEN    admin bearer token for agent commands",
       "  DATABASE_URL        postgres dsn (required for mek rewrap)",
       "  PACT_MEK_OLD        base64 current MEK (required for mek rewrap)",
       "  PACT_MEK_NEW        base64 new MEK (required for mek rewrap)",
@@ -302,6 +308,11 @@ const main = async () => {
     case "mek":
       await mek();
       return;
+    case "agent": {
+      const result = await runAgent(process.argv.slice(3));
+      if (result.exitCode !== 0) process.exit(result.exitCode);
+      return;
+    }
     default:
       process.stderr.write(`unknown command: ${command}\n`);
       process.exit(1);
