@@ -331,7 +331,7 @@ describe("scope filtering", () => {
     source: "stub",
   };
 
-  it("applyScopeFilter drops files outside the allowed folders", () => {
+  it("applyScopeFilter is retained for back-compat but the live path no longer calls it", () => {
     const allHits = fixture.files.slice(0, 200).map((f) => ({
       source_uri: `gdrive://${f.id}`,
       snippet: "",
@@ -353,7 +353,7 @@ describe("scope filtering", () => {
     expect(hits).toHaveLength(12);
   });
 
-  it("buildOutput reports the same count the demo prints", () => {
+  it("buildOutput reports the same count the demo prints (server-side audience filter)", () => {
     const hits = fixtureFallbackHits(cap, fixture, 50);
     const out = buildOutput(cap, hits, "fixture");
     expect(out.totalFiles).toBe(12);
@@ -361,6 +361,13 @@ describe("scope filtering", () => {
     expect(out.scope).toEqual({ folder_id: ["folder_X"] });
     expect(out.capabilitySource).toBe("stub");
     expect(out.searchSource).toBe("fixture");
+  });
+
+  it("live note advertises server-side audience filtering", () => {
+    const liveCap: ScopedCapability = { ...cap, source: "live" };
+    const out = buildOutput(liveCap, [], "live");
+    expect(out.note).toContain("server-side");
+    expect(out.note).toContain("audience");
   });
 
   it("audit chain records mint and redeem events", () => {

@@ -360,7 +360,7 @@ export const buildOutput = (
   note:
     cap.source === "stub" || searchSource === "fixture"
       ? "fallback path active; bring up the local stack (issuer, mcp-server, verifier) and set PACT_API_BASE, PACT_ADMIN_TOKEN, PACT_AGENT_ID, PACT_MCP_URL, PACT_MCP_TOKEN to exercise the live flow"
-      : "end-to-end live: capability minted by issuer, brain.search filtered to scope",
+      : "end-to-end live: capability minted by issuer, brain.search filtered server-side by audience",
 });
 
 const SEARCH_QUERY = env("PACT_DEMO_QUERY") ?? "Q3 planning notes";
@@ -380,8 +380,7 @@ const main = async (): Promise<void> => {
   });
 
   const search = await searchBrain(cap, SEARCH_QUERY, SEARCH_K, fixture);
-  const scoped = applyScopeFilter(search.hits, cap, fixture);
-  const hits = search.source === "fixture" ? search.hits : scoped;
+  const hits = search.hits;
   const output = buildOutput(cap, hits, search.source);
 
   process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
