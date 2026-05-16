@@ -1,3 +1,9 @@
+import {
+  DRIVE_SOURCE_URI_PREFIX,
+  type DriveAttestation,
+  decodeAttestation,
+  verifyDriveAttestation,
+} from "@getpact/adapter-drive/attestation";
 import { type Adapter, type AdapterTool, json, type ToolDeps } from "@getpact/adapter-sdk";
 import { writeEvent } from "@getpact/audit";
 import { chunkText } from "@getpact/brain-core/chunkers";
@@ -11,7 +17,7 @@ import {
   sendCaps,
   workspaces,
 } from "@getpact/db/schema";
-import { loadActiveSigningKey } from "@getpact/keystore";
+import { loadActiveHmacKey, loadActiveSigningKey } from "@getpact/keystore";
 import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { BrainAdapter } from "../brain-adapter.js";
 
@@ -318,6 +324,53 @@ const trySendCapAudit = async (
   }
 };
 
+const tryDriveAttestationAudit = async (
+  db: DbClient,
+  workspaceId: string,
+  rawMek: Uint8Array | undefined,
+  payload: {
+    actorUserId: string;
+    sourceUri: string;
+    reason: string;
+  },
+): Promise<void> => {
+  if (!rawMek) return;
+  try {
+    await withWorkspace(db, workspaceId, async (tx) => {
+      const [ws] = await tx
+        .select({ createdAt: workspaces.createdAt })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId))
+        .limit(1);
+      if (!ws) return;
+      const auditKey = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
+      await writeEvent(tx, {
+        workspaceId,
+        workspaceCreatedAt: ws.createdAt,
+        signingKeyId: auditKey.id,
+        signingKey: auditKey.privateKey,
+        event: {
+          actorKind: "user",
+          actorId: payload.actorUserId,
+          action: "brain.put.drive_attestation_invalid",
+          target: { sourceUri: payload.sourceUri },
+          decision: "deny",
+          supporting: { reason: payload.reason },
+        },
+      });
+    });
+  } catch {
+    // best-effort
+  }
+};
+
+const bufferToHex = (value: Buffer): string => value.toString("hex");
+
+const attestationInput = (input: unknown): DriveAttestation | null => {
+  if (!input || typeof input !== "object") return null;
+  return decodeAttestation((input as Record<string, unknown>).drive_attestation);
+};
+
 const findExistingPage = async (
   tx: Tx,
   workspaceId: string,
@@ -353,6 +406,14 @@ const brainPut: AdapterTool = {
         title: { type: "string" },
         author: { type: "string" },
         audience: { type: "array", items: { type: "string" } },
+        drive_attestation: {
+          type: "object",
+          required: ["payload", "mac"],
+          properties: {
+            payload: { type: "string" },
+            mac: { type: "string" },
+          },
+        },
       },
     },
   },
@@ -387,6 +448,62 @@ const brainPut: AdapterTool = {
     const audience = stringArrayInput(input, "audience") ?? [];
     const contentHash = await sha256Bytes(content);
     const db = createClient(deps.databaseUrl);
+
+    if (sourceUri.startsWith(DRIVE_SOURCE_URI_PREFIX)) {
+      const attestation = attestationInput(input);
+      if (!attestation) {
+        await tryDriveAttestationAudit(db, ctx.workspaceId, deps.rawMek, {
+          actorUserId: ctx.userId,
+          sourceUri,
+          reason: "missing",
+        });
+        return {
+          content: [{ type: "text", text: "drive_attestation_invalid: missing" }],
+          isError: true,
+        };
+      }
+      if (!deps.rawMek) {
+        return {
+          content: [{ type: "text", text: "drive_attestation_invalid: workspace key unavailable" }],
+          isError: true,
+        };
+      }
+      let keyBytes: Uint8Array;
+      try {
+        const loaded = await withWorkspace(db, ctx.workspaceId, (tx) =>
+          loadActiveHmacKey(tx, ctx.workspaceId, "adapter-drive", deps.rawMek as Uint8Array),
+        );
+        keyBytes = loaded.keyBytes;
+      } catch {
+        await tryDriveAttestationAudit(db, ctx.workspaceId, deps.rawMek, {
+          actorUserId: ctx.userId,
+          sourceUri,
+          reason: "key_load_failed",
+        });
+        return {
+          content: [{ type: "text", text: "drive_attestation_invalid: key_load_failed" }],
+          isError: true,
+        };
+      }
+      const verifyResult = await verifyDriveAttestation({
+        keyBytes,
+        attestation,
+        sourceUri,
+        contentHash: bufferToHex(contentHash),
+        audience,
+      });
+      if (!verifyResult.ok) {
+        await tryDriveAttestationAudit(db, ctx.workspaceId, deps.rawMek, {
+          actorUserId: ctx.userId,
+          sourceUri,
+          reason: verifyResult.reason,
+        });
+        return {
+          content: [{ type: "text", text: `drive_attestation_invalid: ${verifyResult.reason}` }],
+          isError: true,
+        };
+      }
+    }
 
     const existing = await withWorkspace(db, ctx.workspaceId, (tx) =>
       findExistingPage(tx, ctx.workspaceId, sourceUri, contentHash),
