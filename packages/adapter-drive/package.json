@@ -8,16 +8,24 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "type": "module",
+  "bin": {
+    "pact-drive-backfill": "./dist/cli-backfill.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./ingest": {
+      "types": "./dist/ingest.d.ts",
+      "import": "./dist/ingest.js"
     }
   },
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "backfill": "node ./dist/cli-backfill.js"
   },
   "dependencies": {
     "@getpact/adapter-sdk": "workspace:*"
@@ -27,10 +35,10 @@
     "vitest": "^3.2.4"
   },
   "files": [
-    "dist/*.js",
-    "dist/*.js.map",
-    "dist/*.d.ts",
-    "dist/*.d.ts.map",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
     "README.md",
     "LICENSE"
   ]
