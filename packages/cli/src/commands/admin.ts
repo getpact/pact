@@ -151,7 +151,7 @@ const ensureHmacKey = async (
 ): Promise<boolean> => {
   return withWorkspace(db, workspaceId, async (tx) => {
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(${HMAC_BACKFILL_LOCK_TAG}, hashtextextended(${workspaceId} || ':' || ${ADAPTER_DRIVE_KIND}, 0)::int4)`,
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${workspaceId} || ':' || ${ADAPTER_DRIVE_KIND}, ${HMAC_BACKFILL_LOCK_TAG}))`,
     );
     try {
       await loadActiveHmacKey(tx, workspaceId, ADAPTER_DRIVE_KIND, rawMek);
