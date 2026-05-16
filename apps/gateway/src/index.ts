@@ -139,7 +139,11 @@ export const gatewayAuthorization = (
 
 export const canonicalGatewaySearch = (search: string): string => {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-  const entries = [...params.entries()].sort(([leftKey, leftValue], [rightKey, rightValue]) => {
+  const collected: [string, string][] = [];
+  params.forEach((value, key) => {
+    collected.push([key, value]);
+  });
+  const entries = collected.sort(([leftKey, leftValue], [rightKey, rightValue]) => {
     const keyOrder = leftKey.localeCompare(rightKey);
     return keyOrder === 0 ? leftValue.localeCompare(rightValue) : keyOrder;
   });
