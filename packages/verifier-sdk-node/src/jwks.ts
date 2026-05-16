@@ -39,10 +39,42 @@ export class JwksCache {
   private readonly ttlMs: number;
   private readonly fetcher: JwksFetcher;
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly inflight = new Map<string, Promise<CacheEntry>>();
 
   constructor(options: JwksCacheOptions = {}) {
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.fetcher = options.fetcher ?? defaultFetcher;
+  }
+
+  private async loadEntry(url: string): Promise<CacheEntry> {
+    const pending = this.inflight.get(url);
+    if (pending) return pending;
+    const fetchPromise = (async (): Promise<CacheEntry> => {
+      let jwks: JSONWebKeySet;
+      try {
+        jwks = await this.fetcher(url);
+      } catch (err) {
+        if (err instanceof JwksFetchError) throw err;
+        throw new JwksFetchError("failed to fetch jwks", err);
+      }
+      const keys = new Map<string, KeyLike | Uint8Array>();
+      for (const jwk of jwks.keys) {
+        if (!jwk || typeof jwk.kid !== "string") continue;
+        try {
+          const imported = await importJWK(jwk, jwk.alg ?? "EdDSA");
+          keys.set(jwk.kid, imported);
+        } catch {
+          // skip keys we cannot import; matching by kid will surface the failure
+        }
+      }
+      const entry: CacheEntry = { expiresAt: Date.now() + this.ttlMs, keys };
+      this.cache.set(url, entry);
+      return entry;
+    })().finally(() => {
+      this.inflight.delete(url);
+    });
+    this.inflight.set(url, fetchPromise);
+    return fetchPromise;
   }
 
   async resolve(url: string, kid: string): Promise<KeyLike | Uint8Array> {
@@ -53,27 +85,8 @@ export class JwksCache {
       if (key) return key;
     }
 
-    let jwks: JSONWebKeySet;
-    try {
-      jwks = await this.fetcher(url);
-    } catch (err) {
-      if (err instanceof JwksFetchError) throw err;
-      throw new JwksFetchError("failed to fetch jwks", err);
-    }
-
-    const keys = new Map<string, KeyLike | Uint8Array>();
-    for (const jwk of jwks.keys) {
-      if (!jwk || typeof jwk.kid !== "string") continue;
-      try {
-        const imported = await importJWK(jwk, jwk.alg ?? "EdDSA");
-        keys.set(jwk.kid, imported);
-      } catch {
-        // skip keys we cannot import; matching by kid will surface the failure
-      }
-    }
-    this.cache.set(url, { expiresAt: now + this.ttlMs, keys });
-
-    const key = keys.get(kid);
+    const entry = await this.loadEntry(url);
+    const key = entry.keys.get(kid);
     if (!key) {
       throw new JwksFetchError(`jwks at ${url} has no key with kid ${kid}`);
     }
