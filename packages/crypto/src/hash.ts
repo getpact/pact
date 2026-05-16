@@ -27,3 +27,11 @@ export const fromBase64 = (b64: string): Uint8Array => {
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
 };
+
+export const toBase64Url = (bytes: Uint8Array): string =>
+  toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+
+export const fromBase64Url = (b64u: string): Uint8Array => {
+  const pad = b64u.length % 4 === 0 ? "" : "=".repeat(4 - (b64u.length % 4));
+  return fromBase64(b64u.replace(/-/g, "+").replace(/_/g, "/") + pad);
+};

@@ -3,3 +3,4 @@ export * from "./ed25519.js";
 export * from "./hash.js";
 export * from "./jcs.js";
 export * from "./jwt.js";
+export * as sdjwt from "./sd-jwt.js";
