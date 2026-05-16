@@ -9,6 +9,7 @@ import { writeEvent } from "@getpact/audit";
 import { chunkText } from "@getpact/brain-core/chunkers";
 import { hybridSearch } from "@getpact/brain-core/search";
 import { isUuid } from "@getpact/core";
+import { jcsBytes, signEd25519, toBase64Url } from "@getpact/crypto";
 import { createClient, type DbClient, type Tx, withWorkspace } from "@getpact/db";
 import {
   brainChunkEmbeddings,
@@ -697,30 +698,89 @@ const brainSearch: AdapterTool = {
         : {}),
     });
 
-    return json({
-      results: results.map((r) => {
+    const signer = deps.rawMek
+      ? await loadProvenanceSigner(db, ctx.workspaceId, deps.rawMek)
+      : null;
+    const issuedAt = new Date().toISOString();
+
+    const enriched = await Promise.all(
+      results.map(async (r) => {
         const chunkUuid = adapter.resolveUuid(r.chunk_id) ?? null;
         const pageUuid = adapter.resolvePageUuid(r.chunk_id) ?? null;
+        const provenanceBase = {
+          source_uri: r.slug,
+          chunk_index: r.chunk_index,
+          chunk_id: chunkUuid,
+          page_id: pageUuid,
+        };
+        const provenance = signer
+          ? {
+              ...provenanceBase,
+              issued_at: issuedAt,
+              kid: signer.id,
+              signature: await signProvenance(signer.privateKey, {
+                workspace_id: ctx.workspaceId,
+                page_id: pageUuid,
+                chunk_id: chunkUuid,
+                source_uri: r.slug,
+                chunk_index: r.chunk_index,
+                issued_at: issuedAt,
+              }),
+            }
+          : provenanceBase;
         return {
           page_id: pageUuid,
           source_uri: r.slug,
           chunk_id: chunkUuid,
           snippet: snippetFor(r.chunk_text, query),
           score: r.score,
-          provenance: {
-            source_uri: r.slug,
-            chunk_index: r.chunk_index,
-            chunk_id: chunkUuid,
-            page_id: pageUuid,
-          },
+          provenance,
         };
       }),
+    );
+
+    return json({
+      results: enriched,
       meta: {
         vector_enabled: Boolean(embedderConfig),
         embed_model: embedderConfig?.model ?? null,
+        signing_kid: signer?.id ?? null,
       },
     });
   },
+};
+
+type ProvenanceSigner = { id: string; privateKey: CryptoKey };
+
+const loadProvenanceSigner = async (
+  db: DbClient,
+  workspaceId: string,
+  rawMek: Uint8Array,
+): Promise<ProvenanceSigner | null> => {
+  try {
+    return await withWorkspace(db, workspaceId, async (tx) => {
+      const key = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
+      return { id: key.id, privateKey: key.privateKey };
+    });
+  } catch {
+    return null;
+  }
+};
+
+const signProvenance = async (
+  privateKey: CryptoKey,
+  payload: {
+    workspace_id: string;
+    page_id: string | null;
+    chunk_id: string | null;
+    source_uri: string;
+    chunk_index: number;
+    issued_at: string;
+  },
+): Promise<string> => {
+  const bytes = jcsBytes(payload);
+  const sig = await signEd25519(privateKey, bytes);
+  return toBase64Url(sig);
 };
 
 const estimateTokens = (text: string): number => {
