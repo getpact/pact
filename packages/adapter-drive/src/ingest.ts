@@ -1,5 +1,6 @@
 import type { AdapterContext, ToolDeps, ToolResult } from "@getpact/adapter-sdk";
 
+import { type DriveAttestation, signDriveAttestation } from "./attestation.js";
 import { createDriveClient, type DriveClient, type DriveFile, type FetchLike } from "./index.js";
 
 export type BrainPutInput = {
@@ -9,7 +10,14 @@ export type BrainPutInput = {
   title?: string;
   author?: string;
   audience?: string[];
+  drive_attestation?: DriveAttestation;
 };
+
+export type DriveAttestationSigner = (input: {
+  sourceUri: string;
+  content: string;
+  audience: string[];
+}) => Promise<DriveAttestation>;
 
 export type BrainPutFn = (
   input: BrainPutInput,
@@ -57,6 +65,8 @@ export type IngestOptions = {
   pageSize?: number;
   groups?: string[];
   roles?: string[];
+  attestationSigner?: DriveAttestationSigner;
+  attestationKeyBytes?: Uint8Array;
 };
 
 export type IngestError = {
@@ -255,6 +265,8 @@ export async function ingestRecentDriveDocs(opts: IngestOptions): Promise<Ingest
     nextCursor: runStartedAt,
   };
 
+  const signer = resolveAttestationSigner(opts);
+
   const query = `modifiedTime > '${escapeDriveLiteral(cursorStart)}' and trashed = false`;
   let pageToken: string | undefined;
   let processed = 0;
@@ -306,14 +318,22 @@ export async function ingestRecentDriveDocs(opts: IngestOptions): Promise<Ingest
 
         const ownerEmail = file.owners?.[0]?.emailAddress ?? opts.email;
         const audience = [`gdrive_owner:${ownerEmail}`];
+        const sourceUri = `gdrive://${file.id}`;
         const input: BrainPutInput = {
-          source_uri: `gdrive://${file.id}`,
+          source_uri: sourceUri,
           source_kind: "connector",
           content: fetched.content,
           author: ownerEmail,
           audience,
         };
         if (file.name) input.title = file.name;
+        if (signer) {
+          input.drive_attestation = await signer({
+            sourceUri,
+            content: fetched.content,
+            audience,
+          });
+        }
 
         const putResult = await opts.brainPut(input, ctx, deps);
         if (putResult.isError) {
@@ -339,3 +359,13 @@ export async function ingestRecentDriveDocs(opts: IngestOptions): Promise<Ingest
 
   return result;
 }
+
+const resolveAttestationSigner = (opts: IngestOptions): DriveAttestationSigner | null => {
+  if (opts.attestationSigner) return opts.attestationSigner;
+  if (opts.attestationKeyBytes) {
+    const keyBytes = opts.attestationKeyBytes;
+    return async ({ sourceUri, content, audience }) =>
+      signDriveAttestation({ keyBytes, sourceUri, content, audience });
+  }
+  return null;
+};

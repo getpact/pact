@@ -19,6 +19,10 @@
     "./ingest": {
       "types": "./dist/ingest.d.ts",
       "import": "./dist/ingest.js"
+    },
+    "./attestation": {
+      "types": "./dist/attestation.d.ts",
+      "import": "./dist/attestation.js"
     }
   },
   "scripts": {

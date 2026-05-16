@@ -9,6 +9,20 @@ import {
 } from "@getpact/adapter-sdk";
 
 export {
+  computeDriveContentHash,
+  DRIVE_ATTESTATION_MAX_SKEW_SECONDS,
+  DRIVE_SOURCE_URI_PREFIX,
+  type DriveAttestation,
+  type DriveAttestationPayload,
+  type DriveAttestationVerifyInput,
+  type DriveAttestationVerifyResult,
+  decodeAttestation,
+  serializeDriveAttestationPayload,
+  signDriveAttestation,
+  sortAudience,
+  verifyDriveAttestation,
+} from "./attestation.js";
+export {
   type BrainPutFn,
   type BrainPutInput,
   type IngestDriveClient,
