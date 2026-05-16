@@ -48,6 +48,14 @@ DATABASE_URL=postgres://... pact admin prune-replay-log --older-than 7d
 
 The function runs SECURITY DEFINER and prunes across every workspace in one pass. Wire it into cron, a Worker scheduled trigger, or your migration runner.
 
+Existing workspaces created before the drive HMAC fence or default-audience seeding shipped need a one-shot backfill. The command is idempotent:
+
+```
+DATABASE_URL=postgres://... MEK=... pact admin backfill [--workspace <id>] [--what keys|audiences|all] [--dry-run]
+```
+
+`--what keys` seeds the missing `adapter-drive` HMAC key. `--what audiences` seeds the missing default audiences. `all` does both.
+
 ## Packages
 
 OSS (MIT):
