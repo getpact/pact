@@ -204,6 +204,20 @@
       "when": 1778495000000,
       "tag": "0028_brain_core",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1778496000000,
+      "tag": "0029_workspace_audiences",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1778497000000,
+      "tag": "0030_kbjwt_replay_log",
+      "breakpoints": true
     }
   ]
 }

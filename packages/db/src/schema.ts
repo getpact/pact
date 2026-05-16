@@ -642,3 +642,47 @@ export const delegationChains = pgTable(
 
 export type DelegationChain = typeof delegationChains.$inferSelect;
 export type NewDelegationChain = typeof delegationChains.$inferInsert;
+
+export const workspaceAudiences = pgTable(
+  "workspace_audiences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    allowedSubjectPatterns: text("allowed_subject_patterns").array().notNull().default(sql`'{}'`),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("workspace_audiences_unique_name")
+      .on(t.workspaceId, t.name)
+      .where(sql`revoked_at IS NULL`),
+  ],
+);
+
+export type WorkspaceAudience = typeof workspaceAudiences.$inferSelect;
+export type NewWorkspaceAudience = typeof workspaceAudiences.$inferInsert;
+
+export const kbjwtReplayLog = pgTable(
+  "kbjwt_replay_log",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    jti: uuid("jti").notNull(),
+    kbIat: bigint("kb_iat", { mode: "number" }).notNull(),
+    sdHash: bytea("sd_hash").notNull(),
+    presentedAt: timestamp("presented_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workspaceId, t.jti, t.kbIat, t.sdHash] }),
+    index("kbjwt_replay_log_presented_idx").on(t.workspaceId, t.presentedAt),
+  ],
+);
+
+export type KbjwtReplayLogEntry = typeof kbjwtReplayLog.$inferSelect;
+export type NewKbjwtReplayLogEntry = typeof kbjwtReplayLog.$inferInsert;
