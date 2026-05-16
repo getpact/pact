@@ -221,12 +221,16 @@ export class BrainAdapter implements SearchAdapter {
     }
     if (uuids.length === 0) return result;
 
+    const uuidArray = sql`ARRAY[${sql.join(
+      uuids.map((u) => sql`${u}`),
+      sql`, `,
+    )}]::uuid[]`;
     const rows = (await this.withTx((tx) =>
       tx.execute(sql`
         SELECT chunk_id::text AS chunk_id, embedding::text AS embedding
         FROM brain_chunk_embeddings
         WHERE workspace_id = ${this.deps.workspaceId}
-          AND chunk_id = ANY(${sql.raw(`ARRAY[${uuids.map((u) => `'${u}'`).join(",")}]::uuid[]`)})
+          AND chunk_id = ANY(${uuidArray})
       `),
     )) as EmbeddingRow[];
 
@@ -266,6 +270,10 @@ export class BrainAdapter implements SearchAdapter {
     }
     if (uuids.length === 0) return [];
 
+    const uuidArray = sql`ARRAY[${sql.join(
+      uuids.map((u) => sql`${u}`),
+      sql`, `,
+    )}]::uuid[]`;
     const rows = (await this.withTx((tx) =>
       tx.execute(sql`
         SELECT
@@ -278,7 +286,7 @@ export class BrainAdapter implements SearchAdapter {
         JOIN brain_pages p ON p.id = c.page_id AND p.deleted_at IS NULL
         WHERE c.workspace_id = ${this.deps.workspaceId}
           AND c.deleted_at IS NULL
-          AND c.id = ANY(${sql.raw(`ARRAY[${uuids.map((u) => `'${u}'`).join(",")}]::uuid[]`)})
+          AND c.id = ANY(${uuidArray})
       `),
     )) as HydrateRow[];
 
