@@ -1,4 +1,5 @@
 import { fromBase64 } from "@getpact/crypto";
+import type { AnalyticsEngineDataset } from "@getpact/logger";
 
 export type Env = {
   DATABASE_URL: string;
@@ -15,6 +16,10 @@ export type Env = {
   WEB_ISSUER_SERVICE_TOKEN?: string;
   WEB_OAUTH_REDIRECT_URI?: string;
   TOKEN_TTL_SECONDS?: string;
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  SENTRY_RELEASE?: string;
+  METRICS?: AnalyticsEngineDataset;
 };
 
 export const decodeMek = (env: Env): Uint8Array => fromBase64(env.MEK);
