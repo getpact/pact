@@ -430,8 +430,12 @@ export const registerCapabilityRoutes = (app: Hono<any>): void => {
       }
 
       const invRows = (await tx.execute(
-        sql`SELECT id, agent_id, on_behalf_of_user_id, tool_name, scope_claim,
-                  audience, redeem_status, redeem_count, max_redeems, expires_at
+        sql`SELECT id,
+                   COALESCE(agent_id, agent_id_snapshot) AS agent_id,
+                   COALESCE(on_behalf_of_user_id, on_behalf_of_user_id_snapshot)
+                     AS on_behalf_of_user_id,
+                   tool_name, scope_claim,
+                   audience, redeem_status, redeem_count, max_redeems, expires_at
             FROM agent_invocations
             WHERE workspace_id = ${workspaceId} AND jti = ${payloadJti}
             FOR UPDATE`,

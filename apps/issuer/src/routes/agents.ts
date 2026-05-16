@@ -583,11 +583,13 @@ export const registerAgentRoutes = (app: IssuerApp): void => {
 
         await tx.execute(
           sql`INSERT INTO agent_invocations (
-            workspace_id, jti, parent_jti, agent_id, grant_id, on_behalf_of_user_id,
+            workspace_id, jti, parent_jti, agent_id, agent_id_snapshot, grant_id,
+            on_behalf_of_user_id, on_behalf_of_user_id_snapshot,
             tool_name, scope_claim, audience, intent_jti, cnf_thumbprint,
             redeem_status, redeem_count, max_redeems, issued_at, expires_at
           ) VALUES (
-            ${workspaceId}, ${jti}::uuid, NULL, ${agentId}::uuid, ${grant.id}::uuid, ${subject.id}::uuid,
+            ${workspaceId}, ${jti}::uuid, NULL, ${agentId}::uuid, ${agentId}::uuid, ${grant.id}::uuid,
+            ${subject.id}::uuid, ${subject.id}::uuid,
             ${parsed.toolName}, ${JSON.stringify(parsed.scope)}::jsonb, ${parsed.audience},
             ${parsed.intentJti}, ${cnfThumbprint}, 'issued', 0, ${parsed.maxRedeems},
             to_timestamp(${iat}), to_timestamp(${exp})
