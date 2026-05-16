@@ -7,7 +7,7 @@
     "build": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --no-file-parallelism --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
