@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@getpact/core": "workspace:*",
+    "@getpact/logger": "workspace:*",
     "hono": "^4.6.0",
     "jose": "^5.9.0"
   },
