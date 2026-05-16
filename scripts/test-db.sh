@@ -65,6 +65,13 @@ else
   echo "[test-db] using externally provided DATABASE_URL and RLS_TEST_DB"
 fi
 
+echo "[test-db] refreshing collation version (silences glibc-skew warning)"
+if command -v psql >/dev/null 2>&1; then
+  PGPASSWORD=pact psql -h "$DB_HOST" -p "$DB_PORT" -U pact -d pact -v ON_ERROR_STOP=1 -c "ALTER DATABASE pact REFRESH COLLATION VERSION;" >/dev/null 2>&1 || true
+else
+  docker compose -f "$COMPOSE" exec -T postgres psql -U pact -d pact -v ON_ERROR_STOP=1 -c "ALTER DATABASE pact REFRESH COLLATION VERSION;" >/dev/null 2>&1 || true
+fi
+
 echo "[test-db] applying migrations"
 pnpm --filter @getpact/db db:migrate
 
