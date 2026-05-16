@@ -1,0 +1,1814 @@
+openapi: 3.1.0
+info:
+  title: Pact API
+  version: 0.1.0
+  description: Pre-v1 HTTP contract for Pact Workers. This file is the source of truth until route-level runtime schemas are introduced.
+servers:
+  - url: https://api.getpact.dev
+tags:
+  - name: issuer
+  - name: verifier
+  - name: admin
+  - name: audit
+  - name: gateway
+  - name: mcp
+  - name: dashboard
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [issuer]
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Worker is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+  /v1/dev/issue:
+    post:
+      tags: [issuer]
+      summary: Issue a development token
+      description: Available only when ENABLE_DEV_ISSUE=true and ENVIRONMENT is not production. Non-test environments require x-pact-dev-issue-secret.
+      security:
+        - devIssueSecretAuth: []
+      parameters:
+        - in: header
+          name: x-pact-dev-issue-secret
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId, email, audience]
+              properties:
+                workspaceId:
+                  type: string
+                  format: uuid
+                email:
+                  type: string
+                  format: email
+                audience:
+                  $ref: "#/components/schemas/Audience"
+      responses:
+        "200":
+          description: Token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedToken"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Development issue endpoint is disabled or not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces:
+    post:
+      tags: [issuer]
+      summary: Create a workspace
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, name, adminEmail]
+              properties:
+                slug:
+                  type: string
+                name:
+                  type: string
+                region:
+                  type: string
+                adminEmail:
+                  type: string
+                  format: email
+                adminName:
+                  type: string
+      responses:
+        "201":
+          description: Workspace created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workspaceId, adminUserId, jwtKeyId, auditKeyId]
+                properties:
+                  workspaceId:
+                    type: string
+                    format: uuid
+                  adminUserId:
+                    type: string
+                    format: uuid
+                  jwtKeyId:
+                    type: string
+                  auditKeyId:
+                    type: string
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/oauth/google/exchange:
+    post:
+      tags: [issuer]
+      summary: Exchange a Google OAuth code for Pact tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId, code, codeVerifier, redirectUri, audience]
+              properties:
+                workspaceId:
+                  type: string
+                  format: uuid
+                code:
+                  type: string
+                codeVerifier:
+                  type: string
+                redirectUri:
+                  type: string
+                  format: uri
+                audience:
+                  $ref: "#/components/schemas/Audience"
+      responses:
+        "200":
+          description: Token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedToken"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/oauth/google/session:
+    post:
+      tags: [issuer]
+      summary: Exchange a Google OAuth code for a dashboard token bundle
+      security:
+        - webIssuerServiceAuth: []
+      parameters:
+        - in: header
+          name: x-pact-web-service-token
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId, code, codeVerifier, redirectUri, audiences]
+              properties:
+                workspaceId:
+                  type: string
+                  format: uuid
+                code:
+                  type: string
+                codeVerifier:
+                  type: string
+                redirectUri:
+                  type: string
+                  format: uri
+                audiences:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  uniqueItems: true
+                  items:
+                    $ref: "#/components/schemas/DashboardAudience"
+      responses:
+        "200":
+          description: Token bundle issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenBundle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/config:
+    get:
+      tags: [dashboard]
+      summary: Read dashboard runtime configuration
+      description: Public BFF config used by the dashboard to display local OAuth setup status. Does not expose secrets.
+      security: []
+      responses:
+        "200":
+          description: Dashboard runtime config returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode, oauthConfigured]
+                properties:
+                  mode:
+                    type: string
+                    enum: [production, nonproduction]
+                  oauthConfigured:
+                    type: boolean
+                  defaultWorkspaceId:
+                    type: string
+                    format: uuid
+                    nullable: true
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/auth/google/start:
+    post:
+      tags: [dashboard]
+      summary: Start dashboard Google OAuth
+      description: Same-origin BFF endpoint. Requires an exact Origin or Referer matching WEB_BASE_URL and returns a Google authorization URL plus HttpOnly OAuth cookies.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId]
+              properties:
+                workspaceId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: OAuth authorization URL returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [location]
+                properties:
+                  location:
+                    type: string
+                    format: uri
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/auth/google/callback:
+    get:
+      tags: [dashboard]
+      summary: Complete dashboard Google OAuth
+      description: Browser callback that validates HttpOnly state and exchanges the code through the issuer session endpoint.
+      security: []
+      responses:
+        "302":
+          description: Session cookies stored and browser redirected to the dashboard.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/connections/google-drive/start:
+    post:
+      tags: [dashboard]
+      summary: Start Google Drive OAuth
+      description: Same-origin BFF endpoint that requires a dashboard session and CSRF token. Returns a Google authorization URL plus HttpOnly Drive OAuth cookies.
+      security:
+        - csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Drive OAuth authorization URL returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [location]
+                properties:
+                  location:
+                    type: string
+                    format: uri
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/connections/google-drive:
+    delete:
+      tags: [dashboard]
+      summary: Disconnect Google Drive through the dashboard BFF
+      security:
+        - csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Drive connection disconnected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/connections/google-drive/callback:
+    get:
+      tags: [dashboard]
+      summary: Complete Google Drive OAuth
+      description: Browser callback that validates HttpOnly Drive state and forwards the code to the admin API. Google tokens are never exposed to browser JavaScript.
+      security: []
+      responses:
+        "302":
+          description: Drive connection stored and browser redirected to the dashboard.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /oauth/oidc/callback:
+    get:
+      tags: [dashboard]
+      summary: Complete local dashboard Google OAuth
+      description: Browser callback alias used by the local Google OAuth client. Validates HttpOnly state and exchanges the code through the issuer session endpoint.
+      security: []
+      responses:
+        "302":
+          description: Session cookies stored and browser redirected to the dashboard.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/session:
+    get:
+      tags: [dashboard]
+      summary: Read dashboard session state
+      description: Same-origin BFF endpoint backed by HttpOnly Pact cookies. Access tokens are never returned.
+      security: []
+      responses:
+        "200":
+          description: Session state returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSession"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [dashboard]
+      summary: Clear dashboard session cookies
+      security:
+        - csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session cleared.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/session/refresh:
+    post:
+      tags: [dashboard]
+      summary: Refresh dashboard Pact tokens
+      security:
+        - csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspace/status:
+    get:
+      tags: [dashboard]
+      summary: Read dashboard workspace status
+      description: BFF-owned status DTO; upstream admin/audit tokens remain in HttpOnly cookies.
+      security:
+        - dashboardSession: []
+      responses:
+        "200":
+          description: Workspace status returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardWorkspaceStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/mcp/test:
+    post:
+      tags: [dashboard]
+      summary: Run a same-origin MCP smoke test
+      description: Uses the HttpOnly MCP token cookie to call `pact.whoami`; never returns bearer tokens.
+      security:
+        - dashboardSession: []
+          csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: MCP smoke response returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardMcpTestResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/connections/google-drive:
+    get:
+      tags: [admin]
+      summary: Read Google Drive connection status
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Drive connection status for the authenticated workspace user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection]
+                properties:
+                  connection:
+                    $ref: "#/components/schemas/DriveConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [admin]
+      summary: Disconnect Google Drive
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Drive connection removed or already absent.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Ok"
+                  - type: object
+                    required: [connection]
+                    properties:
+                      connection:
+                        $ref: "#/components/schemas/DriveConnection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/connections/google-drive/oauth:
+    post:
+      tags: [admin]
+      summary: Store Google Drive OAuth tokens
+      description: Exchanges a Google OAuth code server-side, verifies the Google subject matches the signed-in Pact user, stores encrypted token material, and writes connection metadata.
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, codeVerifier, nonce, redirectUri]
+              properties:
+                code:
+                  type: string
+                codeVerifier:
+                  type: string
+                nonce:
+                  type: string
+                redirectUri:
+                  type: string
+                  format: uri
+      responses:
+        "200":
+          description: Drive connection stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection]
+                properties:
+                  connection:
+                    $ref: "#/components/schemas/DriveConnection"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/refresh:
+    post:
+      tags: [issuer]
+      summary: Redeem a refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId, refreshToken, audience]
+              properties:
+                workspaceId:
+                  type: string
+                  format: uuid
+                refreshToken:
+                  type: string
+                audience:
+                  $ref: "#/components/schemas/Audience"
+      responses:
+        "200":
+          description: Token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedToken"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/.well-known/jwks.json:
+    get:
+      tags: [issuer]
+      summary: Workspace JWT JWKS
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: JWKS document.
+          headers:
+            cache-control:
+              schema:
+                type: string
+              description: Public cache directive for workspace signing keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jwks"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/.well-known/audit-jwks.json:
+    get:
+      tags: [issuer]
+      summary: Workspace audit JWKS
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: JWKS document.
+          headers:
+            cache-control:
+              schema:
+                type: string
+              description: Public cache directive for workspace audit signing keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jwks"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/verify:
+    post:
+      tags: [verifier]
+      summary: Verify a requested action against policy
+      security:
+        - verifierServiceAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyRequest"
+      responses:
+        "200":
+          description: Allowed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+        "400":
+          description: Invalid audience.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid verifier service token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Denied by policy or token validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResponse"
+        "503":
+          description: Verifier service token not configured in production.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/workspaces/{workspaceId}/users:
+    get:
+      tags: [admin]
+      summary: List users
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Users.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [admin]
+      summary: Create a user
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/groups:
+    post:
+      tags: [admin]
+      summary: Create a group
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroupCreate"
+      responses:
+        "201":
+          description: Group created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [group]
+                properties:
+                  group:
+                    $ref: "#/components/schemas/Group"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/groups/{groupId}/members:
+    post:
+      tags: [admin]
+      summary: Add a user to a group
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - in: path
+          name: groupId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Member added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/policies:
+    get:
+      tags: [admin]
+      summary: List policies
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Policies.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [policies]
+                properties:
+                  policies:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PolicySummary"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [admin]
+      summary: Create a policy version
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: object
+      responses:
+        "201":
+          description: Policy created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [policy]
+                properties:
+                  policy:
+                    $ref: "#/components/schemas/PolicySummary"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/revocations:
+    post:
+      tags: [admin]
+      summary: Revoke a token JTI
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevocationCreate"
+      responses:
+        "201":
+          description: Token revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/invites:
+    post:
+      tags: [admin]
+      summary: Create an invite
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteCreate"
+      responses:
+        "201":
+          description: Invite created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invite]
+                properties:
+                  invite:
+                    $ref: "#/components/schemas/Invite"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/brains:
+    get:
+      tags: [admin]
+      summary: List gateway brains
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Brains.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [brains]
+                properties:
+                  brains:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Brain"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [admin]
+      summary: Create a gateway brain
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BrainCreate"
+      responses:
+        "201":
+          description: Brain created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [brain]
+                properties:
+                  brain:
+                    $ref: "#/components/schemas/Brain"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/brains/{brainId}:
+    delete:
+      tags: [admin]
+      summary: Delete a gateway brain
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - in: path
+          name: brainId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Brain deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/brains/{brainId}/credential:
+    put:
+      tags: [admin]
+      summary: Store a gateway brain bearer credential
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - in: path
+          name: brainId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        "200":
+          description: Credential stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/audit/events:
+    get:
+      tags: [audit]
+      summary: List audit events
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+        - in: query
+          name: action
+          schema:
+            type: string
+        - in: query
+          name: since
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: until
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - in: query
+          name: cursor
+          schema:
+            type: string
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        "200":
+          description: Audit events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventsPage"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/audit/workspace:
+    get:
+      tags: [audit]
+      summary: Workspace metadata for audit verification
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Workspace metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditWorkspace"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/audit/chain:
+    get:
+      tags: [audit]
+      summary: Current audit chain head
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: Chain head.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditChainHead"
+        default:
+          $ref: "#/components/responses/Error"
+  /{workspace}/mcp:
+    post:
+      tags: [mcp]
+      summary: JSON-RPC MCP endpoint for a workspace
+      parameters:
+        - in: path
+          name: workspace
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: JSON-RPC response.
+        default:
+          $ref: "#/components/responses/Error"
+  /{workspace}/gateway/{brain}/{path}:
+    parameters:
+      - in: path
+        name: workspace
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: brain
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: path
+        required: true
+        schema:
+          type: string
+    x-pact-note: Gateway accepts all HTTP methods and forwards only configured request headers.
+    x-pact-opaque-upstream: true
+    get:
+      tags: [gateway]
+      summary: Gateway GET to a brain upstream
+      responses:
+        "200":
+          description: Upstream response.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Error"
+        "501":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        "504":
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [gateway]
+      summary: Gateway POST to a brain upstream
+      requestBody:
+        required: false
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Upstream response.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Error"
+        "501":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        "504":
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [gateway]
+      summary: Gateway PUT to a brain upstream
+      requestBody:
+        required: false
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Upstream response.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Error"
+        "501":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        "504":
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [gateway]
+      summary: Gateway PATCH to a brain upstream
+      requestBody:
+        required: false
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Upstream response.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Error"
+        "501":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        "504":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [gateway]
+      summary: Gateway DELETE to a brain upstream
+      responses:
+        "200":
+          description: Upstream response.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Error"
+        "501":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        "504":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    verifierServiceAuth:
+      type: http
+      scheme: bearer
+      description: Shared service token used by internal callers.
+    devIssueSecretAuth:
+      type: apiKey
+      in: header
+      name: x-pact-dev-issue-secret
+      description: Required outside ENVIRONMENT=test when the dev issue endpoint is enabled.
+    webIssuerServiceAuth:
+      type: apiKey
+      in: header
+      name: x-pact-web-service-token
+      description: Shared service token used by the dashboard BFF for OAuth code exchange.
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: x-pact-csrf
+      description: Same-origin dashboard CSRF token.
+    dashboardSession:
+      type: apiKey
+      in: cookie
+      name: __Host-pact-admin-access
+      description: HttpOnly dashboard session cookies set by the web BFF. Workspace status also requires the audit cookie; MCP smoke also requires the MCP cookie.
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Authenticated request is not allowed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource was not found or is not exposed in this environment.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: Request body is too large.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: Too many requests.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Error:
+      description: Error response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  parameters:
+    workspaceId:
+      in: path
+      name: workspaceId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    Ok:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+    Audience:
+      type: string
+      enum: [pact-admin, pact-audit, pact-mcp, pact-gateway]
+    DashboardAudience:
+      type: string
+      enum: [pact-admin, pact-audit, pact-mcp]
+    DashboardSession:
+      type: object
+      required: [authenticated]
+      properties:
+        authenticated:
+          type: boolean
+        workspaceId:
+          type: string
+          format: uuid
+        csrfToken:
+          type: string
+        claims:
+          type: object
+          properties:
+            workspaceId:
+              type: string
+              format: uuid
+            userId:
+              type: string
+            email:
+              type: string
+              format: email
+            exp:
+              type: integer
+            roles:
+              type: array
+              items:
+                type: string
+            groups:
+              type: array
+              items:
+                type: string
+    DashboardWorkspaceStatus:
+      type: object
+      required: [workspaceId, users, brains, connections, audit, mcp]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        users:
+          type: object
+          required: [count]
+          properties:
+            count:
+              type: integer
+        brains:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardBrain"
+        connections:
+          type: object
+          required: [drive]
+          properties:
+            drive:
+              $ref: "#/components/schemas/DriveConnection"
+        audit:
+          type: object
+          properties:
+            head:
+              type: object
+              nullable: true
+        mcp:
+          type: object
+          required: [configured, endpoint, audience]
+          properties:
+            configured:
+              type: boolean
+            endpoint:
+              type: string
+              format: uri
+              nullable: true
+            audience:
+              type: string
+    DashboardMcpTestResponse:
+      type: object
+      required: [endpoint, response]
+      properties:
+        endpoint:
+          type: string
+          format: uri
+        response:
+          type: object
+          required: [jsonrpc, id]
+          properties:
+            jsonrpc:
+              type: string
+              enum: ["2.0"]
+            id:
+              oneOf:
+                - type: string
+                - type: integer
+                - type: "null"
+            result:
+              type: object
+              nullable: true
+              properties:
+                content:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      text:
+                        type: string
+            error:
+              type: object
+              required: [code, message]
+              properties:
+                code:
+                  type: integer
+                message:
+                  type: string
+    DriveConnection:
+      type: object
+      required: [status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [not_configured, connected, expired, disconnected]
+        email:
+          type: string
+          format: email
+        scopes:
+          type: array
+          items:
+            type: string
+        expiresAt:
+          type: string
+          format: date-time
+        connectedAt:
+          type: string
+          format: date-time
+        lastRefreshAt:
+          type: string
+          format: date-time
+        lastError:
+          type: string
+          nullable: true
+    Jwks:
+      type: object
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            type: object
+            required: [kty, crv, x, kid, alg, use]
+            properties:
+              kty:
+                type: string
+                enum: [OKP]
+              crv:
+                type: string
+                enum: [Ed25519]
+              x:
+                type: string
+              kid:
+                type: string
+              alg:
+                type: string
+                enum: [EdDSA]
+              use:
+                type: string
+                enum: [sig]
+    IssuedToken:
+      type: object
+      required: [token, jti, exp, userId, refreshToken, refreshExpiresAt]
+      properties:
+        token:
+          type: string
+        jti:
+          type: string
+          format: uuid
+        exp:
+          type: integer
+        userId:
+          type: string
+          format: uuid
+        refreshToken:
+          type: string
+        refreshExpiresAt:
+          type: string
+          format: date-time
+    TokenBundle:
+      type: object
+      required: [tokens]
+      properties:
+        tokens:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/IssuedToken"
+    VerifyRequest:
+      type: object
+      required: [token, action, resource]
+      properties:
+        token:
+          type: string
+        action:
+          type: string
+        resource:
+          type: string
+        audience:
+          type: string
+    VerifyResponse:
+      type: object
+      required: [allow, reasons]
+      properties:
+        allow:
+          type: boolean
+        reasons:
+          type: array
+          items:
+            type: string
+        sub:
+          type: string
+    User:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    Group:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    PolicySummary:
+      type: object
+      required: [id, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        replacedAt:
+          type: string
+          format: date-time
+          nullable: true
+    Invite:
+      type: object
+      required: [id, email, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        expiresAt:
+          type: string
+          format: date-time
+    DashboardBrain:
+      type: object
+      required: [id, kind, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        status:
+          type: string
+    Brain:
+      type: object
+      required: [id, kind, baseUrl]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        baseUrl:
+          type: string
+          format: uri
+        authScheme:
+          type: string
+          enum: [none, bearer]
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AuditEvent:
+      type: object
+      required: [id, workspaceId, auditSeq, ts, actorKind, action, target, decision, signingKeyId, prevHash, thisHash, signature]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        auditSeq:
+          type: integer
+        ts:
+          type: string
+          format: date-time
+        actorKind:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        action:
+          type: string
+        target:
+          type: object
+        decision:
+          type: string
+        supporting:
+          type: object
+        signingKeyId:
+          type: string
+        prevHash:
+          type: string
+        thisHash:
+          type: string
+        signature:
+          type: string
+    AuditEventsPage:
+      type: object
+      required: [events, nextCursor]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        nextCursor:
+          type: string
+          nullable: true
+    AuditWorkspace:
+      type: object
+      required: [id, slug, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AuditChainHead:
+      type: object
+      required: [head]
+      properties:
+        head:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [lastHash, lastEventId, updatedAt]
+              properties:
+                lastHash:
+                  type: string
+                lastEventId:
+                  type: string
+                  format: uuid
+                updatedAt:
+                  type: string
+                  format: date-time
+    GroupCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+    RevocationCreate:
+      type: object
+      required: [jti]
+      properties:
+        jti:
+          type: string
+        reason:
+          type: string
+    InviteCreate:
+      type: object
+      required: [email, scope, ttl]
+      properties:
+        email:
+          type: string
+          format: email
+        scope:
+          type: object
+        ttl:
+          type: string
+          enum: [1d, 1w, 1m]
+    BrainCreate:
+      type: object
+      required: [kind, baseUrl]
+      properties:
+        kind:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{0,32}$"
+        baseUrl:
+          type: string
+          format: uri
+        authScheme:
+          type: string
+          enum: [none, bearer]
