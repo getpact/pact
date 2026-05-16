@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
 import { runAuditCheckpoint, runAuditVerify } from "./audit-verify.js";
 import { runAgent } from "./commands/agent.js";
+import { runSendCap } from "./commands/send-cap.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { type ClientId, installMcpServer } from "./mcp-install.js";
 import { serveStdio } from "./mcp-serve.js";
@@ -42,6 +43,9 @@ const help = () => {
       "  agent mint       mint an agent capability token",
       "  agent revoke     revoke an agent capability by jti",
       "  agent list       list agents in a workspace",
+      "  send-cap grant   grant a sender consent to address you",
+      "  send-cap list    list send caps in a workspace",
+      "  send-cap revoke  revoke a send cap by id",
       "  mek rewrap       rewrap stored secrets with a new MEK",
       "",
       "env:",
@@ -310,6 +314,11 @@ const main = async () => {
       return;
     case "agent": {
       const result = await runAgent(process.argv.slice(3));
+      if (result.exitCode !== 0) process.exit(result.exitCode);
+      return;
+    }
+    case "send-cap": {
+      const result = await runSendCap(process.argv.slice(3));
       if (result.exitCode !== 0) process.exit(result.exitCode);
       return;
     }
