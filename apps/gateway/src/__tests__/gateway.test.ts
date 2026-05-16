@@ -70,7 +70,7 @@ describe("gateway", () => {
     expect(() => buildGatewayTarget("https://127.0.0.1:8080", "v1/pages", "")).toThrow(
       "upstream host not allowed",
     );
-    expect(() => buildGatewayTarget("https://8.8.8.8", "v1/pages", "")).toThrow(
+    expect(() => buildGatewayTarget("https://10.0.0.1", "v1/pages", "")).toThrow(
       "upstream host not allowed",
     );
     expect(() => buildGatewayTarget("https://service.local", "v1/pages", "")).toThrow(
