@@ -161,17 +161,20 @@ const pickEmbedder = (deps: ToolDeps): { embedder: EmbedProvider; model: string 
   return stubEmbedderFromDeps(deps) ?? resolveEmbedder(deps);
 };
 
-const tryAuditBrainWrite = async (
+type BestEffortAuditPayload = {
+  actorKind: "user" | "agent" | "system";
+  actorId: string;
+  action: string;
+  target: unknown;
+  decision: "allow" | "deny";
+  supporting?: unknown;
+};
+
+const tryAuditEvent = async (
   db: DbClient,
   workspaceId: string,
   rawMek: Uint8Array | undefined,
-  payload: {
-    pageId: string;
-    sourceUri: string;
-    chunksCreated: number;
-    idempotent: boolean;
-    actorUserId: string;
-  },
+  payload: BestEffortAuditPayload,
 ): Promise<void> => {
   if (!rawMek) return;
   try {
@@ -189,15 +192,12 @@ const tryAuditBrainWrite = async (
         signingKeyId: auditKey.id,
         signingKey: auditKey.privateKey,
         event: {
-          actorKind: "user",
-          actorId: payload.actorUserId,
-          action: "brain.page.write",
-          target: { pageId: payload.pageId, sourceUri: payload.sourceUri },
-          decision: "allow",
-          supporting: {
-            chunksCreated: payload.chunksCreated,
-            idempotent: payload.idempotent,
-          },
+          actorKind: payload.actorKind,
+          actorId: payload.actorId,
+          action: payload.action,
+          target: payload.target,
+          decision: payload.decision,
+          supporting: payload.supporting ?? null,
         },
       });
     });
@@ -281,88 +281,6 @@ const consumeSendCapsForAudience = async (
     consumed.push(cap.id);
   }
   return { result: { kind: "allow" }, consumedCapIds: consumed };
-};
-
-const trySendCapAudit = async (
-  db: DbClient,
-  workspaceId: string,
-  rawMek: Uint8Array | undefined,
-  payload: {
-    action: string;
-    actorUserId: string;
-    target: unknown;
-    decision: "allow" | "deny";
-    supporting?: unknown;
-  },
-): Promise<void> => {
-  if (!rawMek) return;
-  try {
-    await withWorkspace(db, workspaceId, async (tx) => {
-      const [ws] = await tx
-        .select({ createdAt: workspaces.createdAt })
-        .from(workspaces)
-        .where(eq(workspaces.id, workspaceId))
-        .limit(1);
-      if (!ws) return;
-      const auditKey = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
-      await writeEvent(tx, {
-        workspaceId,
-        workspaceCreatedAt: ws.createdAt,
-        signingKeyId: auditKey.id,
-        signingKey: auditKey.privateKey,
-        event: {
-          actorKind: "user",
-          actorId: payload.actorUserId,
-          action: payload.action,
-          target: payload.target,
-          decision: payload.decision,
-          supporting: payload.supporting ?? null,
-        },
-      });
-    });
-  } catch {
-    // best-effort
-  }
-};
-
-const tryDriveAttestationAudit = async (
-  db: DbClient,
-  workspaceId: string,
-  rawMek: Uint8Array | undefined,
-  payload: {
-    actorUserId: string;
-    sourceUri: string;
-    reason: string;
-  },
-): Promise<void> => {
-  if (!rawMek) return;
-  try {
-    await withWorkspace(db, workspaceId, async (tx) => {
-      const [ws] = await tx
-        .select({ createdAt: workspaces.createdAt })
-        .from(workspaces)
-        .where(eq(workspaces.id, workspaceId))
-        .limit(1);
-      if (!ws) return;
-      const auditKey = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
-      await writeEvent(tx, {
-        workspaceId,
-        workspaceCreatedAt: ws.createdAt,
-        signingKeyId: auditKey.id,
-        signingKey: auditKey.privateKey,
-        event: {
-          actorKind: "user",
-          actorId: payload.actorUserId,
-          action: "brain.put.drive_attestation_invalid",
-          target: { sourceUri: payload.sourceUri },
-          decision: "deny",
-          supporting: { reason: payload.reason },
-        },
-      });
-    });
-  } catch {
-    // best-effort
-  }
 };
 
 const bufferToHex = (value: Buffer): string => value.toString("hex");
@@ -453,10 +371,13 @@ const brainPut: AdapterTool = {
     if (sourceUri.startsWith(DRIVE_SOURCE_URI_PREFIX)) {
       const attestation = attestationInput(input);
       if (!attestation) {
-        await tryDriveAttestationAudit(db, ctx.workspaceId, deps.rawMek, {
-          actorUserId: ctx.userId,
-          sourceUri,
-          reason: "missing",
+        await tryAuditEvent(db, ctx.workspaceId, deps.rawMek, {
+          actorKind: "user",
+          actorId: ctx.userId,
+          action: "brain.put.drive_attestation_invalid",
+          target: { sourceUri },
+          decision: "deny",
+          supporting: { reason: "missing" },
         });
         return {
           content: [{ type: "text", text: "drive_attestation_invalid: missing" }],
@@ -476,10 +397,13 @@ const brainPut: AdapterTool = {
         );
         keyBytes = loaded.keyBytes;
       } catch {
-        await tryDriveAttestationAudit(db, ctx.workspaceId, deps.rawMek, {
-          actorUserId: ctx.userId,
-          sourceUri,
-          reason: "key_load_failed",
+        await tryAuditEvent(db, ctx.workspaceId, deps.rawMek, {
+          actorKind: "user",
+          actorId: ctx.userId,
+          action: "brain.put.drive_attestation_invalid",
+          target: { sourceUri },
+          decision: "deny",
+          supporting: { reason: "key_load_failed" },
         });
         return {
           content: [{ type: "text", text: "drive_attestation_invalid: key_load_failed" }],
@@ -494,10 +418,13 @@ const brainPut: AdapterTool = {
         audience,
       });
       if (!verifyResult.ok) {
-        await tryDriveAttestationAudit(db, ctx.workspaceId, deps.rawMek, {
-          actorUserId: ctx.userId,
-          sourceUri,
-          reason: verifyResult.reason,
+        await tryAuditEvent(db, ctx.workspaceId, deps.rawMek, {
+          actorKind: "user",
+          actorId: ctx.userId,
+          action: "brain.put.drive_attestation_invalid",
+          target: { sourceUri },
+          decision: "deny",
+          supporting: { reason: verifyResult.reason },
         });
         return {
           content: [{ type: "text", text: `drive_attestation_invalid: ${verifyResult.reason}` }],
@@ -510,12 +437,13 @@ const brainPut: AdapterTool = {
       findExistingPage(tx, ctx.workspaceId, sourceUri, contentHash),
     );
     if (existing) {
-      await tryAuditBrainWrite(db, ctx.workspaceId, deps.rawMek, {
-        pageId: existing.id,
-        sourceUri,
-        chunksCreated: 0,
-        idempotent: true,
-        actorUserId: ctx.userId,
+      await tryAuditEvent(db, ctx.workspaceId, deps.rawMek, {
+        actorKind: "user",
+        actorId: ctx.userId,
+        action: "brain.page.write",
+        target: { pageId: existing.id, sourceUri },
+        decision: "allow",
+        supporting: { chunksCreated: 0, idempotent: true },
       });
       return json({
         page_id: existing.id,
@@ -529,9 +457,10 @@ const brainPut: AdapterTool = {
     );
     if (sendCapCheck.result.kind === "deny") {
       const denial = sendCapCheck.result;
-      await trySendCapAudit(db, ctx.workspaceId, deps.rawMek, {
+      await tryAuditEvent(db, ctx.workspaceId, deps.rawMek, {
+        actorKind: "user",
+        actorId: ctx.userId,
         action: "brain.put.send_cap_required",
-        actorUserId: ctx.userId,
         target: { sourceUri, audience_user_id: denial.audienceUserId },
         decision: "deny",
         supporting: { reason: denial.reason },
@@ -547,9 +476,10 @@ const brainPut: AdapterTool = {
       };
     }
     for (const capId of sendCapCheck.consumedCapIds) {
-      await trySendCapAudit(db, ctx.workspaceId, deps.rawMek, {
+      await tryAuditEvent(db, ctx.workspaceId, deps.rawMek, {
+        actorKind: "user",
+        actorId: ctx.userId,
         action: "send_cap.used",
-        actorUserId: ctx.userId,
         target: { send_cap_id: capId, sourceUri },
         decision: "allow",
       });
@@ -638,12 +568,13 @@ const brainPut: AdapterTool = {
       return newPageId;
     });
 
-    await tryAuditBrainWrite(db, ctx.workspaceId, deps.rawMek, {
-      pageId,
-      sourceUri,
-      chunksCreated: chunks.length,
-      idempotent: false,
-      actorUserId: ctx.userId,
+    await tryAuditEvent(db, ctx.workspaceId, deps.rawMek, {
+      actorKind: "user",
+      actorId: ctx.userId,
+      action: "brain.page.write",
+      target: { pageId, sourceUri },
+      decision: "allow",
+      supporting: { chunksCreated: chunks.length, idempotent: false },
     });
 
     return json({
