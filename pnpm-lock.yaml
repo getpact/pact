@@ -246,6 +246,9 @@ importers:
       '@getpact/test-helpers':
         specifier: workspace:*
         version: link:../../packages/test-helpers
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
       wrangler:
         specifier: ^4.0.0
         version: 4.90.0(@cloudflare/workers-types@4.20260509.1)
@@ -389,6 +392,9 @@ importers:
 
   packages/brain-core:
     devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
