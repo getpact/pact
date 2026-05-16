@@ -1,6 +1,13 @@
 import { writeEvent } from "@getpact/audit";
 import { isStrongSharedSecret, isUuid, timingSafeEqualString } from "@getpact/core";
-import { type Ed25519PublicJwk, fromBase64, fromBase64Url, sdjwt } from "@getpact/crypto";
+import {
+  type Ed25519PublicJwk,
+  fromBase64,
+  fromBase64Url,
+  sdjwt,
+  sha256,
+  toHex,
+} from "@getpact/crypto";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys, loadActiveSigningKey } from "@getpact/keystore";
@@ -45,11 +52,43 @@ const REVOCATION_CACHE_TTL = 60;
 const denyResult = (reasons: string[]): RedeemDeny => ({ allow: false, reasons });
 
 const denyStatus = (reason: string): number => {
-  if (reason === "token_revoked" || reason === "token_expired") return 410;
+  if (reason === "token_revoked" || reason === "token_expired" || reason === "kb_replay_detected")
+    return 410;
   if (reason === "max_redeems_exceeded") return 409;
   if (reason === "scope_mismatch" || reason === "tool_mismatch" || reason === "resource_required")
     return 422;
   return 403;
+};
+
+const isUniqueViolation = (err: unknown): boolean => {
+  if (!err || typeof err !== "object") return false;
+  const code = (err as { code?: unknown }).code;
+  if (code === "23505") return true;
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause && typeof cause === "object" && (cause as { code?: unknown }).code === "23505") {
+    return true;
+  }
+  return false;
+};
+
+const KB_IAT_SKEW_SECONDS = 300;
+
+const isKbIatAcceptable = (kbIat: unknown): kbIat is number => {
+  if (typeof kbIat !== "number" || !Number.isFinite(kbIat) || !Number.isInteger(kbIat)) {
+    return false;
+  }
+  if (kbIat <= 0) return false;
+  const now = Math.floor(Date.now() / 1000);
+  if (kbIat > now + KB_IAT_SKEW_SECONDS) return false;
+  return true;
+};
+
+const sdJwtWithoutKb = (compact: string): string => {
+  const parts = compact.split("~");
+  if (parts.length < 2) return compact;
+  const last = parts[parts.length - 1];
+  if (last === "" || last === undefined) return compact;
+  return `${parts.slice(0, -1).join("~")}~`;
 };
 
 const inMemoryCacheFromBinding = (
@@ -265,13 +304,15 @@ export const registerCapabilityRoutes = (app: Hono<any>): void => {
       keys: await Promise.all(keys.map((k) => exportEd25519PublicJwk(k.publicKey, k.id))),
     };
 
+    let kbClaims: Record<string, unknown> | undefined;
     try {
-      await sdjwt.verifySdJwt({
+      const verified = await sdjwt.verifySdJwt({
         compactSdJwt: body.sd_jwt,
         issuerJwks,
         expectedAudience: audience,
         requireKbBinding: true,
       });
+      kbClaims = verified.kbClaims;
     } catch (err) {
       const code =
         err && typeof err === "object" && "code" in err && typeof err.code === "string"
@@ -289,6 +330,23 @@ export const registerCapabilityRoutes = (app: Hono<any>): void => {
       );
       return c.json(denyResult([reason]), 403);
     }
+
+    const kbIatRaw = kbClaims?.iat;
+    if (!isKbIatAcceptable(kbIatRaw)) {
+      await auditDenyOutsideTx(
+        env.DATABASE_URL,
+        rawMek,
+        workspaceId,
+        payloadJti,
+        ["kb_iat_invalid"],
+        body.tool_name,
+        body.resource,
+      );
+      return c.json(denyResult(["kb_iat_invalid"]), 403);
+    }
+    const kbIat = kbIatRaw;
+    const sdHashDigest = await sha256(new TextEncoder().encode(sdJwtWithoutKb(body.sd_jwt)));
+    const sdHashParam = sql`decode(${toHex(sdHashDigest)}, 'hex')`;
 
     const cache = inMemoryCacheFromBinding(env.REVOCATION_CACHE);
     const ck = cacheKey(workspaceId, payloadJti);
@@ -343,6 +401,28 @@ export const registerCapabilityRoutes = (app: Hono<any>): void => {
           { reasons: ["token_revoked"] },
         );
         return { ok: false, status: 410, reasons: ["token_revoked"] };
+      }
+
+      try {
+        await tx.execute(
+          sql`INSERT INTO kbjwt_replay_log (workspace_id, jti, kb_iat, sd_hash)
+              VALUES (${workspaceId}, ${payloadJti}, ${kbIat}, ${sdHashParam})`,
+        );
+      } catch (insertErr) {
+        if (isUniqueViolation(insertErr)) {
+          await writeCapabilityAudit(
+            tx,
+            workspaceId,
+            ws.createdAt,
+            rawMek,
+            "agent.capability.denied",
+            undefined,
+            { jti: payloadJti, tool_name: body.tool_name, resource: body.resource },
+            { reasons: ["kb_replay_detected"] },
+          );
+          return { ok: false, status: 410, reasons: ["kb_replay_detected"] };
+        }
+        throw insertErr;
       }
 
       const invRows = (await tx.execute(
