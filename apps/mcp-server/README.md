@@ -1,6 +1,6 @@
 # @getpact/mcp-server
 
-Model Context Protocol server. Exposes brain adapters (Slack, Drive, etc.) as MCP tools. Each tool call is authorized via the verifier before execution.
+Model Context Protocol server. Exposes brain adapters (Drive, etc.) as MCP tools. Each tool call is authorized via the verifier before execution.
 
 ## Endpoints
 
@@ -19,12 +19,12 @@ Bearer JWT with `aud=pact-mcp` (Mode A). Workspace slug or id in path must match
 - `MCP_AUDIENCE` (default `pact-mcp`)
 - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` - required for refreshing Google Drive access tokens when Drive MCP tools are enabled
 - `GOOGLE_OAUTH_TOKEN_ENDPOINT` - optional local-test override for Google's token endpoint
-- Per-adapter secrets (e.g. `SLACK_*` via vault, not env)
+- Per-adapter secrets via vault, not env
 - `ENVIRONMENT`
 
 ## Adapters
 
-Wired adapters live in `@getpact/adapter-slack` and `@getpact/adapter-drive`; both consume `@getpact/adapter-sdk`. New adapters register tools via `buildToolRegistry`.
+Wired adapters live in `@getpact/adapter-drive` and consume `@getpact/adapter-sdk`. New adapters register tools via `buildToolRegistry`.
 
 ## Drive Retrieval
 
