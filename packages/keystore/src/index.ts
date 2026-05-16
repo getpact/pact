@@ -48,6 +48,25 @@ export type StoredSigningKey = {
 const aadFor = (workspaceId: string, kind: SigningKeyKind): Uint8Array =>
   new TextEncoder().encode(`keystore:v1:${workspaceId}:${kind}`);
 
+const metrics = {
+  aadMismatch: 0,
+};
+
+export const getKeystoreMetrics = (): { aadMismatch: number } => ({
+  aadMismatch: metrics.aadMismatch,
+});
+
+export const resetKeystoreMetricsForTests = (): void => {
+  metrics.aadMismatch = 0;
+};
+
+const legacyRewrapEnabled = (): boolean => {
+  const v = process.env.KEYSTORE_LEGACY_REWRAP;
+  if (!v) return false;
+  const lower = v.toLowerCase();
+  return lower === "1" || lower === "true" || lower === "yes" || lower === "on";
+};
+
 export const createSigningKey = async (
   tx: Tx,
   opts: CreateSigningKeyOptions,
@@ -85,7 +104,15 @@ const decryptPrivateKey = async (
   const aad = aadFor(workspaceId, kind);
   try {
     return await decryptAesGcm(mek, parse(row.privateKeyWrapped), aad);
-  } catch {
+  } catch (err) {
+    metrics.aadMismatch += 1;
+    if (!legacyRewrapEnabled()) {
+      throw new Error(
+        `keystore AAD verification failed for signing key ${row.id} (workspace ${workspaceId}, kind ${kind})`,
+        { cause: err },
+      );
+    }
+
     const locked = (await tx.execute(
       sql`SELECT private_key_wrapped FROM workspace_signing_keys
           WHERE id = ${row.id}
@@ -96,6 +123,11 @@ const decryptPrivateKey = async (
       return await decryptAesGcm(mek, parse(current), aad);
     } catch {
       const privBytes = await decryptAesGcm(mek, parse(current));
+      process.stderr.write(
+        `[keystore] WARNING legacy AAD rewrap engaged for signing key ${row.id} ` +
+          `(workspace ${workspaceId}, kind ${kind}); KEYSTORE_LEGACY_REWRAP must be ` +
+          `disabled after migration is complete\n`,
+      );
       const rewrapped = await encryptAesGcm(mek, privBytes, aad);
       await tx
         .update(schema.workspaceSigningKeys)
