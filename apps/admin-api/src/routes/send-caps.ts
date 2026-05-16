@@ -218,6 +218,17 @@ const serializeCap = (row: {
 
 export const registerSendCapRoutes = <T extends { Bindings: SendCapsEnv }>(app: Hono<T>): void => {
   app.post("/v1/send-caps", async (c) => {
+    const workspaceIdHeader = c.req.header("x-pact-workspace-id");
+    if (!workspaceIdHeader || !isUuid(workspaceIdHeader)) {
+      return c.json(
+        { error: "invalid_request", message: "x-pact-workspace-id header required" },
+        400,
+      );
+    }
+
+    const ctx = await auth(c as unknown as AppCtx, workspaceIdHeader);
+    if (!isAuth(ctx)) return ctx;
+
     let body: MintBody;
     try {
       body = (await c.req.json()) as MintBody;
@@ -231,17 +242,6 @@ export const registerSendCapRoutes = <T extends { Bindings: SendCapsEnv }>(app: 
     if (typeof parsed === "string") {
       return c.json({ error: "invalid_body", message: parsed }, 400);
     }
-
-    const workspaceIdHeader = c.req.header("x-pact-workspace-id");
-    if (!workspaceIdHeader || !isUuid(workspaceIdHeader)) {
-      return c.json(
-        { error: "invalid_request", message: "x-pact-workspace-id header required" },
-        400,
-      );
-    }
-
-    const ctx = await auth(c as unknown as AppCtx, workspaceIdHeader);
-    if (!isAuth(ctx)) return ctx;
 
     if (parsed.granteeUserId === ctx.userId) {
       return c.json({ error: "invalid_body", message: "issuer and grantee must differ" }, 400);

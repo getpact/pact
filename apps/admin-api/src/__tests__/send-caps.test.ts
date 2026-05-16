@@ -133,9 +133,9 @@ run("send-caps admin api", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-pact-workspace-id": "00000000-0000-0000-0000-000000000000",
+          "x-pact-workspace-id": "11111111-1111-4111-8111-111111111111",
         },
-        body: JSON.stringify({ grantee_user_id: "00000000-0000-0000-0000-000000000001" }),
+        body: JSON.stringify({ grantee_user_id: "22222222-2222-4222-8222-222222222222" }),
       },
       {
         DATABASE_URL: url as string,
