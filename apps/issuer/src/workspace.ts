@@ -1,16 +1,8 @@
-import { ConflictError, canonicalizeEmail, type Email } from "@getpact/core";
+import { ConflictError, canonicalizeEmail, DEFAULT_AUDIENCES, type Email } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { roles, userRoles, users, workspaceAudiences, workspaces } from "@getpact/db/schema";
 import { createHmacKey, createSigningKey } from "@getpact/keystore";
 import { sql } from "drizzle-orm";
-
-const DEFAULT_AUDIENCES: ReadonlyArray<{ name: string; description: string }> = [
-  { name: "pact-admin", description: "Workspace admin console" },
-  { name: "pact-audit", description: "Audit log readers" },
-  { name: "pact-mcp", description: "MCP gateway access" },
-  { name: "pact-gateway", description: "Pact gateway" },
-  { name: "pact-agent", description: "Agent capability tokens" },
-];
 
 const isPgUniqueViolation = (e: unknown): boolean =>
   typeof e === "object" && e !== null && "code" in e && (e as { code?: unknown }).code === "23505";

@@ -1,3 +1,5 @@
+export { DEFAULT_AUDIENCES, type DefaultAudience } from "./audiences.js";
+
 export type WorkspaceId = string & { readonly _brand: "WorkspaceId" };
 export type UserId = string & { readonly _brand: "UserId" };
 export type TokenId = string & { readonly _brand: "TokenId" };
