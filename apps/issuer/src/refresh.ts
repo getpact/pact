@@ -25,15 +25,22 @@ export type IssueRefreshInput = {
   audience: string;
   accessJti: string;
   ttlSeconds: number;
+  familyId?: string;
+  parentId?: string;
 };
 
 export const issueRefresh = async (tx: Tx, input: IssueRefreshInput): Promise<IssuedRefresh> => {
   const raw = generateRefreshSecret();
   const hash = await hashRefresh(raw);
   const expiresAt = new Date(Date.now() + input.ttlSeconds * 1000);
+  const familyId = input.familyId ?? null;
+  const parentId = input.parentId ?? null;
   const inserted = (await tx.execute(
-    sql`INSERT INTO refresh_tokens (workspace_id, user_id, ciphertext, audience, access_jti, expires_at)
-        VALUES (${input.workspaceId}, ${input.userId}, ${hash}, ${input.audience}, ${input.accessJti}, ${expiresAt.toISOString()})
+    sql`INSERT INTO refresh_tokens (workspace_id, user_id, ciphertext, audience, access_jti, expires_at, family_id, parent_id)
+        VALUES (
+          ${input.workspaceId}, ${input.userId}, ${hash}, ${input.audience}, ${input.accessJti}, ${expiresAt.toISOString()},
+          COALESCE(${familyId}::uuid, gen_random_uuid()), ${parentId}::uuid
+        )
         RETURNING id`,
   )) as Array<{ id: string }>;
   const id = inserted[0]?.id;
@@ -45,7 +52,20 @@ export type RedeemRefreshResult = {
   workspaceId: string;
   userId: string;
   accessJti: string | null;
+  refreshTokenId: string;
+  familyId: string;
 };
+
+export type RefreshReuseDetection = {
+  refreshTokenId: string;
+  familyId: string;
+  userId: string;
+};
+
+export type RedeemRefreshOutcome =
+  | { kind: "ok"; redeemed: RedeemRefreshResult }
+  | { kind: "reuse"; detection: RefreshReuseDetection }
+  | { kind: "miss" };
 
 export const redeemRefresh = async (
   tx: Tx,
@@ -53,32 +73,61 @@ export const redeemRefresh = async (
   rawRefresh: string,
   audience: string,
 ): Promise<RedeemRefreshResult | null> => {
+  const outcome = await redeemRefreshDetailed(tx, workspaceId, rawRefresh, audience);
+  return outcome.kind === "ok" ? outcome.redeemed : null;
+};
+
+export const redeemRefreshDetailed = async (
+  tx: Tx,
+  workspaceId: string,
+  rawRefresh: string,
+  audience: string,
+): Promise<RedeemRefreshOutcome> => {
   const hash = await hashRefresh(rawRefresh);
   const candidate = (await tx.execute(
-    sql`SELECT user_id
+    sql`SELECT id, user_id, family_id, last_used_at, revoked_at, expires_at
         FROM refresh_tokens
         WHERE workspace_id = ${workspaceId}
           AND ciphertext = ${hash}
           AND audience = ${audience}
-          AND expires_at > NOW()
-          AND last_used_at IS NULL
-          AND revoked_at IS NULL
         LIMIT 1`,
-  )) as Array<{ user_id: string }>;
-  const userId = candidate[0]?.user_id;
-  if (!userId) return null;
+  )) as Array<{
+    id: string;
+    user_id: string;
+    family_id: string;
+    last_used_at: Date | null;
+    revoked_at: Date | null;
+    expires_at: Date;
+  }>;
+  const row = candidate[0];
+  if (!row) return { kind: "miss" };
+
+  if (row.last_used_at !== null || row.revoked_at !== null) {
+    await tx.execute(
+      sql`UPDATE refresh_tokens
+          SET revoked_at = COALESCE(revoked_at, NOW())
+          WHERE workspace_id = ${workspaceId}
+            AND family_id = ${row.family_id}`,
+    );
+    return {
+      kind: "reuse",
+      detection: { refreshTokenId: row.id, familyId: row.family_id, userId: row.user_id },
+    };
+  }
+
+  if (new Date(row.expires_at).getTime() <= Date.now()) {
+    return { kind: "miss" };
+  }
 
   const lockedUser = (await tx.execute(
     sql`SELECT id
         FROM users
         WHERE workspace_id = ${workspaceId}
-          AND id = ${userId}
+          AND id = ${row.user_id}
         FOR UPDATE`,
   )) as Array<{ id: string }>;
-  if (!lockedUser[0]) return null;
+  if (!lockedUser[0]) return { kind: "miss" };
 
-  // Atomic redeem: claim the row by setting last_used_at, only succeeds if
-  // not already used and not expired. Concurrent redeems collide here.
   const claimed = (await tx.execute(
     sql`UPDATE refresh_tokens
         SET last_used_at = NOW()
@@ -88,11 +137,26 @@ export const redeemRefresh = async (
           AND expires_at > NOW()
           AND last_used_at IS NULL
           AND revoked_at IS NULL
-        RETURNING workspace_id, user_id, access_jti`,
-  )) as Array<{ workspace_id: string; user_id: string; access_jti: string | null }>;
-  const row = claimed[0];
-  if (!row) return null;
-  return { workspaceId: row.workspace_id, userId: row.user_id, accessJti: row.access_jti };
+        RETURNING id, workspace_id, user_id, access_jti, family_id`,
+  )) as Array<{
+    id: string;
+    workspace_id: string;
+    user_id: string;
+    access_jti: string | null;
+    family_id: string;
+  }>;
+  const won = claimed[0];
+  if (!won) return { kind: "miss" };
+  return {
+    kind: "ok",
+    redeemed: {
+      workspaceId: won.workspace_id,
+      userId: won.user_id,
+      accessJti: won.access_jti,
+      refreshTokenId: won.id,
+      familyId: won.family_id,
+    },
+  };
 };
 
 export const revokeRefreshForAccessJti = async (
