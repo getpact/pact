@@ -1,10 +1,19 @@
 import { isStrongSharedSecret, securityHeaders, timingSafeEqualString } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
 import { assertSafeRuntimeDbRole, UnsafeRuntimeDbRoleError } from "@getpact/db";
-import { createLogger, requestLogger } from "@getpact/logger";
+import {
+  type AnalyticsEngineDataset,
+  createLogger,
+  type MetricsClient,
+  metricsFromEnv,
+  requestLogger,
+  type SentryClient,
+  sentryFromEnv,
+} from "@getpact/logger";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type KVNamespace, kvRevocationCache } from "./cache.js";
+import { registerCapabilityRoutes } from "./routes/capabilities.js";
 import { AuditUnavailableError, verifyAction } from "./verify.js";
 
 type Env = {
@@ -16,12 +25,33 @@ type Env = {
   VERIFIER_AUDIENCES?: string;
   VERIFIER_SERVICE_TOKEN?: string;
   REVOCATION_CACHE?: KVNamespace;
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  SENTRY_RELEASE?: string;
+  METRICS?: AnalyticsEngineDataset;
 };
 
-const app = new Hono<{ Bindings: Env }>();
+type AppVariables = {
+  sentry: SentryClient;
+  metrics: MetricsClient;
+};
+
+const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const logger = createLogger({ base: { app: "verifier" } });
 app.use("*", requestLogger(logger, "verifier"));
+app.use("*", async (c, next) => {
+  const sentry = sentryFromEnv(c.env, "verifier");
+  const metrics = metricsFromEnv(c.env, "verifier");
+  c.set("sentry", sentry);
+  c.set("metrics", metrics);
+  try {
+    await next();
+  } catch (err) {
+    sentry.captureRequest(c.req.raw, err);
+    throw err;
+  }
+});
 app.use("*", async (c, next) => {
   await next();
   const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
@@ -30,6 +60,8 @@ app.use("*", async (c, next) => {
 app.use("/v1/*", bodyLimit({ maxSize: 16 * 1024 }));
 
 app.get("/health", (c) => c.json({ ok: true }));
+
+registerCapabilityRoutes(app);
 
 export const allowedAudiences = (env: Pick<Env, "VERIFIER_AUDIENCE" | "VERIFIER_AUDIENCES">) =>
   (env.VERIFIER_AUDIENCES ?? env.VERIFIER_AUDIENCE ?? "pact-mcp")
@@ -74,6 +106,8 @@ app.post("/v1/verify", async (c) => {
   }
   const rawMek = fromBase64(c.env.MEK);
   const cache = c.env.REVOCATION_CACHE ? kvRevocationCache(c.env.REVOCATION_CACHE) : undefined;
+  const metrics = c.get("metrics");
+  const verifyStart = Date.now();
   let result: Awaited<ReturnType<typeof verifyAction>>;
   try {
     result = await verifyAction(
@@ -92,11 +126,16 @@ app.post("/v1/verify", async (c) => {
       },
     );
   } catch (e) {
+    metrics?.recordVerifyLatency(Date.now() - verifyStart, { audience, outcome: "error" });
     if (e instanceof AuditUnavailableError) {
       return c.json({ error: "audit_unavailable", message: "verifier audit is required" }, 503);
     }
     throw e;
   }
+  metrics?.recordVerifyLatency(Date.now() - verifyStart, {
+    audience,
+    outcome: result.allow ? "allow" : "deny",
+  });
   return c.json(result, result.allow ? 200 : 403);
 });
 
