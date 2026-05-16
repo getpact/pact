@@ -218,6 +218,13 @@
       "when": 1778497000000,
       "tag": "0030_kbjwt_replay_log",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1778498000000,
+      "tag": "0031_send_caps",
+      "breakpoints": true
     }
   ]
 }

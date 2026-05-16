@@ -686,3 +686,38 @@ export const kbjwtReplayLog = pgTable(
 
 export type KbjwtReplayLogEntry = typeof kbjwtReplayLog.$inferSelect;
 export type NewKbjwtReplayLogEntry = typeof kbjwtReplayLog.$inferInsert;
+
+export const sendCaps = pgTable(
+  "send_caps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    issuerUserId: uuid("issuer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    granteeUserId: uuid("grantee_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scopePattern: jsonb("scope_pattern").notNull().default(sql`'{}'::jsonb`),
+    maxUses: integer("max_uses"),
+    usedCount: integer("used_count").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedReason: text("revoked_reason"),
+  },
+  (t) => [
+    index("send_caps_issuer_grantee_idx")
+      .on(t.workspaceId, t.issuerUserId, t.granteeUserId)
+      .where(sql`revoked_at IS NULL`),
+    index("send_caps_grantee_active_idx")
+      .on(t.workspaceId, t.granteeUserId, t.expiresAt)
+      .where(sql`revoked_at IS NULL`),
+    check("send_caps_issuer_grantee_check", sql`${t.issuerUserId} <> ${t.granteeUserId}`),
+  ],
+);
+
+export type SendCap = typeof sendCaps.$inferSelect;
+export type NewSendCap = typeof sendCaps.$inferInsert;
