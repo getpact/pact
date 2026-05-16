@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   check,
+  customType,
   index,
   integer,
   jsonb,
@@ -12,6 +14,27 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
+
+const vector1536 = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return "vector(1536)";
+  },
+  toDriver(value) {
+    return `[${value.join(",")}]`;
+  },
+  fromDriver(value) {
+    if (typeof value !== "string") return [];
+    const trimmed = value.replace(/^\[/, "").replace(/\]$/, "");
+    if (trimmed.length === 0) return [];
+    return trimmed.split(",").map((v) => Number(v));
+  },
+});
 
 export const workspaces = pgTable(
   "workspaces",
@@ -132,6 +155,10 @@ export const refreshTokens = pgTable(
     ciphertext: text("ciphertext").notNull(),
     audience: text("audience").notNull().default("pact-mcp"),
     accessJti: text("access_jti"),
+    familyId: uuid("family_id").notNull().defaultRandom(),
+    parentId: uuid("parent_id").references((): AnyPgColumn => refreshTokens.id, {
+      onDelete: "set null",
+    }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -140,6 +167,7 @@ export const refreshTokens = pgTable(
   (t) => [
     index("refresh_tokens_user_idx").on(t.userId),
     index("refresh_tokens_access_jti_idx").on(t.workspaceId, t.accessJti),
+    index("refresh_tokens_family_idx").on(t.workspaceId, t.familyId),
   ],
 );
 
@@ -310,6 +338,80 @@ export const driveDocumentChunks = pgTable(
 export type DriveDocumentChunk = typeof driveDocumentChunks.$inferSelect;
 export type NewDriveDocumentChunk = typeof driveDocumentChunks.$inferInsert;
 
+export const brainPages = pgTable(
+  "brain_pages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sourceUri: text("source_uri").notNull(),
+    sourceKind: text("source_kind").notNull(),
+    contentHash: bytea("content_hash").notNull(),
+    title: text("title"),
+    authorUserId: uuid("author_user_id").references(() => users.id),
+    audience: text("audience").array().notNull().default(sql`'{}'`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("brain_pages_workspace_source_hash_idx")
+      .on(t.workspaceId, t.sourceUri, t.contentHash)
+      .where(sql`deleted_at IS NULL`),
+    index("brain_pages_workspace_idx").on(t.workspaceId).where(sql`deleted_at IS NULL`),
+    check("brain_pages_source_kind_check", sql`${t.sourceKind} IN ('manual', 'connector')`),
+  ],
+);
+
+export const brainChunks = pgTable(
+  "brain_chunks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => brainPages.id, { onDelete: "cascade" }),
+    chunkIndex: integer("chunk_index").notNull(),
+    content: text("content").notNull(),
+    contentSha256: bytea("content_sha256").notNull(),
+    tokenCount: integer("token_count"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("brain_chunks_page_idx_uq")
+      .on(t.pageId, t.chunkIndex)
+      .where(sql`deleted_at IS NULL`),
+    index("brain_chunks_workspace_idx").on(t.workspaceId).where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export const brainChunkEmbeddings = pgTable(
+  "brain_chunk_embeddings",
+  {
+    chunkId: uuid("chunk_id")
+      .primaryKey()
+      .references(() => brainChunks.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    model: text("model").notNull(),
+    embedding: vector1536("embedding").notNull(),
+    embeddedAt: timestamp("embedded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("brain_chunk_embeddings_workspace_idx").on(t.workspaceId)],
+);
+
+export type BrainPage = typeof brainPages.$inferSelect;
+export type NewBrainPage = typeof brainPages.$inferInsert;
+export type BrainChunk = typeof brainChunks.$inferSelect;
+export type NewBrainChunk = typeof brainChunks.$inferInsert;
+export type BrainChunkEmbedding = typeof brainChunkEmbeddings.$inferSelect;
+export type NewBrainChunkEmbedding = typeof brainChunkEmbeddings.$inferInsert;
+
 export type Brain = typeof brains.$inferSelect;
 export type NewBrain = typeof brains.$inferInsert;
 
@@ -388,3 +490,155 @@ export const workspaceSigningKeys = pgTable(
 
 export type WorkspaceSigningKey = typeof workspaceSigningKeys.$inferSelect;
 export type NewWorkspaceSigningKey = typeof workspaceSigningKeys.$inferInsert;
+
+export const agents = pgTable(
+  "agents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    displayName: text("display_name").notNull(),
+    kind: text("kind").notNull(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    pubkeyJwk: jsonb("pubkey_jwk").notNull(),
+    pubkeyThumbprint: text("pubkey_thumbprint").notNull(),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agents_workspace_slug_idx").on(t.workspaceId, t.slug),
+    uniqueIndex("agents_workspace_thumbprint_idx")
+      .on(t.workspaceId, t.pubkeyThumbprint)
+      .where(sql`revoked_at IS NULL`),
+    check("agents_kind_check", sql`${t.kind} IN ('service', 'user_delegated', 'sub_agent')`),
+    check("agents_status_check", sql`${t.status} IN ('active', 'suspended', 'revoked')`),
+  ],
+);
+
+export type Agent = typeof agents.$inferSelect;
+export type NewAgent = typeof agents.$inferInsert;
+
+export const agentCapabilityGrants = pgTable(
+  "agent_capability_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    onBehalfOfUserId: uuid("on_behalf_of_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    onBehalfOfPattern: text("on_behalf_of_pattern"),
+    toolName: text("tool_name").notNull(),
+    scope: jsonb("scope").notNull(),
+    maxUsesPerDay: integer("max_uses_per_day").notNull().default(1000),
+    defaultExpTtlSeconds: integer("default_exp_ttl_seconds").notNull().default(300),
+    audience: text("audience").array().notNull().default(sql`'{}'`),
+    policyVersion: integer("policy_version").notNull().default(1),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("agent_capability_grants_agent_tool_idx")
+      .on(t.workspaceId, t.agentId, t.toolName)
+      .where(sql`revoked_at IS NULL`),
+    index("agent_capability_grants_scope_gin").using("gin", sql`${t.scope} jsonb_path_ops`),
+    check(
+      "agent_capability_grants_on_behalf_of_check",
+      sql`${t.onBehalfOfUserId} IS NOT NULL OR ${t.onBehalfOfPattern} IS NOT NULL`,
+    ),
+  ],
+);
+
+export type AgentCapabilityGrant = typeof agentCapabilityGrants.$inferSelect;
+export type NewAgentCapabilityGrant = typeof agentCapabilityGrants.$inferInsert;
+
+export const agentInvocations = pgTable(
+  "agent_invocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    jti: uuid("jti").notNull(),
+    parentJti: uuid("parent_jti"),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    grantId: uuid("grant_id").references(() => agentCapabilityGrants.id),
+    onBehalfOfUserId: uuid("on_behalf_of_user_id").references(() => users.id),
+    toolName: text("tool_name").notNull(),
+    scopeClaim: jsonb("scope_claim").notNull(),
+    audience: text("audience").notNull(),
+    intentJti: text("intent_jti"),
+    cnfThumbprint: text("cnf_thumbprint").notNull(),
+    redeemStatus: text("redeem_status").notNull(),
+    redeemCount: integer("redeem_count").notNull().default(0),
+    maxRedeems: integer("max_redeems").notNull().default(1),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastRedeemedAt: timestamp("last_redeemed_at", { withTimezone: true }),
+    denyReason: text("deny_reason"),
+    auditEventId: uuid("audit_event_id"),
+  },
+  (t) => [
+    uniqueIndex("agent_invocations_workspace_jti_idx").on(t.workspaceId, t.jti),
+    index("agent_invocations_agent_time_idx").on(t.workspaceId, t.agentId, t.issuedAt.desc()),
+    index("agent_invocations_parent_jti_idx")
+      .on(t.workspaceId, t.parentJti)
+      .where(sql`parent_jti IS NOT NULL`),
+    index("agent_invocations_active_idx")
+      .on(t.workspaceId, t.expiresAt)
+      .where(sql`redeem_status = 'issued'`),
+    index("agent_invocations_scope_gin").using("gin", sql`${t.scopeClaim} jsonb_path_ops`),
+    check(
+      "agent_invocations_redeem_status_check",
+      sql`${t.redeemStatus} IN ('issued', 'redeemed', 'denied', 'expired', 'revoked')`,
+    ),
+  ],
+);
+
+export type AgentInvocation = typeof agentInvocations.$inferSelect;
+export type NewAgentInvocation = typeof agentInvocations.$inferInsert;
+
+export const delegationChains = pgTable(
+  "delegation_chains",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    parentJti: uuid("parent_jti").notNull(),
+    childJti: uuid("child_jti").notNull(),
+    parentAgentId: uuid("parent_agent_id")
+      .notNull()
+      .references(() => agents.id),
+    childAgentId: uuid("child_agent_id")
+      .notNull()
+      .references(() => agents.id),
+    scopeReduction: jsonb("scope_reduction").notNull(),
+    depth: integer("depth").notNull(),
+    maxDepth: integer("max_depth").notNull().default(3),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("delegation_chains_child_jti_idx").on(t.workspaceId, t.childJti),
+    index("delegation_chains_parent_jti_idx").on(t.workspaceId, t.parentJti),
+    check("delegation_chains_depth_max_check", sql`${t.depth} <= ${t.maxDepth}`),
+    check("delegation_chains_depth_positive_check", sql`${t.depth} > 0`),
+  ],
+);
+
+export type DelegationChain = typeof delegationChains.$inferSelect;
+export type NewDelegationChain = typeof delegationChains.$inferInsert;
