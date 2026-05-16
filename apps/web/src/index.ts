@@ -1,4 +1,11 @@
 import { isUuid, timingSafeEqualString } from "@getpact/core";
+import {
+  type AnalyticsEngineDataset,
+  type MetricsClient,
+  metricsFromEnv,
+  type SentryClient,
+  sentryFromEnv,
+} from "@getpact/logger";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { decodeProtectedHeader, importJWK, type JWK, jwtVerify } from "jose";
@@ -17,9 +24,18 @@ type Env = {
   GOOGLE_OAUTH_CLIENT_ID: string;
   GOOGLE_OAUTH_AUTHORIZATION_ENDPOINT?: string;
   WEB_ISSUER_SERVICE_TOKEN: string;
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  SENTRY_RELEASE?: string;
+  METRICS?: AnalyticsEngineDataset;
 };
 
-type AppContext = Context<{ Bindings: Env }>;
+type AppVariables = {
+  sentry: SentryClient;
+  metrics: MetricsClient;
+};
+
+type AppContext = Context<{ Bindings: Env; Variables: AppVariables }>;
 
 const ADMIN_ACCESS_COOKIE = "__Host-pact-admin-access";
 const ADMIN_REFRESH_COOKIE = "__Host-pact-admin-refresh";
@@ -47,7 +63,7 @@ const THIRTY_DAYS = 30 * 24 * 60 * 60;
 const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
 const JWKS_KID_MISS_TTL_MS = 30 * 1000;
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const dashboardSecurityHeaders = (production: boolean): Record<string, string> => ({
   "cache-control": "no-store",
@@ -69,14 +85,25 @@ const applyDashboardHeaders = (c: AppContext): void => {
 };
 
 app.use("*", async (c, next) => {
+  const sentry = sentryFromEnv(c.env, "web");
+  const metrics = metricsFromEnv(c.env, "web");
+  c.set("sentry", sentry);
+  c.set("metrics", metrics);
   applyDashboardHeaders(c);
-  await next();
+  try {
+    await next();
+  } catch (err) {
+    sentry.captureRequest(c.req.raw, err);
+    throw err;
+  }
   applyDashboardHeaders(c);
 });
 app.use("/v1/*", bodyLimit({ maxSize: 8 * 1024 }));
 
 app.onError((err, c) => {
   console.error(err);
+  const sentry = c.get("sentry");
+  sentry?.captureRequest(c.req.raw, err);
   applyDashboardHeaders(c);
   return c.json({ error: "internal_error" }, 500);
 });
