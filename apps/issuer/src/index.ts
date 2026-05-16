@@ -9,7 +9,14 @@ import {
 } from "@getpact/core";
 import { assertSafeRuntimeDbRole, createClient, UnsafeRuntimeDbRoleError } from "@getpact/db";
 import { rotateStaleKeys } from "@getpact/keystore";
-import { createLogger, requestLogger } from "@getpact/logger";
+import {
+  createLogger,
+  type MetricsClient,
+  metricsFromEnv,
+  requestLogger,
+  type SentryClient,
+  sentryFromEnv,
+} from "@getpact/logger";
 import {
   databaseRateLimiter,
   memoryRateLimiter,
@@ -33,12 +40,30 @@ import {
   redeemRefreshAndIssue,
 } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
+import { registerAgentRoutes } from "./routes/agents.js";
 import { createWorkspace } from "./workspace.js";
 
-export const app = new Hono<{ Bindings: Env }>();
+type AppVariables = {
+  sentry: SentryClient;
+  metrics: MetricsClient;
+};
+
+export const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const logger = createLogger({ base: { app: "issuer" } });
 app.use("*", requestLogger(logger, "issuer"));
+app.use("*", async (c, next) => {
+  const sentry = sentryFromEnv(c.env, "issuer");
+  const metrics = metricsFromEnv(c.env, "issuer");
+  c.set("sentry", sentry);
+  c.set("metrics", metrics);
+  try {
+    await next();
+  } catch (err) {
+    sentry.captureRequest(c.req.raw, err);
+    throw err;
+  }
+});
 app.use("*", async (c, next) => {
   await next();
   const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
@@ -122,6 +147,8 @@ app.use("/v1/dev/issue", (c, next) =>
 
 app.get("/health", (c) => c.json({ ok: true }));
 
+registerAgentRoutes(app);
+
 const googleAuthzBody = (e: AuthzError): { error: string; message: string } => {
   if (e instanceof GoogleIdentityMismatchError) {
     return { error: "google_identity_mismatch", message: e.message };
@@ -155,7 +182,7 @@ const googleExchangeFailure = (e: unknown): Response | null => {
 };
 
 const enforceRouteRateLimit = async (
-  c: Context<{ Bindings: Env }>,
+  c: Context<{ Bindings: Env; Variables: AppVariables }>,
   input: { key: string; limit: number; windowSeconds: number },
 ): Promise<Response | null> => {
   const result = await limiter(c.env).hit(input.key, input.limit, input.windowSeconds);
@@ -202,6 +229,8 @@ app.post("/v1/dev/issue", async (c) => {
     }
   }
   const body = await c.req.json<{ workspaceId: string; email: string; audience: string }>();
+  const metrics = c.get("metrics");
+  const mintStart = Date.now();
   try {
     const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
       workspaceId: body.workspaceId,
@@ -209,6 +238,10 @@ app.post("/v1/dev/issue", async (c) => {
       audience: body.audience,
       ttlSeconds: tokenTtlSeconds(c.env),
       issuerUrl: c.env.ISSUER_BASE_URL,
+    });
+    metrics?.recordMintLatency(Date.now() - mintStart, {
+      audience: body.audience,
+      route: "dev_issue",
     });
     return c.json(result);
   } catch (e) {
@@ -255,6 +288,8 @@ app.post("/v1/oauth/google/exchange", async (c) => {
     return c.json({ error: "email_not_verified" }, 403);
   }
 
+  const metrics = c.get("metrics");
+  const mintStart = Date.now();
   try {
     const result = await issueTokenForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
       workspaceId: body.workspaceId,
@@ -264,6 +299,10 @@ app.post("/v1/oauth/google/exchange", async (c) => {
       audience: body.audience,
       ttlSeconds: tokenTtlSeconds(c.env),
       issuerUrl: c.env.ISSUER_BASE_URL,
+    });
+    metrics?.recordMintLatency(Date.now() - mintStart, {
+      audience: body.audience,
+      route: "google_exchange",
     });
     return c.json(result);
   } catch (e) {
@@ -332,6 +371,8 @@ app.post("/v1/oauth/google/session", async (c) => {
     return c.json({ error: "email_not_verified" }, 403);
   }
 
+  const metrics = c.get("metrics");
+  const mintStart = Date.now();
   try {
     const tokens = await issueTokenBundleForEmail(c.env.DATABASE_URL, decodeMek(c.env), {
       workspaceId: body.workspaceId,
@@ -342,6 +383,12 @@ app.post("/v1/oauth/google/session", async (c) => {
       ttlSeconds: tokenTtlSeconds(c.env),
       issuerUrl: c.env.ISSUER_BASE_URL,
     });
+    for (const aud of audiences) {
+      metrics?.recordMintLatency(Date.now() - mintStart, {
+        audience: aud,
+        route: "google_session",
+      });
+    }
     return c.json({ tokens });
   } catch (e) {
     if (e instanceof AuthzError) {
@@ -360,6 +407,8 @@ app.post("/v1/refresh", async (c) => {
     refreshToken: string;
     audience: string;
   }>();
+  const metrics = c.get("metrics");
+  const mintStart = Date.now();
   try {
     const result = await redeemRefreshAndIssue(c.env.DATABASE_URL, decodeMek(c.env), {
       workspaceId: body.workspaceId,
@@ -368,7 +417,14 @@ app.post("/v1/refresh", async (c) => {
       ttlSeconds: tokenTtlSeconds(c.env),
       issuerUrl: c.env.ISSUER_BASE_URL,
     });
-    if (!result) return c.json({ error: "invalid_grant" }, 401);
+    if (!result) {
+      metrics?.incRefreshReuse({ audience: body.audience });
+      return c.json({ error: "invalid_grant" }, 401);
+    }
+    metrics?.recordMintLatency(Date.now() - mintStart, {
+      audience: body.audience,
+      route: "refresh",
+    });
     return c.json(result);
   } catch (e) {
     if (e instanceof PactError) {

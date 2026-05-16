@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@getpact/audit": "workspace:*",
+    "@getpact/auth": "workspace:*",
     "@getpact/core": "workspace:*",
     "@getpact/crypto": "workspace:*",
     "@getpact/db": "workspace:*",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",
+    "@getpact/test-helpers": "workspace:*",
     "wrangler": "^4.0.0"
   }
 }
