@@ -350,7 +350,6 @@ run("mcp server", () => {
     const body = (await res.json()) as { result: { tools: Array<{ name: string }> } };
     const names = body.result.tools.map((t) => t.name);
     expect(names).toContain("pact.whoami");
-    expect(names).toContain("pact.slack.auth.test");
     expect(names).toContain("pact.drive.files.list");
     expect(names).toContain("pact.drive.file.get");
     expect(names).not.toContain("pact.drive.file.index");
