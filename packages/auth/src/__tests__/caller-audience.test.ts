@@ -34,9 +34,10 @@ describe("callerAudience", () => {
     expect(callerAudience({})).toEqual([]);
   });
 
-  it("ignores non-array groups", () => {
-    expect(callerAudience({ email: "alice@example.com", groups: undefined })).toEqual([
-      "alice@example.com",
-    ]);
+  it("ignores non-array groups defensively", () => {
+    const input = { email: "alice@example.com", groups: "eng" } as unknown as Parameters<
+      typeof callerAudience
+    >[0];
+    expect(callerAudience(input)).toEqual(["alice@example.com"]);
   });
 });
