@@ -403,26 +403,30 @@ export const registerCapabilityRoutes = (app: Hono<any>): void => {
         return { ok: false, status: 410, reasons: ["token_revoked"] };
       }
 
+      let replayDetected = false;
       try {
-        await tx.execute(
-          sql`INSERT INTO kbjwt_replay_log (workspace_id, jti, kb_iat, sd_hash)
-              VALUES (${workspaceId}, ${payloadJti}, ${kbIat}, ${sdHashParam})`,
-        );
-      } catch (insertErr) {
-        if (isUniqueViolation(insertErr)) {
-          await writeCapabilityAudit(
-            tx,
-            workspaceId,
-            ws.createdAt,
-            rawMek,
-            "agent.capability.denied",
-            undefined,
-            { jti: payloadJti, tool_name: body.tool_name, resource: body.resource },
-            { reasons: ["kb_replay_detected"] },
+        await tx.transaction(async (sp) => {
+          await sp.execute(
+            sql`INSERT INTO kbjwt_replay_log (workspace_id, jti, kb_iat, sd_hash)
+                VALUES (${workspaceId}, ${payloadJti}, ${kbIat}, ${sdHashParam})`,
           );
-          return { ok: false, status: 410, reasons: ["kb_replay_detected"] };
-        }
-        throw insertErr;
+        });
+      } catch (insertErr) {
+        if (!isUniqueViolation(insertErr)) throw insertErr;
+        replayDetected = true;
+      }
+      if (replayDetected) {
+        await writeCapabilityAudit(
+          tx,
+          workspaceId,
+          ws.createdAt,
+          rawMek,
+          "agent.capability.denied",
+          undefined,
+          { jti: payloadJti, tool_name: body.tool_name, resource: body.resource },
+          { reasons: ["kb_replay_detected"] },
+        );
+        return { ok: false, status: 410, reasons: ["kb_replay_detected"] };
       }
 
       const invRows = (await tx.execute(
