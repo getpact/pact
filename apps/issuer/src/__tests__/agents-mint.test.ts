@@ -136,7 +136,7 @@ run("agents capability mint", () => {
       onBehalfOfUserId: created.adminUserId,
       toolName: "pact.drive.search",
       scope: { folder: "shared" },
-      audience: ["pact-drive"],
+      audience: ["pact-mcp"],
     });
 
     const res = await callMint(
@@ -146,7 +146,7 @@ run("agents capability mint", () => {
         on_behalf_of: "alice@example.com",
         tool_name: "pact.drive.search",
         scope: { folder: "shared" },
-        audience: "pact-drive",
+        audience: "pact-mcp",
         ttl_seconds: 300,
         max_redeems: 1,
         cnf_jwk: recipientJwk,
@@ -198,7 +198,7 @@ run("agents capability mint", () => {
       onBehalfOfUserId: created.adminUserId,
       toolName: "pact.drive.search",
       scope: { folder: "private" },
-      audience: ["pact-drive"],
+      audience: ["pact-mcp"],
       maxUsesPerDay: 2,
     });
 
@@ -214,7 +214,7 @@ run("agents capability mint", () => {
           onBehalfOfUserId: created.adminUserId,
           toolName: "pact.drive.search",
           scopeClaim: { folder: "private" },
-          audience: "pact-drive",
+          audience: "pact-mcp",
           cnfThumbprint: "filler",
           redeemStatus: "issued",
           issuedAt: now,
@@ -230,7 +230,7 @@ run("agents capability mint", () => {
         on_behalf_of: "alice@example.com",
         tool_name: "pact.drive.search",
         scope: { folder: "private" },
-        audience: "pact-drive",
+        audience: "pact-mcp",
         cnf_jwk: recipientJwk,
       },
       env,
@@ -247,7 +247,7 @@ run("agents capability mint", () => {
       onBehalfOfUserId: created.adminUserId,
       toolName: "pact.drive.search",
       scope: { folder: "shared" },
-      audience: ["pact-drive"],
+      audience: ["pact-mcp"],
     });
     const res = await callMint(
       agentId,
@@ -256,7 +256,7 @@ run("agents capability mint", () => {
         on_behalf_of: "alice@example.com",
         tool_name: "pact.drive.write",
         scope: { folder: "shared" },
-        audience: "pact-drive",
+        audience: "pact-mcp",
         cnf_jwk: recipientJwk,
       },
       env,
@@ -273,7 +273,7 @@ run("agents capability mint", () => {
       onBehalfOfUserId: created.adminUserId,
       toolName: "pact.drive.search",
       scope: { folder: "shared" },
-      audience: ["pact-drive"],
+      audience: ["pact-mcp"],
     });
 
     const localEnv = { ...env, ENVIRONMENT: "development" };
@@ -286,7 +286,7 @@ run("agents capability mint", () => {
           on_behalf_of: "alice@example.com",
           tool_name: "pact.drive.search",
           scope: { folder: "shared" },
-          audience: "pact-drive",
+          audience: "pact-mcp",
           cnf_jwk: recipientJwk,
         },
         localEnv,
@@ -306,7 +306,7 @@ run("agents capability mint", () => {
       onBehalfOfUserId: created.adminUserId,
       toolName: "pact.drive.search",
       scope: { folder: "shared" },
-      audience: ["pact-drive"],
+      audience: ["pact-mcp"],
     });
 
     const res = await callMint(
@@ -316,7 +316,7 @@ run("agents capability mint", () => {
         on_behalf_of: "alice@example.com",
         tool_name: "pact.drive.search",
         scope: { folder: "shared" },
-        audience: "pact-drive",
+        audience: "pact-mcp",
       },
       env,
     );

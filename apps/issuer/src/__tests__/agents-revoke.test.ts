@@ -65,7 +65,7 @@ const seedGrant = async (
         onBehalfOfUserId: input.onBehalfOfUserId,
         toolName: "pact.drive.search",
         scope: { folder: "shared" },
-        audience: ["pact-drive"],
+        audience: ["pact-mcp"],
         createdByUserId: input.ownerUserId,
       })
       .returning({ id: agentCapabilityGrants.id });
@@ -94,7 +94,7 @@ const seedInvocation = async (
       onBehalfOfUserId: input.onBehalfOfUserId,
       toolName: "pact.drive.search",
       scopeClaim: { folder: "shared" },
-      audience: "pact-drive",
+      audience: "pact-mcp",
       cnfThumbprint: "filler",
       redeemStatus: "issued",
       issuedAt: new Date(),
