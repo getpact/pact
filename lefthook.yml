@@ -4,6 +4,16 @@ pre-commit:
     biome:
       glob: "*.{js,ts,jsx,tsx,json,jsonc}"
       run: pnpm biome check --no-errors-on-unmatched {staged_files}
+    typecheck:
+      glob: "*.{ts,tsx}"
+      # Turbo caches per-package; only changed packages recompile.
+      # Skip with PACT_SKIP_PRECOMMIT_TYPECHECK=1 for staged-only quick commits.
+      run: |
+        if [ "${PACT_SKIP_PRECOMMIT_TYPECHECK:-0}" = "1" ]; then
+          echo "[pre-commit] PACT_SKIP_PRECOMMIT_TYPECHECK=1 set; skipping typecheck."
+          exit 0
+        fi
+        pnpm typecheck
     ascii-tells:
       run: |
         files=$(git diff --cached --name-only --diff-filter=ACM)
