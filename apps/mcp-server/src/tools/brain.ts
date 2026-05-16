@@ -10,7 +10,7 @@ import { callerAudience } from "@getpact/auth";
 import { chunkText } from "@getpact/brain-core/chunkers";
 import { hybridSearch } from "@getpact/brain-core/search";
 import { isUuid } from "@getpact/core";
-import { jcsBytes, signEd25519, toBase64Url } from "@getpact/crypto";
+import { jcsBytes, signEd25519, toBase64Url, toHex } from "@getpact/crypto";
 import { createClient, type DbClient, type Tx, withWorkspace } from "@getpact/db";
 import {
   brainChunkEmbeddings,
@@ -265,8 +265,6 @@ const consumeSendCapsForAudience = async (
   return { result: { kind: "allow" }, consumedCapIds: consumed };
 };
 
-const bufferToHex = (value: Buffer): string => value.toString("hex");
-
 const attestationInput = (input: unknown): DriveAttestation | null => {
   if (!input || typeof input !== "object") return null;
   return decodeAttestation((input as Record<string, unknown>).drive_attestation);
@@ -396,7 +394,7 @@ const brainPut: AdapterTool = {
         keyBytes,
         attestation,
         sourceUri,
-        contentHash: bufferToHex(contentHash),
+        contentHash: toHex(contentHash),
         audience,
       });
       if (!verifyResult.ok) {
