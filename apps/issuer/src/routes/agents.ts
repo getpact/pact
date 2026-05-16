@@ -4,11 +4,11 @@ import { canonicalizeEmail, isUuid } from "@getpact/core";
 import { sdjwt } from "@getpact/crypto";
 import type { Tx } from "@getpact/db";
 import { createClient, withWorkspace } from "@getpact/db";
-import { revokedJtis, workspaces } from "@getpact/db/schema";
+import { revokedJtis, workspaceAudiences, workspaces } from "@getpact/db/schema";
 import { loadActiveSigningKey } from "@getpact/keystore";
 import type { MetricsClient, SentryClient } from "@getpact/logger";
 import { databaseRateLimiter, memoryRateLimiter, type RateLimiter } from "@getpact/ratelimit";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Context, Hono } from "hono";
 import { decodeMek, type Env } from "../env.js";
 
@@ -282,6 +282,43 @@ const AGENT_STATUSES = new Set(["active", "suspended", "revoked"]);
 const LIST_LIMIT_DEFAULT = 50;
 const LIST_LIMIT_MAX = 200;
 
+const subjectMatchesPattern = (subject: string, pattern: string): boolean => {
+  if (pattern.length === 0) return false;
+  if (pattern.startsWith("@")) {
+    const at = subject.lastIndexOf("@");
+    if (at < 0) return false;
+    return subject.slice(at) === pattern;
+  }
+  return subject === pattern;
+};
+
+const subjectAllowedByPatterns = (subject: string, patterns: string[]): boolean => {
+  if (patterns.length === 0) return true;
+  return patterns.some((p) => subjectMatchesPattern(subject, p));
+};
+
+const lookupAudience = async (
+  tx: Tx,
+  workspaceId: string,
+  name: string,
+): Promise<{ id: string; allowedSubjectPatterns: string[] } | null> => {
+  const rows = await tx
+    .select({
+      id: workspaceAudiences.id,
+      allowedSubjectPatterns: workspaceAudiences.allowedSubjectPatterns,
+    })
+    .from(workspaceAudiences)
+    .where(
+      and(
+        eq(workspaceAudiences.workspaceId, workspaceId),
+        eq(workspaceAudiences.name, name),
+        isNull(workspaceAudiences.revokedAt),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+};
+
 type AgentListRow = {
   id: string;
   slug: string;
@@ -437,6 +474,24 @@ export const registerAgentRoutes = (app: IssuerApp): void => {
           };
         }
 
+        const audienceRow = await lookupAudience(tx, workspaceId, parsed.audience);
+        if (!audienceRow) {
+          return {
+            kind: "error" as const,
+            status: 400,
+            code: "unknown_audience",
+            message: `Audience "${parsed.audience}" not registered for workspace`,
+          };
+        }
+        if (!subjectAllowedByPatterns(subject.email, audienceRow.allowedSubjectPatterns)) {
+          return {
+            kind: "error" as const,
+            status: 400,
+            code: "subject_not_allowed",
+            message: `Subject not allowed by audience "${parsed.audience}"`,
+          };
+        }
+
         const grant = await findGrant(tx, {
           workspaceId,
           agentId,
@@ -568,7 +623,7 @@ export const registerAgentRoutes = (app: IssuerApp): void => {
       if (result.kind === "error") {
         return c.json(
           { error: result.code, message: result.message },
-          result.status as 403 | 404 | 409,
+          result.status as 400 | 403 | 404 | 409,
         );
       }
       return c.json(result.payload, 201);

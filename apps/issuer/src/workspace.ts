@@ -1,8 +1,16 @@
 import { ConflictError, canonicalizeEmail, type Email } from "@getpact/core";
 import { createClient } from "@getpact/db";
-import { roles, userRoles, users, workspaces } from "@getpact/db/schema";
+import { roles, userRoles, users, workspaceAudiences, workspaces } from "@getpact/db/schema";
 import { createSigningKey } from "@getpact/keystore";
 import { sql } from "drizzle-orm";
+
+const DEFAULT_AUDIENCES: ReadonlyArray<{ name: string; description: string }> = [
+  { name: "pact-admin", description: "Workspace admin console" },
+  { name: "pact-audit", description: "Audit log readers" },
+  { name: "pact-mcp", description: "MCP gateway access" },
+  { name: "pact-gateway", description: "Pact gateway" },
+  { name: "pact-agent", description: "Agent capability tokens" },
+];
 
 const isPgUniqueViolation = (e: unknown): boolean =>
   typeof e === "object" && e !== null && "code" in e && (e as { code?: unknown }).code === "23505";
@@ -58,6 +66,15 @@ export const createWorkspace = async (
     if (!adminRole) throw new Error("admin role insert failed");
 
     await tx.insert(userRoles).values({ userId: user.id, roleId: adminRole.id });
+
+    for (const aud of DEFAULT_AUDIENCES) {
+      await tx.insert(workspaceAudiences).values({
+        workspaceId: ws.id,
+        name: aud.name,
+        description: aud.description,
+        createdByUserId: user.id,
+      });
+    }
 
     const jwtKey = await createSigningKey(tx, {
       workspaceId: ws.id,
