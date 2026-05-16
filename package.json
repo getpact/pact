@@ -21,6 +21,7 @@
     "deploy:cloudflare": "sh scripts/deploy-cloudflare.sh",
     "smoke:cloudflare": "node scripts/smoke-cloudflare.mjs",
     "verify": "bash scripts/verify-clean.sh",
+    "verify:ci": "bash scripts/verify-clean.sh && bash scripts/test-db.sh",
     "prepare": "lefthook install"
   },
   "devDependencies": {

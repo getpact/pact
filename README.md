@@ -36,7 +36,7 @@ To run with an already-running Postgres, copy `.env.example` to `.env`, source i
 
 Without those env vars, DB-gated suites silently skip (with `describe.skip`). CI enforces they actually run via `scripts/check-db-tests-ran.mjs`.
 
-Run `pnpm verify` before push to catch CI mismatches locally (clears caches, reinstalls from frozen lockfile, runs typecheck and lint).
+Run `pnpm verify` before push to catch CI mismatches locally (clears caches, reinstalls from frozen lockfile, runs typecheck and lint). Run `pnpm verify:ci` for the full CI parity check including DB tests (requires docker). Lefthook auto-runs `pnpm test:db` on `git push`; set `PACT_SKIP_PREPUSH_TESTS=1` to skip when iterating fast (CI is still authoritative).
 
 ## Operations
 

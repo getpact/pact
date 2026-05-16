@@ -42,6 +42,20 @@ pre-commit:
         fi
 
 pre-push:
+  parallel: false
   commands:
     typecheck:
       run: pnpm typecheck
+    test-db:
+      # Full CI-parity: boot postgres via docker compose, apply migrations, run all tests.
+      # Slow. Skip with PACT_SKIP_PREPUSH_TESTS=1 for quick fixes; CI is still authoritative.
+      run: |
+        if [ "${PACT_SKIP_PREPUSH_TESTS:-0}" = "1" ]; then
+          echo "[pre-push] PACT_SKIP_PREPUSH_TESTS=1 set; skipping test:db. CI must still pass."
+          exit 0
+        fi
+        if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+          echo "[pre-push] docker unavailable; skipping test:db. Set PACT_SKIP_PREPUSH_TESTS=1 to silence."
+          exit 0
+        fi
+        pnpm test:db
