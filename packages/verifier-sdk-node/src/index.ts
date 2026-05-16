@@ -1,6 +1,17 @@
 import { createRemoteJWKSet, type JWTPayload, type JWTVerifyResult, jwtVerify } from "jose";
 
 export type { JWTPayload, JWTVerifyResult } from "jose";
+export type { JwksCacheOptions, JwksFetcher } from "./jwks.js";
+
+export { JwksCache, JwksFetchError, sharedJwksCache } from "./jwks.js";
+export type {
+  DenyReason,
+  ReplayCache,
+  VerifyDenied,
+  VerifyOpts,
+  VerifyResult,
+} from "./verifyPactToken.js";
+export { verifyPactToken } from "./verifyPactToken.js";
 
 export type VerifierOptions = {
   jwksUrl: string;
