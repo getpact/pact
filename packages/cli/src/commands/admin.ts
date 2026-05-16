@@ -50,7 +50,27 @@ export const parseDuration = (input: string): string => {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error("--older-than must be a positive integer with a unit");
   }
+  const MAX_DAYS = 3650;
   const unit = (match[2] ?? "").toLowerCase();
+  const days = (() => {
+    switch (unit) {
+      case "s":
+        return amount / 86400;
+      case "m":
+        return amount / 1440;
+      case "h":
+        return amount / 24;
+      case "d":
+        return amount;
+      case "w":
+        return amount * 7;
+      default:
+        throw new Error(`invalid --older-than unit '${unit}'`);
+    }
+  })();
+  if (days > MAX_DAYS) {
+    throw new Error(`--older-than '${input}' exceeds maximum of ${MAX_DAYS} days`);
+  }
   switch (unit) {
     case "s":
       return `${amount} seconds`;
@@ -121,24 +141,27 @@ export type BackfillSummary = {
   actions: BackfillAction[];
 };
 
+const HMAC_BACKFILL_LOCK_TAG = 0x70_61_63_74; // "pact" in hex, namespace for advisory lock
+
 const ensureHmacKey = async (
   db: DbClient,
   workspaceId: string,
   rawMek: Uint8Array,
   dryRun: boolean,
 ): Promise<boolean> => {
-  try {
-    await withWorkspace(db, workspaceId, (tx) =>
-      loadActiveHmacKey(tx, workspaceId, ADAPTER_DRIVE_KIND, rawMek),
+  return withWorkspace(db, workspaceId, async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${HMAC_BACKFILL_LOCK_TAG}, hashtextextended(${workspaceId} || ':' || ${ADAPTER_DRIVE_KIND}, 0)::int4)`,
     );
-    return false;
-  } catch {
-    if (dryRun) return true;
-    await withWorkspace(db, workspaceId, (tx) =>
-      createHmacKey(tx, { workspaceId, kind: ADAPTER_DRIVE_KIND, rawMek }),
-    );
-    return true;
-  }
+    try {
+      await loadActiveHmacKey(tx, workspaceId, ADAPTER_DRIVE_KIND, rawMek);
+      return false;
+    } catch {
+      if (dryRun) return true;
+      await createHmacKey(tx, { workspaceId, kind: ADAPTER_DRIVE_KIND, rawMek });
+      return true;
+    }
+  });
 };
 
 const ensureAudiences = async (
@@ -163,11 +186,14 @@ const ensureAudiences = async (
     );
     if (existing.length > 0) continue;
     if (!dryRun) {
-      await withWorkspace(db, workspaceId, (tx) =>
+      const result = await withWorkspace(db, workspaceId, (tx) =>
         tx
           .insert(schema.workspaceAudiences)
-          .values({ workspaceId, name: aud.name, description: aud.description }),
+          .values({ workspaceId, name: aud.name, description: aud.description })
+          .onConflictDoNothing()
+          .returning({ id: schema.workspaceAudiences.id }),
       );
+      if (result.length === 0) continue;
     }
     inserted.push(aud.name);
   }
