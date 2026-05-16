@@ -24,6 +24,25 @@ export type AuthenticateBearerInput = {
   expectedWorkspaceId?: string;
 };
 
+export type CallerLike = { email?: string; groups?: string[] };
+
+export const callerAudience = (ctx: CallerLike): string[] => {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string | undefined) => {
+    if (typeof raw !== "string") return;
+    const value = raw.trim();
+    if (value.length === 0 || seen.has(value)) return;
+    seen.add(value);
+    out.push(value);
+  };
+  push(ctx.email);
+  if (Array.isArray(ctx.groups)) {
+    for (const g of ctx.groups) push(g);
+  }
+  return out;
+};
+
 export const stringArrayClaim = (value: unknown, name: string): string[] => {
   if (value === undefined) return [];
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;

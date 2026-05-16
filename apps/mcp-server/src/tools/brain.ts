@@ -6,6 +6,7 @@ import {
 } from "@getpact/adapter-drive/attestation";
 import { type Adapter, type AdapterTool, json, type ToolDeps } from "@getpact/adapter-sdk";
 import { writeEvent } from "@getpact/audit";
+import { callerAudience } from "@getpact/auth";
 import { chunkText } from "@getpact/brain-core/chunkers";
 import { hybridSearch } from "@getpact/brain-core/search";
 import { isUuid } from "@getpact/core";
@@ -59,25 +60,6 @@ const numberInput = (input: unknown, key: string): number | undefined => {
 
 const isValidSourceKind = (value: string | undefined): value is "manual" | "connector" =>
   value === "manual" || value === "connector";
-
-type CallerLike = { email?: string; groups?: string[] };
-
-const callerAudience = (ctx: CallerLike): string[] => {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const push = (raw: string | undefined) => {
-    if (typeof raw !== "string") return;
-    const value = raw.trim();
-    if (value.length === 0 || seen.has(value)) return;
-    seen.add(value);
-    out.push(value);
-  };
-  push(ctx.email);
-  if (Array.isArray(ctx.groups)) {
-    for (const g of ctx.groups) push(g);
-  }
-  return out;
-};
 
 const openAiEmbedder = (
   apiKey: string,
