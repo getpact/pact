@@ -79,52 +79,6 @@ importers:
         specifier: ^4.0.0
         version: 4.90.0(@cloudflare/workers-types@4.20260509.1)
 
-  apps/audit-api:
-    dependencies:
-      '@getpact/audit':
-        specifier: workspace:*
-        version: link:../../packages/audit
-      '@getpact/auth':
-        specifier: workspace:*
-        version: link:../../packages/auth
-      '@getpact/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@getpact/crypto':
-        specifier: workspace:*
-        version: link:../../packages/crypto
-      '@getpact/db':
-        specifier: workspace:*
-        version: link:../../packages/db
-      '@getpact/keystore':
-        specifier: workspace:*
-        version: link:../../packages/keystore
-      '@getpact/logger':
-        specifier: workspace:*
-        version: link:../../packages/logger
-      drizzle-orm:
-        specifier: ^0.36.0
-        version: 0.36.4(@cloudflare/workers-types@4.20260509.1)(postgres@3.4.9)
-      hono:
-        specifier: ^4.6.0
-        version: 4.12.18
-      jose:
-        specifier: ^5.9.0
-        version: 5.10.0
-      postgres:
-        specifier: ^3.4.0
-        version: 3.4.9
-    devDependencies:
-      '@cloudflare/workers-types':
-        specifier: ^4.20250101.0
-        version: 4.20260509.1
-      '@getpact/test-helpers':
-        specifier: workspace:*
-        version: link:../../packages/test-helpers
-      wrangler:
-        specifier: ^4.0.0
-        version: 4.90.0(@cloudflare/workers-types@4.20260509.1)
-
   apps/gateway:
     dependencies:
       '@getpact/audit':
@@ -179,6 +133,9 @@ importers:
       '@getpact/audit':
         specifier: workspace:*
         version: link:../../packages/audit
+      '@getpact/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@getpact/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -216,6 +173,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250101.0
         version: 4.20260509.1
+      '@getpact/test-helpers':
+        specifier: workspace:*
+        version: link:../../packages/test-helpers
       wrangler:
         specifier: ^4.0.0
         version: 4.90.0(@cloudflare/workers-types@4.20260509.1)
@@ -228,12 +188,15 @@ importers:
       '@getpact/adapter-sdk':
         specifier: workspace:*
         version: link:../../packages/adapter-sdk
-      '@getpact/adapter-slack':
+      '@getpact/audit':
         specifier: workspace:*
-        version: link:../../packages/adapter-slack
+        version: link:../../packages/audit
       '@getpact/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@getpact/brain-core':
+        specifier: workspace:*
+        version: link:../../packages/brain-core
       '@getpact/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -329,6 +292,9 @@ importers:
       '@getpact/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@getpact/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
       hono:
         specifier: ^4.6.0
         version: 4.12.18
@@ -342,6 +308,21 @@ importers:
       wrangler:
         specifier: ^4.0.0
         version: 4.90.0(@cloudflare/workers-types@4.20260509.1)
+
+  examples/god-mode-demo:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@22.19.18)(tsx@4.21.0)
 
   packages/adapter-drive:
     dependencies:
@@ -357,12 +338,6 @@ importers:
         version: 3.2.4(@types/node@22.19.18)(tsx@4.21.0)
 
   packages/adapter-sdk: {}
-
-  packages/adapter-slack:
-    dependencies:
-      '@getpact/adapter-sdk':
-        specifier: workspace:*
-        version: link:../adapter-sdk
 
   packages/audit:
     dependencies:
@@ -396,6 +371,15 @@ importers:
       jose:
         specifier: ^5.9.0
         version: 5.10.0
+
+  packages/brain-core:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@22.19.18)(tsx@4.21.0)
 
   packages/cli:
     dependencies:
