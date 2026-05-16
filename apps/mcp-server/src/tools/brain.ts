@@ -2,10 +2,17 @@ import { type Adapter, type AdapterTool, json, type ToolDeps } from "@getpact/ad
 import { writeEvent } from "@getpact/audit";
 import { chunkText } from "@getpact/brain-core/chunkers";
 import { hybridSearch } from "@getpact/brain-core/search";
+import { isUuid } from "@getpact/core";
 import { createClient, type DbClient, type Tx, withWorkspace } from "@getpact/db";
-import { brainChunkEmbeddings, brainChunks, brainPages, workspaces } from "@getpact/db/schema";
+import {
+  brainChunkEmbeddings,
+  brainChunks,
+  brainPages,
+  sendCaps,
+  workspaces,
+} from "@getpact/db/schema";
 import { loadActiveSigningKey } from "@getpact/keystore";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { BrainAdapter } from "../brain-adapter.js";
 
 const EMBED_DIMS = 1536;
@@ -173,6 +180,124 @@ const tryAuditBrainWrite = async (
   }
 };
 
+type SendCapCheckResult =
+  | { kind: "allow" }
+  | { kind: "deny"; audienceUserId: string; reason: string };
+
+const isUserAudienceEntry = (entry: string): boolean => {
+  if (entry.startsWith("tier:") || entry.startsWith("group:") || entry.startsWith("role:")) {
+    return false;
+  }
+  return isUuid(entry);
+};
+
+const consumeSendCapsForAudience = async (
+  tx: Tx,
+  workspaceId: string,
+  actorUserId: string,
+  audience: string[],
+): Promise<{ result: SendCapCheckResult; consumedCapIds: string[] }> => {
+  const consumed: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of audience) {
+    if (!isUserAudienceEntry(entry)) continue;
+    if (entry === actorUserId) continue;
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+
+    const nowSql = sql`NOW()`;
+    const [cap] = await tx
+      .select({
+        id: sendCaps.id,
+        maxUses: sendCaps.maxUses,
+        usedCount: sendCaps.usedCount,
+        expiresAt: sendCaps.expiresAt,
+        revokedAt: sendCaps.revokedAt,
+      })
+      .from(sendCaps)
+      .where(
+        and(
+          eq(sendCaps.workspaceId, workspaceId),
+          eq(sendCaps.issuerUserId, entry),
+          eq(sendCaps.granteeUserId, actorUserId),
+          isNull(sendCaps.revokedAt),
+          or(isNull(sendCaps.expiresAt), gt(sendCaps.expiresAt, nowSql)),
+          or(isNull(sendCaps.maxUses), gt(sendCaps.maxUses, sendCaps.usedCount)),
+        ),
+      )
+      .orderBy(sendCaps.createdAt)
+      .limit(1);
+    if (!cap) {
+      return {
+        result: { kind: "deny", audienceUserId: entry, reason: "send_cap_required" },
+        consumedCapIds: consumed,
+      };
+    }
+    const updated = await tx
+      .update(sendCaps)
+      .set({ usedCount: sql`${sendCaps.usedCount} + 1` })
+      .where(
+        and(
+          eq(sendCaps.workspaceId, workspaceId),
+          eq(sendCaps.id, cap.id),
+          isNull(sendCaps.revokedAt),
+          or(isNull(sendCaps.maxUses), gt(sendCaps.maxUses, sendCaps.usedCount)),
+        ),
+      )
+      .returning({ id: sendCaps.id });
+    if (updated.length === 0) {
+      return {
+        result: { kind: "deny", audienceUserId: entry, reason: "send_cap_exhausted" },
+        consumedCapIds: consumed,
+      };
+    }
+    consumed.push(cap.id);
+  }
+  return { result: { kind: "allow" }, consumedCapIds: consumed };
+};
+
+const trySendCapAudit = async (
+  db: DbClient,
+  workspaceId: string,
+  rawMek: Uint8Array | undefined,
+  payload: {
+    action: string;
+    actorUserId: string;
+    target: unknown;
+    decision: "allow" | "deny";
+    supporting?: unknown;
+  },
+): Promise<void> => {
+  if (!rawMek) return;
+  try {
+    await withWorkspace(db, workspaceId, async (tx) => {
+      const [ws] = await tx
+        .select({ createdAt: workspaces.createdAt })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId))
+        .limit(1);
+      if (!ws) return;
+      const auditKey = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
+      await writeEvent(tx, {
+        workspaceId,
+        workspaceCreatedAt: ws.createdAt,
+        signingKeyId: auditKey.id,
+        signingKey: auditKey.privateKey,
+        event: {
+          actorKind: "user",
+          actorId: payload.actorUserId,
+          action: payload.action,
+          target: payload.target,
+          decision: payload.decision,
+          supporting: payload.supporting ?? null,
+        },
+      });
+    });
+  } catch {
+    // best-effort
+  }
+};
+
 const findExistingPage = async (
   tx: Tx,
   workspaceId: string,
@@ -258,6 +383,37 @@ const brainPut: AdapterTool = {
         page_id: existing.id,
         chunks_created: 0,
         idempotent: true,
+      });
+    }
+
+    const sendCapCheck = await withWorkspace(db, ctx.workspaceId, (tx) =>
+      consumeSendCapsForAudience(tx, ctx.workspaceId, ctx.userId, audience),
+    );
+    if (sendCapCheck.result.kind === "deny") {
+      const denial = sendCapCheck.result;
+      await trySendCapAudit(db, ctx.workspaceId, deps.rawMek, {
+        action: "brain.put.send_cap_required",
+        actorUserId: ctx.userId,
+        target: { sourceUri, audience_user_id: denial.audienceUserId },
+        decision: "deny",
+        supporting: { reason: denial.reason },
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `send_cap_required: no active SendCap from ${denial.audienceUserId} to actor`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    for (const capId of sendCapCheck.consumedCapIds) {
+      await trySendCapAudit(db, ctx.workspaceId, deps.rawMek, {
+        action: "send_cap.used",
+        actorUserId: ctx.userId,
+        target: { send_cap_id: capId, sourceUri },
+        decision: "allow",
       });
     }
 
