@@ -333,7 +333,9 @@ async function hybridSearchInner(
       }),
       async (span) => {
         const lists = await Promise.all(
-          embeddings.map((emb) => adapter.searchVector(emb, searchOpts)),
+          embeddings
+            .filter((emb): emb is Float32Array => emb !== undefined)
+            .map((emb) => adapter.searchVector(emb, searchOpts)),
         );
         const total = lists.reduce((n, l) => n + l.length, 0);
         span.setAttr("hits", total);
