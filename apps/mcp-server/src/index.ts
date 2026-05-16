@@ -1,7 +1,15 @@
 import { PactError, securityHeaders } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
 import { assertSafeRuntimeDbRole, UnsafeRuntimeDbRoleError } from "@getpact/db";
-import { createLogger, requestLogger } from "@getpact/logger";
+import {
+  type AnalyticsEngineDataset,
+  createLogger,
+  type MetricsClient,
+  metricsFromEnv,
+  requestLogger,
+  type SentryClient,
+  sentryFromEnv,
+} from "@getpact/logger";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { authenticate } from "./auth.js";
@@ -21,12 +29,33 @@ type Env = {
   GOOGLE_OAUTH_CLIENT_SECRET?: string;
   GOOGLE_OAUTH_TOKEN_ENDPOINT?: string;
   DRIVE_RAG_ENABLED?: string;
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  SENTRY_RELEASE?: string;
+  METRICS?: AnalyticsEngineDataset;
 };
 
-const app = new Hono<{ Bindings: Env }>();
+type AppVariables = {
+  sentry: SentryClient;
+  metrics: MetricsClient;
+};
+
+const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const logger = createLogger({ base: { app: "mcp-server" } });
 app.use("*", requestLogger(logger, "mcp-server"));
+app.use("*", async (c, next) => {
+  const sentry = sentryFromEnv(c.env, "mcp-server");
+  const metrics = metricsFromEnv(c.env, "mcp-server");
+  c.set("sentry", sentry);
+  c.set("metrics", metrics);
+  try {
+    await next();
+  } catch (err) {
+    sentry.captureRequest(c.req.raw, err);
+    throw err;
+  }
+});
 app.use("*", async (c, next) => {
   await next();
   const headers = securityHeaders({ production: c.env.ENVIRONMENT === "production" });
@@ -90,6 +119,20 @@ app.post("/:workspace/mcp", async (c) => {
     },
     ...(verify ? { verify } : {}),
   });
+  if (response.error) {
+    const bodyRecord =
+      body && typeof body === "object" ? (body as Record<string, unknown>) : undefined;
+    const method = typeof bodyRecord?.method === "string" ? bodyRecord.method : undefined;
+    if (method === "tools/call") {
+      const metrics = c.get("metrics");
+      const params =
+        bodyRecord?.params && typeof bodyRecord.params === "object"
+          ? (bodyRecord.params as Record<string, unknown>)
+          : undefined;
+      const toolName = typeof params?.name === "string" ? params.name : "unknown";
+      metrics?.incMcpToolError(toolName, { code: String(response.error.code) });
+    }
+  }
   return c.json(response);
 });
 
