@@ -17,6 +17,10 @@ import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 
 export type SigningKeyKind = "jwt" | "audit";
 
+export type HmacKeyKind = "adapter-drive";
+
+const HMAC_KEY_LENGTH = 32;
+
 const IV_BYTES = 12;
 
 const serialize = (env: AesEnvelope): string => {
@@ -317,4 +321,99 @@ export const rotateStaleKeys = async (
     }
   }
   return { rotated, errors };
+};
+
+const hmacAadFor = (workspaceId: string, kind: HmacKeyKind): Uint8Array =>
+  new TextEncoder().encode(`keystore:hmac:v1:${workspaceId}:${kind}`);
+
+export type CreateHmacKeyOptions = {
+  workspaceId: string;
+  kind: HmacKeyKind;
+  rawMek: Uint8Array;
+};
+
+export type StoredHmacKey = {
+  id: string;
+};
+
+export const createHmacKey = async (tx: Tx, opts: CreateHmacKeyOptions): Promise<StoredHmacKey> => {
+  const keyBytes = crypto.getRandomValues(new Uint8Array(HMAC_KEY_LENGTH));
+  const mek = await importMek(opts.rawMek);
+  const wrapped = await encryptAesGcm(mek, keyBytes, hmacAadFor(opts.workspaceId, opts.kind));
+
+  const inserted = (await tx.execute(
+    sql`INSERT INTO workspace_signing_keys (workspace_id, kind, alg, public_key_spki, private_key_wrapped)
+        VALUES (${opts.workspaceId}, ${opts.kind}, ${"HS256"}, ${""}, ${serialize(wrapped)})
+        RETURNING id`,
+  )) as Array<{ id: string }>;
+
+  const id = inserted[0]?.id;
+  if (!id) throw new Error("hmac key insert returned no id");
+  return { id };
+};
+
+export type ActiveHmacKey = {
+  id: string;
+  keyBytes: Uint8Array;
+};
+
+export const loadActiveHmacKey = async (
+  tx: Tx,
+  workspaceId: string,
+  kind: HmacKeyKind,
+  rawMek: Uint8Array,
+): Promise<ActiveHmacKey> => {
+  const rows = await tx
+    .select()
+    .from(schema.workspaceSigningKeys)
+    .where(
+      and(
+        eq(schema.workspaceSigningKeys.workspaceId, workspaceId),
+        eq(schema.workspaceSigningKeys.kind, kind),
+        or(
+          isNull(schema.workspaceSigningKeys.validForSigningUntil),
+          gt(schema.workspaceSigningKeys.validForSigningUntil, sql`NOW()`),
+        ),
+      ),
+    )
+    .orderBy(desc(schema.workspaceSigningKeys.createdAt))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) throw new Error(`no active ${kind} hmac key for workspace ${workspaceId}`);
+
+  const mek = await importMek(rawMek);
+  const aad = hmacAadFor(workspaceId, kind);
+  const keyBytes = await decryptAesGcm(mek, parse(row.privateKeyWrapped), aad);
+  return { id: row.id, keyBytes };
+};
+
+export const computeHmacSha256 = async (
+  keyBytes: Uint8Array,
+  message: Uint8Array,
+): Promise<Uint8Array> => {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyBytes as BufferSource,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", cryptoKey, message as BufferSource);
+  return new Uint8Array(sig);
+};
+
+export const verifyHmacSha256 = async (
+  keyBytes: Uint8Array,
+  message: Uint8Array,
+  tag: Uint8Array,
+): Promise<boolean> => {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyBytes as BufferSource,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+  return crypto.subtle.verify("HMAC", cryptoKey, tag as BufferSource, message as BufferSource);
 };
