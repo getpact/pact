@@ -72,6 +72,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250101.0
         version: 4.20260509.1
+      '@getpact/ratelimit':
+        specifier: workspace:*
+        version: link:../../packages/ratelimit
       '@getpact/test-helpers':
         specifier: workspace:*
         version: link:../../packages/test-helpers
@@ -237,6 +240,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20250101.0
         version: 4.20260509.1
+      '@getpact/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@getpact/test-helpers':
         specifier: workspace:*
         version: link:../../packages/test-helpers
