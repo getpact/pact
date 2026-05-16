@@ -11,7 +11,7 @@ import {
 } from "@getpact/db";
 import { sendCaps, users, workspaces } from "@getpact/db/schema";
 import { loadActiveSigningKey } from "@getpact/keystore";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { Context, Hono } from "hono";
 
 type SendCapsEnv = {
@@ -123,18 +123,6 @@ const writeSendCapAudit = async (
   });
 };
 
-const findWorkspaceIdForCap = async (
-  databaseUrl: string,
-  capId: string,
-): Promise<string | null> => {
-  if (!isUuid(capId)) return null;
-  const db = createClient(databaseUrl);
-  const rows = (await db.execute(
-    sql`SELECT workspace_id FROM send_caps WHERE id = ${capId} LIMIT 1`,
-  )) as Array<{ workspace_id: string }>;
-  return rows[0]?.workspace_id ?? null;
-};
-
 type MintBody = {
   grantee_user_id?: unknown;
   scope_pattern?: unknown;
@@ -216,17 +204,20 @@ const serializeCap = (row: {
   revoked_reason: row.revokedReason,
 });
 
-export const registerSendCapRoutes = <T extends { Bindings: SendCapsEnv }>(app: Hono<T>): void => {
-  app.post("/v1/send-caps", async (c) => {
-    const workspaceIdHeader = c.req.header("x-pact-workspace-id");
-    if (!workspaceIdHeader || !isUuid(workspaceIdHeader)) {
-      return c.json(
-        { error: "invalid_request", message: "x-pact-workspace-id header required" },
-        400,
-      );
-    }
+const requireWorkspaceParam = (c: AppCtx): string | Response => {
+  const id = c.req.param("workspaceId");
+  if (!id || !isUuid(id)) {
+    return c.json({ error: "invalid_request", message: "workspace id must be a uuid" }, 400);
+  }
+  return id;
+};
 
-    const ctx = await auth(c as unknown as AppCtx, workspaceIdHeader);
+export const registerSendCapRoutes = <T extends { Bindings: SendCapsEnv }>(app: Hono<T>): void => {
+  app.post("/v1/workspaces/:workspaceId/send-caps", async (c) => {
+    const workspaceId = requireWorkspaceParam(c as unknown as AppCtx);
+    if (typeof workspaceId !== "string") return workspaceId;
+
+    const ctx = await auth(c as unknown as AppCtx, workspaceId);
     if (!isAuth(ctx)) return ctx;
 
     let body: MintBody;
@@ -299,15 +290,10 @@ export const registerSendCapRoutes = <T extends { Bindings: SendCapsEnv }>(app: 
     }
   });
 
-  app.get("/v1/send-caps", async (c) => {
-    const workspaceIdHeader = c.req.header("x-pact-workspace-id");
-    if (!workspaceIdHeader || !isUuid(workspaceIdHeader)) {
-      return c.json(
-        { error: "invalid_request", message: "x-pact-workspace-id header required" },
-        400,
-      );
-    }
-    const ctx = await auth(c as unknown as AppCtx, workspaceIdHeader);
+  app.get("/v1/workspaces/:workspaceId/send-caps", async (c) => {
+    const workspaceId = requireWorkspaceParam(c as unknown as AppCtx);
+    if (typeof workspaceId !== "string") return workspaceId;
+    const ctx = await auth(c as unknown as AppCtx, workspaceId);
     if (!isAuth(ctx)) return ctx;
 
     const url = new URL(c.req.url);
@@ -352,7 +338,9 @@ export const registerSendCapRoutes = <T extends { Bindings: SendCapsEnv }>(app: 
     }
   });
 
-  app.delete("/v1/send-caps/:id", async (c) => {
+  app.delete("/v1/workspaces/:workspaceId/send-caps/:id", async (c) => {
+    const workspaceId = requireWorkspaceParam(c as unknown as AppCtx);
+    if (typeof workspaceId !== "string") return workspaceId;
     const id = c.req.param("id");
     if (!isUuid(id)) {
       return c.json({ error: "not_found", message: "send_cap not found" }, 404);
@@ -380,10 +368,6 @@ export const registerSendCapRoutes = <T extends { Bindings: SendCapsEnv }>(app: 
       reason = body.reason;
     }
 
-    const workspaceId = await findWorkspaceIdForCap(c.env.DATABASE_URL, id);
-    if (!workspaceId) {
-      return c.json({ error: "not_found", message: "send_cap not found" }, 404);
-    }
     const ctx = await auth(c as unknown as AppCtx, workspaceId);
     if (!isAuth(ctx)) return ctx;
 

@@ -53,7 +53,7 @@ run("send-caps admin api", () => {
   };
 
   const callApi = async (
-    path: string,
+    suffix: string,
     token: string,
     method: "DELETE" | "GET" | "POST",
     body: unknown,
@@ -65,10 +65,10 @@ run("send-caps admin api", () => {
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
-        "x-pact-workspace-id": workspaceId,
       },
     };
     if (body !== undefined) init.body = JSON.stringify(body);
+    const path = `/v1/workspaces/${workspaceId}${suffix}`;
     return app.request(path, init, { ISSUER_BASE_URL: "https://issuer.test/acme", ...env });
   };
 
@@ -81,7 +81,7 @@ run("send-caps admin api", () => {
     };
 
     const mint = await callApi(
-      "/v1/send-caps",
+      "/send-caps",
       token,
       "POST",
       { grantee_user_id: granteeId, max_uses: 3 },
@@ -93,7 +93,7 @@ run("send-caps admin api", () => {
     expect(minted.send_cap.grantee_user_id).toBe(granteeId);
 
     const list = await callApi(
-      "/v1/send-caps?active=true",
+      "/send-caps?active=true",
       token,
       "GET",
       undefined,
@@ -105,7 +105,7 @@ run("send-caps admin api", () => {
     expect(listed.send_caps.map((r) => r.id)).toContain(minted.send_cap.id);
 
     const revoke = await callApi(
-      `/v1/send-caps/${minted.send_cap.id}`,
+      `/send-caps/${minted.send_cap.id}`,
       token,
       "DELETE",
       { reason: "rotated" },
@@ -128,12 +128,11 @@ run("send-caps admin api", () => {
 
   it("rejects requests with no admin token as 401", async () => {
     const res = await app.request(
-      "/v1/send-caps",
+      "/v1/workspaces/11111111-1111-4111-8111-111111111111/send-caps",
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-pact-workspace-id": "11111111-1111-4111-8111-111111111111",
         },
         body: JSON.stringify({ grantee_user_id: "22222222-2222-4222-8222-222222222222" }),
       },
@@ -156,7 +155,7 @@ run("send-caps admin api", () => {
     };
 
     const mint = await callApi(
-      "/v1/send-caps",
+      "/send-caps",
       token,
       "POST",
       { grantee_user_id: granteeId },
@@ -173,7 +172,7 @@ run("send-caps admin api", () => {
     });
 
     const revoke = await callApi(
-      `/v1/send-caps/${minted.send_cap.id}`,
+      `/send-caps/${minted.send_cap.id}`,
       granteeToken.token,
       "DELETE",
       undefined,
@@ -198,7 +197,7 @@ run("send-caps admin api", () => {
     };
 
     const mintA = await callApi(
-      "/v1/send-caps",
+      "/send-caps",
       a.token,
       "POST",
       { grantee_user_id: a.granteeId },
@@ -208,7 +207,7 @@ run("send-caps admin api", () => {
     expect(mintA.status).toBe(201);
 
     const listB = await callApi(
-      "/v1/send-caps",
+      "/send-caps",
       b.token,
       "GET",
       undefined,

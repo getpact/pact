@@ -64,13 +64,11 @@ const requestJson = async <T>(
   method: string,
   url: string,
   token: string,
-  workspace: string,
   body?: unknown,
 ): Promise<T> => {
   const headers: Record<string, string> = {
     authorization: `Bearer ${token}`,
     accept: "application/json",
-    "x-pact-workspace-id": workspace,
   };
   const init: RequestInit = { method, headers };
   if (body !== undefined) {
@@ -166,8 +164,8 @@ export const grantSendCap = async (
   input: GrantInput,
   opts: { apiBase: string; token: string; workspaceId: string },
 ): Promise<{ send_cap: SendCap }> => {
-  const url = `${opts.apiBase}/v1/send-caps`;
-  return requestJson("POST", url, opts.token, opts.workspaceId, buildGrantBody(input));
+  const url = `${opts.apiBase}/v1/workspaces/${encodeURIComponent(opts.workspaceId)}/send-caps`;
+  return requestJson("POST", url, opts.token, buildGrantBody(input));
 };
 
 export type ListFilter = {
@@ -180,21 +178,23 @@ export const listSendCaps = async (
   filter: ListFilter,
   opts: { apiBase: string; token: string; workspaceId: string },
 ): Promise<{ send_caps: SendCap[] }> => {
-  const url = new URL(`${opts.apiBase}/v1/send-caps`);
+  const url = new URL(
+    `${opts.apiBase}/v1/workspaces/${encodeURIComponent(opts.workspaceId)}/send-caps`,
+  );
   if (filter.issuerUserId) url.searchParams.set("issuer_user_id", filter.issuerUserId);
   if (filter.granteeUserId) url.searchParams.set("grantee_user_id", filter.granteeUserId);
   if (filter.active) url.searchParams.set("active", "true");
-  return requestJson("GET", url.toString(), opts.token, opts.workspaceId);
+  return requestJson("GET", url.toString(), opts.token);
 };
 
 export const revokeSendCap = async (
   id: string,
   opts: { apiBase: string; token: string; workspaceId: string; reason?: string },
 ): Promise<{ send_cap: SendCap }> => {
-  const url = `${opts.apiBase}/v1/send-caps/${encodeURIComponent(id)}`;
+  const url = `${opts.apiBase}/v1/workspaces/${encodeURIComponent(opts.workspaceId)}/send-caps/${encodeURIComponent(id)}`;
   const body: Record<string, unknown> = {};
   if (opts.reason !== undefined) body.reason = opts.reason;
-  return requestJson("DELETE", url, opts.token, opts.workspaceId, body);
+  return requestJson("DELETE", url, opts.token, body);
 };
 
 export const formatSendCapsTable = (rows: SendCap[]): string => {

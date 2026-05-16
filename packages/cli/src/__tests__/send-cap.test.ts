@@ -86,13 +86,15 @@ describe("runSendCap grant", () => {
     vi.unstubAllGlobals();
   });
 
-  it("POSTs to /v1/send-caps with the admin token and workspace header", async () => {
+  it("POSTs to the workspace-scoped path with the admin token", async () => {
     const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
-      expect(String(input)).toBe("https://issuer.test/v1/send-caps");
+      expect(String(input)).toBe(
+        "https://issuer.test/v1/workspaces/00000000-0000-0000-0000-000000000099/send-caps",
+      );
       expect(init?.method).toBe("POST");
       const headers = init?.headers as Record<string, string>;
       expect(headers.authorization).toBe("Bearer admin-token");
-      expect(headers["x-pact-workspace-id"]).toBe("00000000-0000-0000-0000-000000000099");
+      expect(headers["x-pact-workspace-id"]).toBeUndefined();
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body.grantee_user_id).toBe("bob");
       expect(body.max_uses).toBe(5);
@@ -143,7 +145,7 @@ describe("runSendCap list", () => {
   it("GETs and applies filters", async () => {
     const fetchMock = vi.fn(async (input: string | URL) => {
       const u = new URL(String(input));
-      expect(u.pathname).toBe("/v1/send-caps");
+      expect(u.pathname).toBe("/v1/workspaces/00000000-0000-0000-0000-000000000099/send-caps");
       expect(u.searchParams.get("active")).toBe("true");
       expect(u.searchParams.get("from")).toBeNull();
       expect(u.searchParams.get("issuer_user_id")).toBe("alice");
@@ -164,7 +166,9 @@ describe("runSendCap revoke", () => {
 
   it("DELETEs and forwards reason", async () => {
     const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
-      expect(String(input)).toBe("https://issuer.test/v1/send-caps/cap-1");
+      expect(String(input)).toBe(
+        "https://issuer.test/v1/workspaces/00000000-0000-0000-0000-000000000099/send-caps/cap-1",
+      );
       expect(init?.method).toBe("DELETE");
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body.reason).toBe("rotated");
