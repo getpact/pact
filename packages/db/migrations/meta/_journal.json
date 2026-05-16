@@ -232,6 +232,13 @@
       "when": 1778499000000,
       "tag": "0032_prune_kbjwt_replay_log",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0033_agent_invocations_snapshot",
+      "breakpoints": true
     }
   ]
 }

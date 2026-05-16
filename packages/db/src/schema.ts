@@ -573,11 +573,13 @@ export const agentInvocations = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     jti: uuid("jti").notNull(),
     parentJti: uuid("parent_jti"),
-    agentId: uuid("agent_id")
-      .notNull()
-      .references(() => agents.id),
-    grantId: uuid("grant_id").references(() => agentCapabilityGrants.id),
-    onBehalfOfUserId: uuid("on_behalf_of_user_id").references(() => users.id),
+    agentId: uuid("agent_id").references(() => agents.id, { onDelete: "set null" }),
+    agentIdSnapshot: uuid("agent_id_snapshot"),
+    grantId: uuid("grant_id").references(() => agentCapabilityGrants.id, { onDelete: "set null" }),
+    onBehalfOfUserId: uuid("on_behalf_of_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    onBehalfOfUserIdSnapshot: uuid("on_behalf_of_user_id_snapshot"),
     toolName: text("tool_name").notNull(),
     scopeClaim: jsonb("scope_claim").notNull(),
     audience: text("audience").notNull(),
@@ -595,6 +597,11 @@ export const agentInvocations = pgTable(
   (t) => [
     uniqueIndex("agent_invocations_workspace_jti_idx").on(t.workspaceId, t.jti),
     index("agent_invocations_agent_time_idx").on(t.workspaceId, t.agentId, t.issuedAt.desc()),
+    index("agent_invocations_agent_snapshot_idx").on(
+      t.workspaceId,
+      t.agentIdSnapshot,
+      t.issuedAt.desc(),
+    ),
     index("agent_invocations_parent_jti_idx")
       .on(t.workspaceId, t.parentJti)
       .where(sql`parent_jti IS NOT NULL`),
