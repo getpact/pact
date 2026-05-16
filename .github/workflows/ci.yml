@@ -8,20 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: pact
-          POSTGRES_PASSWORD: pact
-          POSTGRES_DB: pact
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       DATABASE_URL: postgres://pact:pact@localhost:5432/pact
       RLS_TEST_DB: postgres://pact_app:pact_app@localhost:5432/pact
@@ -34,6 +20,15 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: start postgres with raised max_connections
+        run: |
+          docker compose -f infra/compose/docker-compose.yml up -d --wait
+          for _ in $(seq 1 30); do
+            if pg_isready -h localhost -p 5432 -U pact >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          echo "postgres did not become ready" >&2
+          exit 1
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
