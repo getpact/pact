@@ -84,6 +84,22 @@ const clampLimit = (limit: number | undefined, fallback: number, max: number): n
   return Math.max(1, Math.min(max, Math.floor(limit)));
 };
 
+const normalizeAudienceFilter = (raw: string[] | undefined): string[] | null => {
+  if (!raw || raw.length === 0) return null;
+  const seen = new Set<string>();
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const trimmed = v.trim();
+    if (trimmed.length > 0) seen.add(trimmed);
+  }
+  return seen.size === 0 ? null : Array.from(seen);
+};
+
+const formatTextArray = (values: string[]): string => {
+  const escaped = values.map((v) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",");
+  return `{${escaped}}`;
+};
+
 export class BrainAdapter implements SearchAdapter {
   private readonly idMap = new Map<number, string>();
   private readonly pageMap = new Map<number, string>();
@@ -126,6 +142,8 @@ export class BrainAdapter implements SearchAdapter {
     const limit = clampLimit(opts.limit, 20, 200);
     const text = query.trim();
     if (text.length === 0) return [];
+    const audienceFilter = normalizeAudienceFilter(opts.audienceFilter);
+    const audienceLiteral = audienceFilter ? formatTextArray(audienceFilter) : null;
     const rows = (await this.withTx((tx) =>
       tx.execute(sql`
         SELECT
@@ -140,6 +158,11 @@ export class BrainAdapter implements SearchAdapter {
         WHERE c.workspace_id = ${this.deps.workspaceId}
           AND c.deleted_at IS NULL
           AND to_tsvector('english', c.content) @@ websearch_to_tsquery('english', ${text})
+          AND (
+            ${audienceLiteral === null}::boolean
+            OR p.audience = '{}'::text[]
+            OR p.audience && ${audienceLiteral}::text[]
+          )
         ORDER BY score DESC, c.created_at DESC
         LIMIT ${limit}
       `),
@@ -152,6 +175,8 @@ export class BrainAdapter implements SearchAdapter {
     if (embedding.length === 0) return [];
     const limit = clampLimit(opts.limit, 20, 200);
     const vector = formatVector(embedding);
+    const audienceFilter = normalizeAudienceFilter(opts.audienceFilter);
+    const audienceLiteral = audienceFilter ? formatTextArray(audienceFilter) : null;
     const rows = (await this.withTx((tx) =>
       tx.execute(sql`
         SELECT
@@ -165,6 +190,11 @@ export class BrainAdapter implements SearchAdapter {
         JOIN brain_chunks c ON c.id = e.chunk_id AND c.deleted_at IS NULL
         JOIN brain_pages p ON p.id = c.page_id AND p.deleted_at IS NULL
         WHERE e.workspace_id = ${this.deps.workspaceId}
+          AND (
+            ${audienceLiteral === null}::boolean
+            OR p.audience = '{}'::text[]
+            OR p.audience && ${audienceLiteral}::text[]
+          )
         ORDER BY e.embedding <=> ${vector}::vector
         LIMIT ${limit}
       `),
