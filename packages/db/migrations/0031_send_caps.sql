@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS send_caps (
   created_at timestamptz NOT NULL DEFAULT now(),
   revoked_at timestamptz,
   revoked_reason text,
-  CHECK (issuer_user_id != grantee_user_id)
+  CONSTRAINT send_caps_issuer_grantee_check CHECK (issuer_user_id != grantee_user_id)
 );
 
 CREATE INDEX send_caps_issuer_grantee_idx
