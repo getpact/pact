@@ -38,6 +38,16 @@ Without those env vars, DB-gated suites silently skip (with `describe.skip`). CI
 
 Run `pnpm verify` before push to catch CI mismatches locally (clears caches, reinstalls from frozen lockfile, runs typecheck and lint).
 
+## Operations
+
+`kbjwt_replay_log` grows once per redeem attempt and has no built-in TTL. Prune it on a schedule (weekly is fine) once you outlive your longest capability:
+
+```
+DATABASE_URL=postgres://... pact admin prune-replay-log --older-than 7d
+```
+
+The function runs SECURITY DEFINER and prunes across every workspace in one pass. Wire it into cron, a Worker scheduled trigger, or your migration runner.
+
 ## Packages
 
 OSS (MIT):

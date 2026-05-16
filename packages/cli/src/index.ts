@@ -2,6 +2,7 @@
 import { writeFileSync } from "node:fs";
 import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
 import { runAuditCheckpoint, runAuditVerify } from "./audit-verify.js";
+import { runAdmin } from "./commands/admin.js";
 import { runAgent } from "./commands/agent.js";
 import { runSendCap } from "./commands/send-cap.js";
 import { loadConfig, saveConfig } from "./config.js";
@@ -46,6 +47,8 @@ const help = () => {
       "  send-cap grant   grant a sender consent to address you",
       "  send-cap list    list send caps in a workspace",
       "  send-cap revoke  revoke a send cap by id",
+      "  admin prune-replay-log  prune kbjwt_replay_log rows older than a window",
+      "  admin backfill   seed missing adapter-drive keys and default audiences",
       "  mek rewrap       rewrap stored secrets with a new MEK",
       "",
       "env:",
@@ -319,6 +322,11 @@ const main = async () => {
     }
     case "send-cap": {
       const result = await runSendCap(process.argv.slice(3));
+      if (result.exitCode !== 0) process.exit(result.exitCode);
+      return;
+    }
+    case "admin": {
+      const result = await runAdmin(process.argv.slice(3));
       if (result.exitCode !== 0) process.exit(result.exitCode);
       return;
     }

@@ -22,8 +22,11 @@
   },
   "dependencies": {
     "@getpact/audit": "workspace:*",
+    "@getpact/core": "workspace:*",
     "@getpact/crypto": "workspace:*",
-    "@getpact/db": "workspace:*"
+    "@getpact/db": "workspace:*",
+    "@getpact/keystore": "workspace:*",
+    "drizzle-orm": "^0.36.0"
   },
   "files": [
     "dist/*.js",
