@@ -8,6 +8,18 @@ import {
   type ToolResult,
 } from "@getpact/adapter-sdk";
 
+export {
+  type BrainPutFn,
+  type BrainPutInput,
+  type IngestDriveClient,
+  type IngestError,
+  type IngestFile,
+  type IngestListResponse,
+  type IngestOptions,
+  type IngestResult,
+  ingestRecentDriveDocs,
+} from "./ingest.js";
+
 export type DriveConnection = {
   accessToken: string;
   refreshToken?: string;
