@@ -42,7 +42,6 @@ for (const routeFile of [
   "apps/issuer/src/index.ts",
   "apps/verifier/src/index.ts",
   "apps/admin-api/src/index.ts",
-  "apps/audit-api/src/index.ts",
   "apps/mcp-server/src/index.ts",
   "apps/gateway/src/index.ts",
   "apps/web/src/index.ts",

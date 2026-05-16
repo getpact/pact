@@ -66,7 +66,6 @@ const health = [
   ["verifier", optional("PACT_VERIFIER_URL")],
   ["mcp-server", optional("PACT_MCP_URL")],
   ["admin-api", optional("PACT_ADMIN_API_URL")],
-  ["audit-api", optional("PACT_AUDIT_API_URL")],
   ["gateway", optional("PACT_GATEWAY_URL")],
   ["web", optional("PACT_WEB_URL")],
 ].filter(([, url]) => url);
@@ -170,7 +169,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
     throw new Error("mcp pact.whoami did not return the smoke identity");
   }
 
-  const auditUrl = optional("PACT_AUDIT_API_URL");
+  const auditUrl = optional("PACT_AUDIT_API_URL") ?? optional("PACT_ADMIN_API_URL");
   if (auditUrl) {
     const auditIssue = await check(
       `${issuerUrl} dev issue audit token`,
@@ -253,7 +252,8 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
       { headers: { authorization: `Bearer ${gatewayIssued.token}` } },
     );
 
-    if (auditUrl) {
+    const gatewayAuditUrl = optional("PACT_AUDIT_API_URL") ?? optional("PACT_ADMIN_API_URL");
+    if (gatewayAuditUrl) {
       const auditIssue = await check(
         `${issuerUrl} dev issue gateway audit token`,
         `${issuerUrl}/v1/dev/issue`,
@@ -267,7 +267,7 @@ if (process.env.PACT_SMOKE_DEV_FLOW === "true") {
       if (!auditIssued.token) throw new Error("audit token issue response did not include token");
       const auditEvents = await check(
         "audit contains gateway event",
-        `${auditUrl}/v1/workspaces/${workspaceId}/audit/events?action=gateway.get&limit=5`,
+        `${gatewayAuditUrl}/v1/workspaces/${workspaceId}/audit/events?action=gateway.get&limit=5`,
         { headers: { authorization: `Bearer ${auditIssued.token}` } },
       );
       const auditBody = await auditEvents.json();

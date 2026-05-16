@@ -78,12 +78,19 @@ const requireRuntimeDatabaseUrl = (path, vars) => {
 
 const apps = {
   "admin-api": {
-    required: ["DATABASE_URL", "MEK", "ISSUER_BASE_URL", "ENVIRONMENT", "ADMIN_AUDIENCE"],
-    values: { ENVIRONMENT: "development", ADMIN_AUDIENCE: "pact-admin" },
-  },
-  "audit-api": {
-    required: ["DATABASE_URL", "ISSUER_BASE_URL", "ENVIRONMENT", "AUDIT_AUDIENCE"],
-    values: { ENVIRONMENT: "development", AUDIT_AUDIENCE: "pact-audit" },
+    required: [
+      "DATABASE_URL",
+      "MEK",
+      "ISSUER_BASE_URL",
+      "ENVIRONMENT",
+      "ADMIN_AUDIENCE",
+      "AUDIT_AUDIENCE",
+    ],
+    values: {
+      ENVIRONMENT: "development",
+      ADMIN_AUDIENCE: "pact-admin",
+      AUDIT_AUDIENCE: "pact-audit",
+    },
   },
   gateway: {
     required: [
@@ -124,7 +131,6 @@ const healthUrls = [
   "http://localhost:8788/health",
   "http://localhost:8789/health",
   "http://localhost:8790/health",
-  "http://localhost:8791/health",
 ];
 
 requireCommand("node");
