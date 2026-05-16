@@ -1,7 +1,7 @@
 import { ConflictError, canonicalizeEmail, type Email } from "@getpact/core";
 import { createClient } from "@getpact/db";
 import { roles, userRoles, users, workspaceAudiences, workspaces } from "@getpact/db/schema";
-import { createSigningKey } from "@getpact/keystore";
+import { createHmacKey, createSigningKey } from "@getpact/keystore";
 import { sql } from "drizzle-orm";
 
 const DEFAULT_AUDIENCES: ReadonlyArray<{ name: string; description: string }> = [
@@ -28,6 +28,7 @@ export type CreateWorkspaceResult = {
   adminUserId: string;
   jwtKeyId: string;
   auditKeyId: string;
+  adapterDriveKeyId: string;
 };
 
 export const createWorkspace = async (
@@ -86,12 +87,18 @@ export const createWorkspace = async (
       kind: "audit",
       rawMek,
     });
+    const adapterDriveKey = await createHmacKey(tx, {
+      workspaceId: ws.id,
+      kind: "adapter-drive",
+      rawMek,
+    });
 
     return {
       workspaceId: ws.id,
       adminUserId: user.id,
       jwtKeyId: jwtKey.id,
       auditKeyId: auditKey.id,
+      adapterDriveKeyId: adapterDriveKey.id,
     };
   });
 };
