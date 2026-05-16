@@ -3,6 +3,7 @@ import { type JwksCache, JwksFetchError, sharedJwksCache } from "./jwks.js";
 
 const KB_JWT_TYP = "kb+jwt";
 const DEFAULT_KB_IAT_SKEW_SECONDS = 300;
+const DEFAULT_KB_IAT_MAX_AGE_SECONDS = 300;
 
 export type VerifyOpts = {
   jwksUri: string;
@@ -11,6 +12,12 @@ export type VerifyOpts = {
   resource?: Record<string, unknown>;
   replayCache?: ReplayCache;
   kbIatSkewSeconds?: number;
+  /**
+   * Maximum age (in seconds) of the KB-JWT iat. A replayed KB-JWT older than
+   * (now - this) is rejected even if no replayCache is supplied. Defaults to
+   * 300s. Pair with a replayCache for stronger guarantees within the window.
+   */
+  kbIatMaxAgeSeconds?: number;
   jwksCache?: JwksCache;
   now?: () => number;
 };
@@ -303,12 +310,14 @@ export async function verifyPactToken(
 
   const kbIat = kbPayload.iat;
   const skew = opts.kbIatSkewSeconds ?? DEFAULT_KB_IAT_SKEW_SECONDS;
+  const maxAge = opts.kbIatMaxAgeSeconds ?? DEFAULT_KB_IAT_MAX_AGE_SECONDS;
   if (
     typeof kbIat !== "number" ||
     !Number.isFinite(kbIat) ||
     !Number.isInteger(kbIat) ||
     kbIat <= 0 ||
-    kbIat > now + skew
+    kbIat > now + skew ||
+    kbIat < now - maxAge
   ) {
     return deny("kb_iat_invalid");
   }
