@@ -13,7 +13,6 @@ import {
   type ToolDeps,
   type ToolDescriptor,
 } from "@getpact/adapter-sdk";
-import { createSlackAdapter } from "@getpact/adapter-slack";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import {
   auditEvents,
@@ -25,6 +24,7 @@ import {
 import { databaseRateLimiter } from "@getpact/ratelimit";
 import { loadSecretString, storeSecret } from "@getpact/vault";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { brainAdapter } from "./tools/brain.js";
 
 export type { ToolDeps, ToolDescriptor, ToolResult } from "@getpact/adapter-sdk";
 export type Tool = AdapterTool;
@@ -181,20 +181,6 @@ const pactAdapter: Adapter = {
   name: "pact",
   tools: [whoami, workspaceInfo, auditRecent, policyActive],
 };
-
-const slackAdapter = createSlackAdapter({
-  loadBotToken: async (ctx, deps) => {
-    if (!deps.rawMek) return null;
-    const db = createClient(deps.databaseUrl);
-    return withWorkspace(db, ctx.workspaceId, (tx) =>
-      loadSecretString(tx, deps.rawMek as Uint8Array, {
-        workspaceId: ctx.workspaceId,
-        kind: "slack",
-        target: "bot-token",
-      }),
-    );
-  },
-});
 
 const DRIVE_PROVIDER = "google_drive";
 const DRIVE_SECRET_KIND = "google_drive_oauth";
@@ -428,7 +414,7 @@ const driveRagAdapter: Adapter = {
   tools: [driveFileIndex, driveSearch],
 };
 
-const defaultAdapters: Adapter[] = [pactAdapter, slackAdapter, driveAdapter];
+const defaultAdapters: Adapter[] = [pactAdapter, driveAdapter, brainAdapter];
 
 export function isDriveRagEnabled(providerConfig?: Record<string, string | undefined>): boolean {
   return providerConfig?.DRIVE_RAG_ENABLED === "true";
