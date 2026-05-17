@@ -40,13 +40,15 @@ Run `pnpm verify` before push to catch CI mismatches locally (clears caches, rei
 
 ## Operations
 
-`kbjwt_replay_log` grows once per redeem attempt and has no built-in TTL. Prune it on a schedule (weekly is fine) once you outlive your longest capability:
+`kbjwt_replay_log` grows once per redeem attempt and has no built-in TTL. The `pact-admin-api` Worker runs a daily scheduled trigger (`0 3 * * *` UTC) that calls `prune_kbjwt_replay_log` across every workspace, so a healthy deploy needs no operator action. Set `PACT_REPLAY_RETENTION_DAYS` on the Worker to change the default 7 day window.
+
+For ad-hoc cleanup, the CLI is still available:
 
 ```
 DATABASE_URL=postgres://... pact admin prune-replay-log --older-than 7d
 ```
 
-The function runs SECURITY DEFINER and prunes across every workspace in one pass. Wire it into cron, a Worker scheduled trigger, or your migration runner.
+The function runs SECURITY DEFINER and prunes across every workspace in one pass.
 
 Existing workspaces created before the drive HMAC fence or default-audience seeding shipped need a one-shot backfill. The command is idempotent:
 
