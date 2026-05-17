@@ -364,45 +364,36 @@ curl -fsS -X POST "${ADMIN_BASE}/v1/workspaces/${WORKSPACE_ID}/groups/${GROUP_ID
 phase_end "create-second-user"
 
 phase_begin "generate-holder-key"
-# generate an ed25519 holder keypair, write the canonical
-# ~/.pact/holder.key format so the bridge can re-load it, and dump the
-# public JWK to a file we can pass to pact agent mint --cnf-jwk.
+# generate an ed25519 holder keypair via the CLI. pact agent generate-keypair
+# emits the same {version, privatePkcs8Base64, publicJwk} record the bridge
+# reloads from ~/.pact/holder.key, and --public-out drops the public JWK we
+# pass to pact agent create and pact agent mint --cnf-jwk.
 if [ -f "$HOLDER_KEY_FILE" ] && [ ! -f "$HOLDER_BACKUP" ]; then
   mv "$HOLDER_KEY_FILE" "$HOLDER_BACKUP"
   log "  backed up existing holder key to $HOLDER_BACKUP"
 fi
 mkdir -p "${HOME}/.pact"
 chmod 700 "${HOME}/.pact"
-node -e '
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const os = require("node:os");
-  (async () => {
-    const pair = await crypto.subtle.generateKey({name:"Ed25519"}, true, ["sign","verify"]);
-    const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
-    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
-    const pubJwk = {kty:"OKP", crv:"Ed25519", x: jwk.x};
-    const record = {version:1, privatePkcs8Base64: Buffer.from(pkcs8).toString("base64"), publicJwk: pubJwk};
-    const hpath = path.join(os.homedir(), ".pact", "holder.key");
-    fs.writeFileSync(hpath, JSON.stringify(record, null, 2) + "\n", {mode: 0o600});
-    fs.writeFileSync(process.argv[1], JSON.stringify(pubJwk));
-  })().catch(e => { console.error(e); process.exit(1); });
-' "$HOLDER_PUB_FILE"
+$PACT agent generate-keypair --out "$HOLDER_KEY_FILE" --public-out "$HOLDER_PUB_FILE" >/dev/null
 log "  holder key written to $HOLDER_KEY_FILE"
 phase_end "generate-holder-key"
 
 phase_begin "create-agent"
 AGENT_NAME="smoke-agent-$(date +%s)"
-AGENT_BODY="$(jq -nc \
-  --arg name "$AGENT_NAME" \
-  --arg owner "$ADMIN_USER_ID" \
-  --slurpfile pub "$HOLDER_PUB_FILE" \
-  '{name:$name, owner_user_id:$owner, pubkey_jwk:$pub[0]}')"
-AGENT_JSON="$(curl -fsS -X POST "${ADMIN_BASE}/v1/workspaces/${WORKSPACE_ID}/agents" \
-  -H 'content-type: application/json' \
-  -H "authorization: Bearer ${ADMIN_TOKEN}" \
-  -d "$AGENT_BODY")"
-AGENT_ID="$(json_get '.agent.id' "$AGENT_JSON")"
+CREATE_OUT="${STATE_DIR}/agent-create.out"
+PACT_ADMIN_API_BASE="$ADMIN_BASE" \
+PACT_ADMIN_TOKEN="$ADMIN_TOKEN" \
+PACT_WORKSPACE_ID="$WORKSPACE_ID" \
+$PACT agent create "$AGENT_NAME" \
+  --owner "$ADMIN_USER_ID" \
+  --public-key "$HOLDER_PUB_FILE" \
+  > "$CREATE_OUT" 2>&1
+AGENT_ID="$(grep -E '^id ' "$CREATE_OUT" | awk '{print $2}')"
+if [ -z "$AGENT_ID" ]; then
+  log "could not parse agent id from create output:"
+  sed 's/^/    /' "$CREATE_OUT"
+  exit 1
+fi
 log "  agent_id=$AGENT_ID"
 phase_end "create-agent"
 
@@ -505,9 +496,10 @@ fi
 phase_end "tool-call-replay"
 
 phase_begin "audit-tail"
-# pact audit tail does not exist; query the admin-api audit/events route.
-AUDIT_JSON="$(curl -fsS "${ADMIN_BASE}/v1/workspaces/${WORKSPACE_ID}/audit/events?limit=200" \
-  -H "authorization: Bearer ${ADMIN_TOKEN}")"
+AUDIT_JSON="$(PACT_ADMIN_API_BASE="$ADMIN_BASE" \
+  PACT_ADMIN_TOKEN="$ADMIN_TOKEN" \
+  PACT_WORKSPACE_ID="$WORKSPACE_ID" \
+  $PACT audit tail --limit 200 --format json)"
 ACTIONS="$(printf '%s' "$AUDIT_JSON" | jq -r '.events[].action' | sort -u)"
 echo "  audit actions seen:"
 echo "$ACTIONS" | sed 's/^/    /'
