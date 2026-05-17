@@ -90,6 +90,8 @@ For Claude Code add the entry to `~/.config/claude-code/config.json` under `mcpS
 
 The SD-JWT in `PACT_SD_JWT` is readable through `/proc/<pid>/environ` on Linux. For longer-running deployments, prefer a wrapper that reads the token from a file with restricted permissions before exec-ing the bridge.
 
+Other bridge env: `PACT_MCP_PORT` (default 8765), `PACT_MCP_HOST` (default 127.0.0.1), `PACT_AUDIENCE` (override the SD-JWT `aud`).
+
 ## Packages
 
 OSS (MIT):
