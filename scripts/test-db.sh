@@ -33,6 +33,7 @@ export PG_POOL_MAX="${PG_POOL_MAX:-1}"
 export PG_IDLE_TIMEOUT="${PG_IDLE_TIMEOUT:-1}"
 export PACT_REQUIRE_DB=1
 export LOG_LEVEL="${LOG_LEVEL:-warn}"
+export PACT_QUIET_PG_NOTICES="${PACT_QUIET_PG_NOTICES:-1}"
 
 if [ "$EXTERNAL_DB" = "false" ]; then
   if ! docker info >/dev/null 2>&1; then

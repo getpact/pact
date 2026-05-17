@@ -9,10 +9,7 @@ export const createClient = (url: string, options?: Partial<Options<Record<strin
   const defaultIdle = process.env.PG_IDLE_TIMEOUT
     ? Number.parseInt(process.env.PG_IDLE_TIMEOUT, 10)
     : undefined;
-  const quiet =
-    process.env.PACT_QUIET_PG_NOTICES === "1" ||
-    process.env.LOG_LEVEL === "warn" ||
-    process.env.LOG_LEVEL === "error";
+  const quiet = process.env.PACT_QUIET_PG_NOTICES === "1";
   const client = postgres(url, {
     max: defaultMax,
     ...(defaultIdle !== undefined ? { idle_timeout: defaultIdle } : {}),
