@@ -8,6 +8,9 @@ import {
   loadActiveSigningKey,
 } from "@getpact/keystore";
 import { and, eq, isNull, sql } from "drizzle-orm";
+import { parseDuration } from "../duration.js";
+
+export { parseDuration } from "../duration.js";
 
 const DEFAULT_OLDER_THAN = "7d";
 const ADAPTER_DRIVE_KIND = "adapter-drive" as const;
@@ -39,58 +42,6 @@ export const parseFlags = (argv: readonly string[]): ParsedFlags => {
     positional.push(a);
   }
   return { positional, flags, booleans };
-};
-
-const DURATION_RE = /^(\d+)\s*(s|m|h|d|w)$/i;
-
-export const parseDuration = (input: string): string => {
-  const trimmed = input.trim();
-  if (trimmed.length === 0) {
-    throw new Error("--older-than must not be empty");
-  }
-  const match = DURATION_RE.exec(trimmed);
-  if (!match) {
-    throw new Error(`invalid --older-than '${input}'; use a value like 7d, 24h, 30m, 1w`);
-  }
-  const amount = Number.parseInt(match[1] ?? "0", 10);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("--older-than must be a positive integer with a unit");
-  }
-  const MAX_DAYS = 3650;
-  const unit = (match[2] ?? "").toLowerCase();
-  const days = (() => {
-    switch (unit) {
-      case "s":
-        return amount / 86400;
-      case "m":
-        return amount / 1440;
-      case "h":
-        return amount / 24;
-      case "d":
-        return amount;
-      case "w":
-        return amount * 7;
-      default:
-        throw new Error(`invalid --older-than unit '${unit}'`);
-    }
-  })();
-  if (days > MAX_DAYS) {
-    throw new Error(`--older-than '${input}' exceeds maximum of ${MAX_DAYS} days`);
-  }
-  switch (unit) {
-    case "s":
-      return `${amount} seconds`;
-    case "m":
-      return `${amount} minutes`;
-    case "h":
-      return `${amount} hours`;
-    case "d":
-      return `${amount} days`;
-    case "w":
-      return `${amount * 7} days`;
-    default:
-      throw new Error(`invalid --older-than unit '${unit}'`);
-  }
 };
 
 const databaseUrl = (env: NodeJS.ProcessEnv): string => {
