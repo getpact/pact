@@ -703,7 +703,7 @@ run("admin api", () => {
       `/v1/workspaces/${created.workspaceId}/invites`,
       token,
       "POST",
-      { email: "rollback-invite@example.com", scope: {}, ttl: "1d" },
+      { email: "rollback-invite@example.com", scope: {}, ttl_seconds: 86400 },
       {
         DATABASE_URL: env.DATABASE_URL,
         MEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",

@@ -19,7 +19,6 @@ import {
 import {
   brains,
   driveDocumentChunks,
-  invites,
   policies,
   revokedJtis,
   users,
@@ -46,6 +45,7 @@ import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
 import { registerAuditRoutes } from "./routes/audit.js";
 import { registerGroupRoutes } from "./routes/groups.js";
+import { registerInviteRoutes } from "./routes/invites.js";
 import { registerSendCapRoutes } from "./routes/send-caps.js";
 
 export type Env = {
@@ -104,6 +104,7 @@ app.get("/health", (c) => c.json({ ok: true }));
 
 registerAuditRoutes(app);
 registerGroupRoutes(app);
+registerInviteRoutes(app);
 registerSendCapRoutes(app);
 
 const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Response> => {
@@ -289,43 +290,6 @@ app.post("/v1/workspaces/:id/revocations", async (c) => {
   });
   await bustRevocationCache(c.env.REVOCATION_CACHE, workspaceId, body.jti);
   return c.json({ ok: true }, 201);
-});
-
-app.post("/v1/workspaces/:id/invites", async (c) => {
-  const workspaceId = c.req.param("id");
-  const ctx = await auth(c, workspaceId);
-  if (!isContext(ctx)) return ctx;
-
-  const body = await c.req.json<{
-    email: string;
-    scope: unknown;
-    ttl: "1d" | "1w" | "1m";
-  }>();
-  const ttlSeconds = body.ttl === "1d" ? 86_400 : body.ttl === "1w" ? 604_800 : 2_592_000;
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
-  const db = createClient(c.env.DATABASE_URL);
-  const inserted = await withWorkspace(db, workspaceId, async (tx) => {
-    const rows = await tx
-      .insert(invites)
-      .values({
-        workspaceId,
-        jti: crypto.randomUUID(),
-        email: canonicalizeEmail(body.email),
-        scope: body.scope,
-        ttl: body.ttl,
-        ttlSeconds,
-        expiresAt,
-        createdBy: ctx.userId,
-      })
-      .returning({ id: invites.id, email: invites.email, expiresAt: invites.expiresAt });
-    await auditInTx(tx, c, ctx, "admin.invite.created", {
-      inviteId: rows[0]?.id,
-      email: rows[0]?.email,
-      ttl: body.ttl,
-    });
-    return rows;
-  });
-  return c.json({ invite: inserted[0] }, 201);
 });
 
 const KIND_RE = /^[a-z][a-z0-9-]{0,32}$/;
