@@ -29,8 +29,19 @@ const post = async <T>(endpoint: string, path: string, body: unknown): Promise<T
 
 export const createWorkspace = (
   endpoint: string,
-  body: { slug: string; name: string; adminEmail: string; adminName?: string },
-): Promise<CreateWorkspaceResponse> => post(endpoint, "/v1/workspaces", body);
+  body: {
+    slug: string;
+    name: string;
+    adminEmail: string;
+    adminName?: string;
+    googleIdToken?: string;
+  },
+): Promise<CreateWorkspaceResponse> => {
+  const { googleIdToken, ...rest } = body;
+  const payload: Record<string, unknown> = { ...rest };
+  if (googleIdToken) payload.google_id_token = googleIdToken;
+  return post(endpoint, "/v1/workspaces", payload);
+};
 
 export const devIssue = (
   endpoint: string,

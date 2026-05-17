@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
-import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
+import { googleExchange, refresh } from "./api.js";
 import { runAuditCheckpoint, runAuditVerify } from "./audit-verify.js";
 import { runAdmin } from "./commands/admin.js";
 import { runAgent } from "./commands/agent.js";
 import { runGroup } from "./commands/group.js";
+import { runInitFromArgv } from "./commands/init.js";
 import { runInvite } from "./commands/invite.js";
 import { runMcpBridge } from "./commands/mcp-bridge.js";
 import { runSendCap } from "./commands/send-cap.js";
@@ -35,7 +36,7 @@ const help = () => {
       "pact <command>",
       "",
       "commands:",
-      "  init             create a workspace and store credentials (dev path)",
+      "  init             create a workspace via Google OAuth (PKCE loopback)",
       "  login            sign in via Google (browser loopback)",
       "  refresh          rotate access token using stored refresh token",
       "  whoami           print the active user and workspace",
@@ -67,6 +68,7 @@ const help = () => {
       "  PACT_AUDIT_CHECKPOINT_FILE signed checkpoint path",
       "  PACT_AUDIT_CHECKPOINT_SECRET HMAC key for checkpoints",
       "  PACT_GOOGLE_CLIENT  Google OAuth client id (required for login)",
+      "  PACT_GOOGLE_CLIENT_ID Google OAuth client id (required for init unless --skip-oauth)",
       "  PACT_WORKSPACE_ID   workspace id (required for login and agent list)",
       "  PACT_API_BASE       issuer base for agent commands (default https://issuer.getpact.dev)",
       "  PACT_ADMIN_TOKEN    admin bearer token for agent commands",
@@ -79,33 +81,7 @@ const help = () => {
 };
 
 const init = async () => {
-  const slug = env("PACT_SLUG");
-  const name = process.env.PACT_NAME ?? slug;
-  const adminEmail = env("PACT_ADMIN_EMAIL");
-  const adminName = process.env.PACT_ADMIN_NAME;
-  const created = await createWorkspace(endpoint(), {
-    slug,
-    name,
-    adminEmail,
-    ...(adminName ? { adminName } : {}),
-  });
-  const issued = await devIssue(endpoint(), {
-    workspaceId: created.workspaceId,
-    email: adminEmail,
-    audience: audience(),
-  });
-  await saveConfig({
-    endpoint: endpoint(),
-    workspaceId: created.workspaceId,
-    workspaceSlug: slug,
-    email: adminEmail,
-    accessToken: issued.token,
-    accessExpiresAt: issued.exp,
-    refreshToken: issued.refreshToken,
-    refreshExpiresAt: issued.refreshExpiresAt,
-  });
-  process.stdout.write(`workspace ${slug} created (${created.workspaceId})\n`);
-  process.stdout.write(`signed in as ${adminEmail}\n`);
+  await runInitFromArgv(process.argv.slice(3));
 };
 
 const login = async () => {
