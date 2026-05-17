@@ -3,9 +3,11 @@ import { generateEd25519Keypair } from "@getpact/crypto";
 import { parseDurationToSeconds } from "../duration.js";
 
 const DEFAULT_API_BASE = "https://issuer.getpact.dev";
+const DEFAULT_ADMIN_API_BASE = "https://issuer.getpact.dev";
 const TTL_DEFAULT = 300;
 const REDEEMS_DEFAULT = 1;
 const REASON_MAX = 280;
+const DESCRIPTION_MAX = 280;
 
 export type ApiError = {
   status: number;
@@ -18,6 +20,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const apiBase = (env: NodeJS.ProcessEnv = process.env): string =>
   (env.PACT_API_BASE ?? DEFAULT_API_BASE).replace(/\/+$/, "");
+
+const adminApiBase = (env: NodeJS.ProcessEnv = process.env): string =>
+  (env.PACT_ADMIN_API_BASE ?? env.PACT_API_BASE ?? DEFAULT_ADMIN_API_BASE).replace(/\/+$/, "");
 
 const adminToken = (env: NodeJS.ProcessEnv = process.env): string => {
   const t = env.PACT_ADMIN_TOKEN;
@@ -133,6 +138,180 @@ const optionalInt = (parsed: ParsedFlags, name: string): number | undefined => {
     throw new Error(`flag --${name} must be an integer`);
   }
   return n;
+};
+
+export type CreateAgentInput = {
+  workspaceId: string;
+  name: string;
+  ownerUserId: string;
+  pubkeyJwk: Record<string, unknown>;
+  kind?: "service" | "user_delegated";
+  description?: string;
+};
+
+export type CreateAgentResponse = {
+  agent: {
+    id: string;
+    name?: string;
+    slug?: string;
+    status: string;
+    owner_user_id?: string;
+    created_at?: string;
+  };
+};
+
+export const buildCreateAgentBody = (input: CreateAgentInput): Record<string, unknown> => {
+  const body: Record<string, unknown> = {
+    name: input.name,
+    owner_user_id: input.ownerUserId,
+    pubkey_jwk: input.pubkeyJwk,
+  };
+  if (input.kind) body.kind = input.kind;
+  if (input.description !== undefined) body.description = input.description;
+  return body;
+};
+
+export const createAgent = async (
+  input: CreateAgentInput,
+  opts: { apiBase: string; token: string },
+): Promise<CreateAgentResponse> => {
+  const url = `${opts.apiBase}/v1/workspaces/${encodeURIComponent(input.workspaceId)}/agents`;
+  return requestJson<CreateAgentResponse>("POST", url, opts.token, buildCreateAgentBody(input));
+};
+
+const loadPublicKeyJwk = async (raw: string): Promise<Record<string, unknown>> => {
+  const trimmed = raw.trim();
+  let parsed: unknown;
+  if (trimmed.startsWith("{")) {
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (e) {
+      throw new Error(`--public-key inline value is not valid JSON: ${(e as Error).message}`);
+    }
+  } else {
+    const text = await readFile(trimmed, "utf8");
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      throw new Error(`--public-key file ${trimmed} is not valid JSON: ${(e as Error).message}`);
+    }
+    if (isRecord(parsed) && isRecord(parsed.publicJwk)) {
+      parsed = parsed.publicJwk;
+    }
+  }
+  if (!isRecord(parsed)) {
+    throw new Error("--public-key must resolve to a JSON object");
+  }
+  if (parsed.kty !== "OKP" || parsed.crv !== "Ed25519" || typeof parsed.x !== "string") {
+    throw new Error("--public-key must be an Ed25519 OKP public JWK (kty=OKP, crv=Ed25519, x)");
+  }
+  return { kty: "OKP", crv: "Ed25519", x: parsed.x };
+};
+
+const runCreate = async (
+  argv: readonly string[],
+  io: { out: (s: string) => void; err: (s: string) => void },
+  env: NodeJS.ProcessEnv,
+): Promise<void> => {
+  const parsed = parseFlags(argv);
+  const name = parsed.positional[0];
+  if (!name || name.length === 0) {
+    throw new Error(
+      "usage: pact agent create <name> --owner <user-id> --public-key <jwk-json|file> [--kind service|user_delegated] [--description text]",
+    );
+  }
+  const owner = parsed.flags.get("owner");
+  if (!owner) {
+    throw new Error("missing required flag --owner (admin user id, uuid)");
+  }
+  const publicKeyArg = parsed.flags.get("public-key");
+  if (!publicKeyArg) {
+    throw new Error(
+      "agent requires --public-key (run 'pact agent generate-keypair' to create one)",
+    );
+  }
+  const kindRaw = parsed.flags.get("kind");
+  let kind: "service" | "user_delegated" | undefined;
+  if (kindRaw !== undefined) {
+    if (kindRaw !== "service" && kindRaw !== "user_delegated") {
+      throw new Error("--kind must be one of service, user_delegated");
+    }
+    kind = kindRaw;
+  }
+  const description = parsed.flags.get("description");
+  if (description !== undefined && description.length > DESCRIPTION_MAX) {
+    throw new Error(`--description too long (max ${DESCRIPTION_MAX} chars)`);
+  }
+  const workspaceId = parsed.flags.get("workspace") ?? env.PACT_WORKSPACE_ID;
+  if (!workspaceId) {
+    throw new Error("missing workspace id (use --workspace or set PACT_WORKSPACE_ID)");
+  }
+  const pubkeyJwk = await loadPublicKeyJwk(publicKeyArg);
+
+  const base = adminApiBase(env);
+  const token = adminToken(env);
+  const res = await createAgent(
+    {
+      workspaceId,
+      name,
+      ownerUserId: owner,
+      pubkeyJwk,
+      ...(kind ? { kind } : {}),
+      ...(description !== undefined ? { description } : {}),
+    },
+    { apiBase: base, token },
+  );
+  const agent = res.agent;
+  io.out(`id           ${agent.id}\n`);
+  if (agent.slug) io.out(`slug         ${agent.slug}\n`);
+  if (agent.name) io.out(`name         ${agent.name}\n`);
+  io.out(`status       ${agent.status}\n`);
+  if (agent.owner_user_id) io.out(`owner        ${agent.owner_user_id}\n`);
+  if (agent.created_at) io.out(`created_at   ${agent.created_at}\n`);
+};
+
+export type GeneratedKeypair = {
+  publicJwk: { kty: "OKP"; crv: "Ed25519"; x: string };
+  privatePkcs8Base64: string;
+};
+
+export const generateKeypairRecord = async (): Promise<GeneratedKeypair> => {
+  const pair = await generateEd25519Keypair();
+  const publicJwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as Record<
+    string,
+    unknown
+  >;
+  const privatePkcs8 = await crypto.subtle.exportKey("pkcs8", pair.privateKey);
+  if (typeof publicJwk.x !== "string") {
+    throw new Error("ed25519 jwk export missing x coordinate");
+  }
+  return {
+    publicJwk: { kty: "OKP", crv: "Ed25519", x: publicJwk.x },
+    privatePkcs8Base64: Buffer.from(privatePkcs8).toString("base64"),
+  };
+};
+
+const runGenerateKeypair = async (
+  argv: readonly string[],
+  io: { out: (s: string) => void; err: (s: string) => void },
+  _env: NodeJS.ProcessEnv,
+): Promise<void> => {
+  const parsed = parseFlags(argv);
+  const out = parsed.flags.get("out");
+  const pubOut = parsed.flags.get("public-out");
+  const record = await generateKeypairRecord();
+  const wrapped = { version: 1, ...record };
+  const json = `${JSON.stringify(wrapped, null, 2)}\n`;
+  if (out) {
+    await writeFile(out, json, { mode: 0o600 });
+    io.err(`private key written to ${out} (mode 0600)\n`);
+  } else {
+    io.out(json);
+  }
+  if (pubOut) {
+    await writeFile(pubOut, `${JSON.stringify(record.publicJwk, null, 2)}\n`, "utf8");
+    io.err(`public jwk written to ${pubOut}\n`);
+  }
 };
 
 export type MintInput = {
@@ -391,6 +570,12 @@ export const runAgent = async (
   const rest = argv.slice(1);
   try {
     switch (sub) {
+      case "create":
+        await runCreate(rest, io, env);
+        return { exitCode: 0 };
+      case "generate-keypair":
+        await runGenerateKeypair(rest, io, env);
+        return { exitCode: 0 };
       case "mint":
         await runMint(rest, io, env);
         return { exitCode: 0 };
@@ -403,7 +588,9 @@ export const runAgent = async (
       default:
         io.err(
           [
-            "usage: pact agent mint --agent <id> --on-behalf-of <user> --tool <name> --scope <json> --audience <aud> [--ttl 7d|1h|300] [--max-redeems n] [--cnf-jwk file] [--dump-holder-key file]",
+            "usage: pact agent create <name> --owner <user-id> --public-key <jwk-json|file> [--kind service|user_delegated] [--description text] [--workspace id]",
+            "       pact agent generate-keypair [--out file] [--public-out file]",
+            "       pact agent mint --agent <id> --on-behalf-of <user> --tool <name> --scope <json> --audience <aud> [--ttl 7d|1h|300] [--max-redeems n] [--cnf-jwk file] [--dump-holder-key file]",
             "       (if --cnf-jwk is omitted an ephemeral holder keypair is generated; the resulting token is not redeemable unless --dump-holder-key is used)",
             "       pact agent revoke <jti> [--no-cascade] [--reason text]",
             "       pact agent list [--workspace id] [--status active|suspended|revoked] [--format json|table]",

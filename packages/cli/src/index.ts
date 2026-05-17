@@ -48,6 +48,8 @@ const help = () => {
       "  audit verify     verify the workspace audit chain end to end",
       "  audit checkpoint export a signed audit head checkpoint",
       "  audit tail       list recent audit events for a workspace",
+      "  agent create     register a new agent in a workspace",
+      "  agent generate-keypair  generate an Ed25519 holder keypair for an agent",
       "  agent mint       mint an agent capability token",
       "  agent revoke     revoke an agent capability by jti",
       "  agent list       list agents in a workspace",
