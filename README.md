@@ -103,7 +103,10 @@ Each run prints a single line of JSON tagged `pact_init_wallclock` with `totalMs
 
 ## Connecting Cursor, Claude Code, and Codex
 
-MCP clients like Cursor, Claude Code, and Codex cannot sign holder-bound KB-JWTs on their own. The `pact mcp bridge` subcommand runs a local HTTP server that holds the holder Ed25519 key, signs a fresh KB-JWT on every forwarded call, and proxies to the remote MCP endpoint.
+Two MCP subcommands cover the two integration shapes:
+
+- `pact mcp serve` runs a stdio MCP server. Use it when the client launches the Pact CLI as a subprocess and speaks MCP over stdin/stdout. Claude Code's stdio mode is the canonical example.
+- `pact mcp bridge` runs a local HTTP MCP server on `127.0.0.1`. Use it when the client speaks MCP over HTTP and cannot sign holder-bound KB-JWTs on its own (Cursor, Codex, and Claude Code's HTTP mode all fall here). The bridge holds the holder Ed25519 key, signs a fresh KB-JWT on every forwarded call, and proxies to the remote MCP endpoint.
 
 Run the bridge:
 

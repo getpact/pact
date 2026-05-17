@@ -42,8 +42,8 @@ const help = () => {
       "  whoami           print the active user and workspace",
       "  status           show endpoint and credential expiry",
       "  mcp install      register Pact MCP server with an agent client",
-      "  mcp serve        run the Pact MCP stdio proxy (used by clients)",
-      "  mcp bridge       run a local http bridge that signs kb-jwt per call",
+      "  mcp serve        stdio MCP server for clients that spawn a subprocess (Claude Code stdio)",
+      "  mcp bridge       local http MCP bridge that signs a kb-jwt per call (Cursor, Codex, Claude Code http)",
       "  audit verify     verify the workspace audit chain end to end",
       "  audit checkpoint export a signed audit head checkpoint",
       "  agent mint       mint an agent capability token",
@@ -209,8 +209,10 @@ const mcp = async () => {
       process.stderr.write(
         "usage: pact mcp install [--client claude-desktop|claude-code|cursor]\n",
       );
-      process.stderr.write("       pact mcp serve\n");
-      process.stderr.write("       pact mcp bridge --upstream <url> [--port 8765]\n");
+      process.stderr.write("       pact mcp serve   (stdio; client spawns this as a subprocess)\n");
+      process.stderr.write(
+        "       pact mcp bridge --upstream <url> [--port 8765]   (http; client connects over localhost)\n",
+      );
       process.exit(1);
   }
 };
