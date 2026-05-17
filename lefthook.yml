@@ -16,19 +16,35 @@ pre-commit:
         pnpm typecheck
     ascii-tells:
       run: |
-        files=$(git diff --cached --name-only --diff-filter=ACM)
-        if [ -z "$files" ]; then exit 0; fi
-        python3 - <<'PY' $files
-        import sys
+        python3 - <<'PY'
+        import os, subprocess, sys
+        # Include renamed files (R) so `git mv` + edit cannot smuggle non-ASCII.
+        out = subprocess.check_output(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"]
+        )
+        files = [os.fsdecode(p) for p in out.split(b"\x00") if p]
+        if not files:
+            sys.exit(0)
         # Paths permitted to contain non-ASCII (Unicode data, locales, fixtures).
         allow_paths = {
             "packages/brain-core/src/cjk.ts",
         }
         # Permitted control characters: tab, LF, CR.
         allow_cc = {0x09, 0x0A, 0x0D}
+        def is_binary(path):
+            try:
+                with open(path, "rb") as fh:
+                    return b"\x00" in fh.read(8192)
+            except OSError:
+                return True
         found = False
-        for f in sys.argv[1:]:
+        for f in files:
             if f in allow_paths:
+                continue
+            try:
+                if is_binary(f):
+                    continue
+            except OSError:
                 continue
             try:
                 with open(f, "r", encoding="utf-8") as fh:
@@ -40,7 +56,23 @@ pre-commit:
                             print(f"{f}:{n}:{col}: non-ASCII U+{o:04X} ({c!r})")
                             found = True
                             break
-            except (UnicodeDecodeError, OSError):
+                continue
+            except UnicodeDecodeError:
+                pass
+            except OSError:
+                continue
+            # Not UTF-8 but not binary (Latin-1, Windows-1254, etc.). Byte-scan
+            # so Turkish comments in single-byte encodings still get caught.
+            try:
+                with open(f, "rb") as fh:
+                    for n, line in enumerate(fh, 1):
+                        for col, b in enumerate(line, 1):
+                            if 0x20 <= b <= 0x7E or b in allow_cc:
+                                continue
+                            print(f"{f}:{n}:{col}: non-ASCII byte 0x{b:02X} (not utf-8)")
+                            found = True
+                            break
+            except OSError:
                 continue
         if found:
             print()
