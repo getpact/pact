@@ -4,6 +4,8 @@ import { createWorkspace, devIssue, googleExchange, refresh } from "./api.js";
 import { runAuditCheckpoint, runAuditVerify } from "./audit-verify.js";
 import { runAdmin } from "./commands/admin.js";
 import { runAgent } from "./commands/agent.js";
+import { runGroup } from "./commands/group.js";
+import { runInvite } from "./commands/invite.js";
 import { runSendCap } from "./commands/send-cap.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { type ClientId, installMcpServer } from "./mcp-install.js";
@@ -47,6 +49,11 @@ const help = () => {
       "  send-cap grant   grant a sender consent to address you",
       "  send-cap list    list send caps in a workspace",
       "  send-cap revoke  revoke a send cap by id",
+      "  group create     create a group",
+      "  group list       list groups",
+      "  group add-member add a user to a group",
+      "  group remove-member remove a user from a group",
+      "  invite           mint a signed invite for an email",
       "  admin prune-replay-log  prune kbjwt_replay_log rows older than a window",
       "  admin backfill   seed missing adapter-drive keys and default audiences",
       "  mek rewrap       rewrap stored secrets with a new MEK",
@@ -327,6 +334,16 @@ const main = async () => {
     }
     case "admin": {
       const result = await runAdmin(process.argv.slice(3));
+      if (result.exitCode !== 0) process.exit(result.exitCode);
+      return;
+    }
+    case "group": {
+      const result = await runGroup(process.argv.slice(3));
+      if (result.exitCode !== 0) process.exit(result.exitCode);
+      return;
+    }
+    case "invite": {
+      const result = await runInvite(process.argv.slice(3));
       if (result.exitCode !== 0) process.exit(result.exitCode);
       return;
     }
