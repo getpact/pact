@@ -91,7 +91,7 @@ PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap revoke <id> --reason ".
 
 PRD goal G1: `npx pact init` takes a fresh customer from zero to a working MCP endpoint in under 10 minutes. The init flow boils down to six measurable steps: workspace create, admin bearer issue, first user upsert, MCP audience bearer issue, JWKS fetch, and JWT verify roundtrip.
 
-`apps/issuer/src/__tests__/init-wallclock.test.ts` times every step in process against a local Postgres and asserts the total stays under 5 seconds (a 5x headroom over real local-stack HTTP and a 120x headroom under the PRD G1 ceiling). The test is DB-gated and runs as part of `pnpm test:db`. To run it alone:
+`apps/issuer/src/__tests__/init-wallclock.test.ts` times every step in process against a local Postgres and asserts the total stays under 5 seconds. The measurement is in-process Hono dispatch (`app.request`) against a local Postgres; it excludes real network, `wrangler dev` boot, the OAuth browser roundtrip, and any DNS or TLS cost. The 5 second budget is a 120x headroom under the PRD G1 ceiling, not a substitute for a real HTTP wall-clock. Cross-app HTTP behavior is covered by `apps/issuer/src/__tests__/composition-e2e.test.ts`. The test is DB-gated and runs as part of `pnpm test:db`. To run it alone:
 
 ```
 DATABASE_URL=postgres://pact:pact@localhost:5432/pact \

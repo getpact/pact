@@ -43,6 +43,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { writeAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
+import { registerAgentRoutes } from "./routes/agents.js";
 import { registerAuditRoutes } from "./routes/audit.js";
 import { registerGroupRoutes } from "./routes/groups.js";
 import { registerInviteRoutes } from "./routes/invites.js";
@@ -106,6 +107,7 @@ registerAuditRoutes(app);
 registerGroupRoutes(app);
 registerInviteRoutes(app);
 registerSendCapRoutes(app);
+registerAgentRoutes(app);
 
 const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Response> => {
   const audience = c.env.ADMIN_AUDIENCE ?? "pact-admin";
