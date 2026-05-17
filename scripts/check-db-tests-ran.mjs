@@ -20,6 +20,7 @@ if (missingEnv.length > 0) {
 
 const dbGated = [
   "apps/admin-api/src/__tests__/admin.test.ts",
+  "apps/admin-api/src/__tests__/agents-admin.test.ts",
   "apps/admin-api/src/__tests__/audit.test.ts",
   "apps/admin-api/src/__tests__/scheduled-prune.test.ts",
   "apps/gateway/src/__tests__/gateway.test.ts",
