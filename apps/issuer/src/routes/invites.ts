@@ -248,11 +248,13 @@ export const registerInviteAcceptRoutes = <T extends { Bindings: Env }>(app: Hon
       return c.json({ error: "forbidden", message: "invite_expired" }, 403);
     }
 
-    const googleJwks = createRemoteJWKSet(new URL(GOOGLE_JWKS_URI));
+    const googleJwksUri = c.env.GOOGLE_JWKS_URI ?? GOOGLE_JWKS_URI;
+    const googleIssuer = c.env.GOOGLE_ISSUER ?? GOOGLE_ISSUER;
+    const googleJwks = createRemoteJWKSet(new URL(googleJwksUri));
     let googlePayload: Awaited<ReturnType<typeof jwtVerify>>["payload"];
     try {
       ({ payload: googlePayload } = await jwtVerify(parsed.googleIdToken, googleJwks, {
-        issuer: GOOGLE_ISSUER,
+        issuer: googleIssuer,
         audience: c.env.GOOGLE_OAUTH_CLIENT_ID,
         algorithms: ["RS256"],
       }));
