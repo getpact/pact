@@ -1,6 +1,6 @@
 import { type Ed25519PublicJwk, generateEd25519Keypair } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { agentCapabilityGrants, users, workspaces } from "@getpact/db/schema";
+import { agentCapabilityGrants, auditEvents, users, workspaces } from "@getpact/db/schema";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -154,6 +154,21 @@ run("admin api agents", () => {
       runtime,
     );
     expect(revokeAgain.status).toBe(200);
+    const revokeAgainBody = (await revokeAgain.json()) as { idempotent?: boolean };
+    expect(revokeAgainBody.idempotent).toBe(true);
+
+    const revokeAudits = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ action: auditEvents.action })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.workspaceId, created.workspaceId),
+            eq(auditEvents.action, "admin.agent.grant.revoked"),
+          ),
+        ),
+    );
+    expect(revokeAudits).toHaveLength(1);
   });
 
   it("rejects a grant with an unknown audience", async () => {

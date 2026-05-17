@@ -586,7 +586,9 @@ export const registerAgentRoutes = <T extends { Bindings: AgentsEnv }>(app: Hono
           )
           .limit(1);
         if (!existing) return { kind: "not_found" as const };
-        if (existing.revokedAt) return { kind: "ok" as const, row: existing };
+        if (existing.revokedAt) {
+          return { kind: "idempotent" as const, row: existing };
+        }
         const updated = await tx
           .update(agentCapabilityGrants)
           .set({ revokedAt: new Date() })
@@ -611,6 +613,9 @@ export const registerAgentRoutes = <T extends { Bindings: AgentsEnv }>(app: Hono
       });
       if (outcome.kind === "not_found") {
         return c.json({ error: "not_found", message: "grant not found" }, 404);
+      }
+      if (outcome.kind === "idempotent") {
+        return c.json({ grant: serializeGrant(outcome.row), idempotent: true });
       }
       return c.json({ grant: serializeGrant(outcome.row) });
     } catch (e) {
