@@ -7,7 +7,7 @@
     "build": "tsc --noEmit",
     "dev": "wrangler dev --env local --local-protocol=http --ip 127.0.0.1 --port 19147",
     "deploy": "wrangler deploy",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests --silent",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
