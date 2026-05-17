@@ -22,6 +22,7 @@ const buildEnv = async () => {
     ISSUER_BASE_URL: "https://issuer.test/acme",
     ENVIRONMENT: "test",
     ENABLE_DEV_ISSUE: "true",
+    PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE: "true",
   };
 };
 

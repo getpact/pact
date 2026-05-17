@@ -121,6 +121,7 @@ run("google oidc exchange", () => {
       GOOGLE_ISSUER: issuerHost,
       ISSUER_BASE_URL: "https://issuer.test/acme",
       ENVIRONMENT: "test",
+      PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE: "true",
       WEB_ISSUER_SERVICE_TOKEN: "test-web-issuer-service-token-12345",
       WEB_OAUTH_REDIRECT_URI: "https://app.test/v1/auth/google/callback",
     };

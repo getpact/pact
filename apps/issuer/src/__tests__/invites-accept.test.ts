@@ -89,6 +89,7 @@ run("issuer invite accept", () => {
       ADMIN_AUDIENCE: "pact-admin",
       ENVIRONMENT: "test",
       ENABLE_DEV_ISSUE: "true",
+      PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE: "true",
     };
   };
 
