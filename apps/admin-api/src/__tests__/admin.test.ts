@@ -185,7 +185,7 @@ run("admin api", () => {
       `/v1/workspaces/${created.workspaceId}/groups/${group.id}/members`,
       token,
       "POST",
-      { userId: user.id },
+      { user_id: user.id },
       { DATABASE_URL: env.DATABASE_URL, MEK: env.MEK, ADMIN_AUDIENCE: env.ADMIN_AUDIENCE },
     );
     expect(memberRes.status).toBe(201);

@@ -19,8 +19,6 @@ import {
 import {
   brains,
   driveDocumentChunks,
-  groupMembers,
-  groups,
   invites,
   policies,
   revokedJtis,
@@ -47,6 +45,7 @@ import { writeAdminAudit } from "./audit.js";
 import { type AdminContext, authenticateAdmin } from "./auth.js";
 import { bustRevocationCache, type KVNamespace } from "./cache.js";
 import { registerAuditRoutes } from "./routes/audit.js";
+import { registerGroupRoutes } from "./routes/groups.js";
 import { registerSendCapRoutes } from "./routes/send-caps.js";
 
 export type Env = {
@@ -104,6 +103,7 @@ app.use("/v1/*", bodyLimit({ maxSize: 64 * 1024 }));
 app.get("/health", (c) => c.json({ ok: true }));
 
 registerAuditRoutes(app);
+registerGroupRoutes(app);
 registerSendCapRoutes(app);
 
 const auth = async (c: AppCtx, workspaceId: string): Promise<AdminContext | Response> => {
@@ -183,42 +183,6 @@ app.post("/v1/workspaces/:id/users", async (c) => {
     return rows;
   });
   return c.json({ user: inserted[0] }, 201);
-});
-
-app.post("/v1/workspaces/:id/groups", async (c) => {
-  const workspaceId = c.req.param("id");
-  const ctx = await auth(c, workspaceId);
-  if (!isContext(ctx)) return ctx;
-
-  const body = await c.req.json<{ name: string; description?: string }>();
-  const db = createClient(c.env.DATABASE_URL);
-  const inserted = await withWorkspace(db, workspaceId, async (tx) => {
-    const rows = await tx
-      .insert(groups)
-      .values({ workspaceId, name: body.name, description: body.description ?? null })
-      .returning({ id: groups.id, name: groups.name });
-    await auditInTx(tx, c, ctx, "admin.group.created", {
-      groupId: rows[0]?.id,
-      name: body.name,
-    });
-    return rows;
-  });
-  return c.json({ group: inserted[0] }, 201);
-});
-
-app.post("/v1/workspaces/:id/groups/:groupId/members", async (c) => {
-  const workspaceId = c.req.param("id");
-  const groupId = c.req.param("groupId");
-  const ctx = await auth(c, workspaceId);
-  if (!isContext(ctx)) return ctx;
-
-  const body = await c.req.json<{ userId: string }>();
-  const db = createClient(c.env.DATABASE_URL);
-  await withWorkspace(db, workspaceId, async (tx) => {
-    await tx.insert(groupMembers).values({ groupId, userId: body.userId });
-    await auditInTx(tx, c, ctx, "admin.group_member.added", { groupId, userId: body.userId });
-  });
-  return c.json({ ok: true }, 201);
 });
 
 app.post("/v1/workspaces/:id/policies", async (c) => {
@@ -345,9 +309,11 @@ app.post("/v1/workspaces/:id/invites", async (c) => {
       .insert(invites)
       .values({
         workspaceId,
+        jti: crypto.randomUUID(),
         email: canonicalizeEmail(body.email),
         scope: body.scope,
         ttl: body.ttl,
+        ttlSeconds,
         expiresAt,
         createdBy: ctx.userId,
       })
