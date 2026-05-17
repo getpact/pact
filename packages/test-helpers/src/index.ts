@@ -26,17 +26,21 @@ const assertLocalDatabase = (databaseUrl: string): void => {
   if (process.env.NODE_ENV === "production") {
     throw new Error("refusing to enable workspace bypass in NODE_ENV=production");
   }
-  let host: string;
+  let url: URL;
   try {
-    host = new URL(databaseUrl).hostname;
+    url = new URL(databaseUrl);
   } catch {
     throw new Error("refusing to enable workspace bypass against unparsable database url");
   }
-  if (!isLocalHost(host)) {
-    throw new Error(
-      `refusing to enable workspace bypass against non-test database (host=${host || "<empty>"})`,
-    );
+  const host = url.hostname;
+  if (isLocalHost(host)) return;
+  if (host === "") {
+    const sockHost = url.searchParams.get("host");
+    if (sockHost?.startsWith("/")) return;
   }
+  throw new Error(
+    `refusing to enable workspace bypass against non-test database (host=${host || "<empty>"})`,
+  );
 };
 
 export const buildTestEnv = async (databaseUrl: string): Promise<TestEnv> => {

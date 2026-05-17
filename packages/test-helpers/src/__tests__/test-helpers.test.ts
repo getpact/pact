@@ -36,6 +36,23 @@ describe("test helpers", () => {
     }
   });
 
+  it("accepts unix socket connection strings", async () => {
+    for (const url of [
+      "postgres:///dbname?host=/tmp",
+      "postgres:///pact?host=/var/run/postgresql",
+      "postgres:///pact?host=/cloudsql/proj:region:inst",
+    ]) {
+      const env = await buildTestEnv(url);
+      expect(env.DATABASE_URL).toBe(url);
+    }
+  });
+
+  it("refuses urls with empty host but no unix socket host param", async () => {
+    for (const url of ["postgres:///dbname", "postgres:///dbname?host=db.prod.example.com"]) {
+      await expect(buildTestEnv(url)).rejects.toThrow(/non-test database/);
+    }
+  });
+
   it("refuses workspace bypass under NODE_ENV=production", async () => {
     const prev = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";
