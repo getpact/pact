@@ -224,6 +224,17 @@ run("composition end-to-end demo loop", () => {
         })
         .returning({ id: agentCapabilityGrants.id });
       if (!grantRow) throw new Error("grant insert failed");
+      // Seed a second grant for pact.whoami so step 11b can mint another
+      // capability targeting the mcp-server's built-in whoami tool.
+      await tx.insert(agentCapabilityGrants).values({
+        workspaceId: wsId,
+        agentId: agentRow.id,
+        onBehalfOfUserId: alice2Id,
+        toolName: "pact.whoami",
+        scope: {},
+        audience: ["pact-mcp"],
+        createdByUserId: created.adminUserId,
+      });
       return { agentId: agentRow.id, grantId: grantRow.id };
     });
     expect(grantId).toBeTruthy();
@@ -266,9 +277,10 @@ run("composition end-to-end demo loop", () => {
       nonce: crypto.randomUUID(),
     });
 
-    // Step 9: redeem at the verifier capability endpoint. The mcp-server's
-    // tools/call path does not currently invoke this redeem flow, so we
-    // exercise the verifier directly; the composition gap is reported.
+    // Step 9: redeem at the verifier capability endpoint directly. This is
+    // the unit-style assertion that the verifier's redeem handler returns
+    // the expected shape and audits the decision; the mcp-server SD-JWT
+    // path is exercised separately in step 11b below.
     const verifierEnv = {
       DATABASE_URL: env.DATABASE_URL,
       MEK: env.MEK,
@@ -375,6 +387,83 @@ run("composition end-to-end demo loop", () => {
     };
     expect(mcpBody.error).toBeUndefined();
     expect(mcpBody.result?.content[0]?.text).toContain("alice@example.com");
+
+    // Step 11b: mint a fresh capability and exercise the SD-JWT bearer path
+    // through the mcp-server front door. The first tools/call must redeem
+    // (not /v1/verify) and the second must trip replay defense with
+    // kb_replay_detected. This closes the composition gap noted earlier.
+    const mintBRes = await callJson(
+      issuer,
+      `/v1/agents/${agentId}/capabilities`,
+      {
+        method: "POST",
+        headers: authHeaders(adminToken),
+        body: JSON.stringify({
+          on_behalf_of: "alice2@example.com",
+          tool_name: "pact.whoami",
+          scope: {},
+          audience: "pact-mcp",
+          ttl_seconds: 300,
+          max_redeems: 2,
+          cnf_jwk: holderPubJwk,
+        }),
+      },
+      env as unknown as Record<string, unknown>,
+    );
+    expect(mintBRes.status).toBe(201);
+    const mintedB = mintBRes.body as { jti: string; sd_jwt: string };
+    const sdJwtForMcp = await sdjwt.signKbJwt({
+      holderPrivateKey: holderPair.privateKey,
+      sdJwt: mintedB.sd_jwt,
+      audience: "pact-mcp",
+      nonce: crypto.randomUUID(),
+    });
+
+    const sdJwtCallRes = await callJson(
+      mcpServer,
+      `/${workspaceSlug}/mcp`,
+      {
+        method: "POST",
+        headers: authHeaders(sdJwtForMcp),
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "pact.whoami", arguments: {} },
+        }),
+      },
+      mcpEnv,
+    );
+    expect(sdJwtCallRes.status).toBe(200);
+    const sdJwtBody = sdJwtCallRes.body as {
+      result?: { content: Array<{ text: string }> };
+      error?: { code: number; message: string };
+    };
+    expect(sdJwtBody.error).toBeUndefined();
+    expect(sdJwtBody.result?.content[0]?.text).toContain("alice2@example.com");
+
+    const replayMcpRes = await callJson(
+      mcpServer,
+      `/${workspaceSlug}/mcp`,
+      {
+        method: "POST",
+        headers: authHeaders(sdJwtForMcp),
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name: "pact.whoami", arguments: {} },
+        }),
+      },
+      mcpEnv,
+    );
+    expect(replayMcpRes.status).toBe(200);
+    const replayMcpBody = replayMcpRes.body as {
+      error?: { code: number; data?: { reasons: string[]; status?: number } };
+    };
+    expect(replayMcpBody.error?.code).toBe(-32001);
+    expect(replayMcpBody.error?.data?.reasons).toContain("kb_replay_detected");
+    expect(replayMcpBody.error?.data?.status).toBe(410);
 
     // Step 12: verify the audit chain contains every step. We use direct
     // queries; admin-api's audit list route is paginated and would only

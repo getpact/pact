@@ -1,8 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { fromBase64 } from "@getpact/crypto";
+import { type Ed25519PublicJwk, fromBase64, generateEd25519Keypair, sdjwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import {
+  agentCapabilityGrants,
+  agents,
   driveDocumentChunks,
   policies,
   workspaceOauthConnections,
@@ -19,6 +21,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
 import verifier from "../../../../apps/verifier/src/index.js";
+import { isSdJwtCompact } from "../auth.js";
 import { handleMcp } from "../handler.js";
 import app from "../index.js";
 import { httpVerifyClient } from "../verify-client.js";
@@ -169,6 +172,156 @@ describe("mcp handler registry injection", () => {
       resource: "test:echo",
       audience: "pact-mcp",
     });
+  });
+});
+
+describe("sd-jwt detection", () => {
+  it("treats plain JWT as bearer", () => {
+    expect(isSdJwtCompact("abc.def.ghi")).toBe(false);
+  });
+
+  it("recognises issuer JWS followed by trailing tilde", () => {
+    expect(isSdJwtCompact("aaa.bbb.ccc~")).toBe(true);
+  });
+
+  it("recognises issuer JWS with disclosures and kb-jwt", () => {
+    expect(isSdJwtCompact("aaa.bbb.ccc~disc1~disc2~kb.head.sig")).toBe(true);
+  });
+
+  it("rejects empty or junk before tilde", () => {
+    expect(isSdJwtCompact("~")).toBe(false);
+    expect(isSdJwtCompact("not.a.jws~tail")).toBe(true);
+    expect(isSdJwtCompact("only-one-segment~tail")).toBe(false);
+  });
+
+  it("rejects when the first segment contains characters outside the JWS alphabet", () => {
+    expect(isSdJwtCompact("aaa.bbb.ccc!~tail")).toBe(false);
+  });
+});
+
+describe("mcp handler sd-jwt redeem path", () => {
+  const sdJwtCtx = {
+    kind: "sd_jwt" as const,
+    workspaceId: "00000000-0000-0000-0000-000000000001",
+    userId: "agent_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    email: "alice2@example.com",
+    groups: [] as string[],
+    roles: [] as string[],
+    jti: "11111111-1111-1111-1111-111111111111",
+    token: "header.payload.sig~policy_d~payload_d~audience_d~kb.head.sig",
+    agentId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    audience: "pact-mcp",
+  };
+
+  const registry = new Map([
+    [
+      "pact.brain.search",
+      {
+        descriptor: {
+          name: "pact.brain.search",
+          description: "Echo redeem path.",
+          inputSchema: { type: "object" as const },
+        },
+        authorize: () => ({
+          action: "tool:pact.brain.search",
+          resource: "workspace:00000000-0000-0000-0000-000000000001:brain:read",
+        }),
+        handler: async () => ({ content: [{ type: "text" as const, text: "ran" }] }),
+      },
+    ],
+  ]);
+
+  it("calls redeem (not verify) for sd-jwt context and runs tool on allow", async () => {
+    const redeem = vi.fn(async () => ({
+      allow: true as const,
+      status: 200 as const,
+      scope_claim: { group_in: ["eng"] },
+      agent_id: sdJwtCtx.agentId,
+      on_behalf_of: "user-id",
+      audience: "pact-mcp",
+      delegation_depth: 0,
+    }));
+    const verify = vi.fn(async () => ({ allow: true, reasons: [] }));
+
+    const res = await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "pact.brain.search", arguments: { query: "hi" } },
+      },
+      sdJwtCtx,
+      {
+        audience: "pact-mcp",
+        verify,
+        redeem,
+        deps: { databaseUrl: "postgres://unused" },
+        registry,
+      },
+    );
+
+    expect(verify).not.toHaveBeenCalled();
+    expect(redeem).toHaveBeenCalledTimes(1);
+    expect(redeem).toHaveBeenCalledWith({
+      sd_jwt: sdJwtCtx.token,
+      jti: sdJwtCtx.jti,
+      tool_name: "pact.brain.search",
+      resource: {
+        tool_name: "pact.brain.search",
+        resource: "workspace:00000000-0000-0000-0000-000000000001:brain:read",
+        action: "tool:pact.brain.search",
+      },
+    });
+    expect(res.error).toBeUndefined();
+    expect(res.result).toEqual({ content: [{ type: "text", text: "ran" }] });
+  });
+
+  it("surfaces kb_replay_detected as -32001 with status 410", async () => {
+    const redeem = vi.fn(async () => ({
+      allow: false as const,
+      status: 410,
+      reasons: ["kb_replay_detected"],
+    }));
+
+    const res = await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "pact.brain.search", arguments: { query: "hi" } },
+      },
+      sdJwtCtx,
+      {
+        audience: "pact-mcp",
+        redeem,
+        deps: { databaseUrl: "postgres://unused" },
+        registry,
+      },
+    );
+
+    expect(res.error?.code).toBe(-32001);
+    expect(res.error?.data).toEqual({ reasons: ["kb_replay_detected"], status: 410 });
+  });
+
+  it("returns -32002 when redeem client is unavailable for sd-jwt context", async () => {
+    const res = await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "pact.brain.search", arguments: { query: "hi" } },
+      },
+      sdJwtCtx,
+      {
+        audience: "pact-mcp",
+        verify: vi.fn(async () => ({ allow: true, reasons: [] })),
+        deps: { databaseUrl: "postgres://unused" },
+        registry,
+      },
+    );
+
+    expect(res.error?.code).toBe(-32002);
+    expect(res.error?.message).toBe("verifier unavailable");
   });
 });
 
@@ -1356,5 +1509,101 @@ run("mcp server with verifier", () => {
     const body = (await res.json()) as { error?: { code: number; data?: { reasons: string[] } } };
     expect(body.error?.code).toBe(-32001);
     expect(body.error?.data?.reasons).toBeDefined();
+  });
+
+  it("routes sd-jwt bearers to verifier redeem and rejects replays", async () => {
+    const { env, slug, created } = await setupWithPolicy({
+      rules: [{ subject: { kind: "role", value: "admin" }, effect: "allow" }],
+    });
+    setVerifierEnv(env);
+
+    const adminMintToken = (
+      await issueTestToken(issuer, env, {
+        workspaceId: created.workspaceId,
+        email: "alice@example.com",
+        audience: env.ADMIN_AUDIENCE,
+      })
+    ).token;
+
+    const exportJwk = async (key: CryptoKey): Promise<Ed25519PublicJwk> => {
+      const jwk = (await crypto.subtle.exportKey("jwk", key)) as JsonWebKey;
+      return { kty: "OKP", crv: "Ed25519", x: jwk.x as string };
+    };
+
+    const holder = await generateEd25519Keypair();
+    const holderPubJwk = await exportJwk(holder.publicKey);
+    const holderThumb = await sdjwt.jwkThumbprint(holderPubJwk);
+
+    const { agentId } = await withWorkspace(adminDb, created.workspaceId, async (tx) => {
+      const [agentRow] = await tx
+        .insert(agents)
+        .values({
+          workspaceId: created.workspaceId,
+          slug: `mcp-sdjwt-${Date.now().toString(36)}`,
+          displayName: "MCP SD-JWT Agent",
+          kind: "service",
+          ownerUserId: created.adminUserId,
+          pubkeyJwk: holderPubJwk,
+          pubkeyThumbprint: holderThumb,
+        })
+        .returning({ id: agents.id });
+      if (!agentRow) throw new Error("agent insert failed");
+      await tx.insert(agentCapabilityGrants).values({
+        workspaceId: created.workspaceId,
+        agentId: agentRow.id,
+        onBehalfOfUserId: created.adminUserId,
+        toolName: "pact.whoami",
+        scope: {},
+        audience: ["pact-mcp"],
+        createdByUserId: created.adminUserId,
+      });
+      return { agentId: agentRow.id };
+    });
+
+    const mintRes = await issuer.request(
+      `/v1/agents/${agentId}/capabilities`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${adminMintToken}`,
+        },
+        body: JSON.stringify({
+          on_behalf_of: "alice@example.com",
+          tool_name: "pact.whoami",
+          scope: {},
+          audience: "pact-mcp",
+          ttl_seconds: 300,
+          max_redeems: 2,
+          cnf_jwk: holderPubJwk,
+        }),
+      },
+      env as unknown as Record<string, unknown>,
+    );
+    expect(mintRes.status).toBe(201);
+    const minted = (await mintRes.json()) as { jti: string; sd_jwt: string };
+
+    const sdJwtWithKb = await sdjwt.signKbJwt({
+      holderPrivateKey: holder.privateKey,
+      sdJwt: minted.sd_jwt,
+      audience: "pact-mcp",
+      nonce: crypto.randomUUID(),
+    });
+
+    const firstCall = await callTool(slug, sdJwtWithKb, env, "pact.whoami");
+    const firstBody = (await firstCall.json()) as {
+      result?: { content: Array<{ text: string }> };
+      error?: { code: number; data?: { reasons: string[]; status?: number } };
+    };
+    expect(firstBody.error).toBeUndefined();
+    expect(firstBody.result?.content[0]?.text).toContain("alice@example.com");
+
+    const replayCall = await callTool(slug, sdJwtWithKb, env, "pact.whoami");
+    const replayBody = (await replayCall.json()) as {
+      error?: { code: number; data?: { reasons: string[]; status?: number } };
+    };
+    expect(replayBody.error?.code).toBe(-32001);
+    expect(replayBody.error?.data?.reasons).toContain("kb_replay_detected");
+    expect(replayBody.error?.data?.status).toBe(410);
   });
 });
