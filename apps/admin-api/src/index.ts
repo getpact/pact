@@ -49,7 +49,7 @@ import { bustRevocationCache, type KVNamespace } from "./cache.js";
 import { registerAuditRoutes } from "./routes/audit.js";
 import { registerSendCapRoutes } from "./routes/send-caps.js";
 
-type Env = {
+export type Env = {
   DATABASE_URL: string;
   MEK: string;
   ISSUER_BASE_URL: string;
@@ -69,6 +69,7 @@ type Env = {
   SENTRY_ENVIRONMENT?: string;
   SENTRY_RELEASE?: string;
   METRICS?: AnalyticsEngineDataset;
+  PACT_REPLAY_RETENTION_DAYS?: string;
 };
 type AppVariables = {
   sentry: SentryClient;
@@ -1049,5 +1050,34 @@ app.put("/v1/workspaces/:id/brains/:brainId/credential", async (c) => {
     throw e;
   }
 });
+
+const DEFAULT_REPLAY_RETENTION_DAYS = 7;
+const MAX_REPLAY_RETENTION_DAYS = 3650;
+
+const replayRetentionDays = (env: Env): number => {
+  const raw = env.PACT_REPLAY_RETENTION_DAYS;
+  if (!raw) return DEFAULT_REPLAY_RETENTION_DAYS;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > MAX_REPLAY_RETENTION_DAYS) {
+    return DEFAULT_REPLAY_RETENTION_DAYS;
+  }
+  return parsed;
+};
+
+export const pruneReplayLog = async (env: Env): Promise<{ deleted: number; days: number }> => {
+  const days = replayRetentionDays(env);
+  const interval = `${days} days`;
+  const db = createClient(env.DATABASE_URL, { max: 1, idle_timeout: 1 });
+  try {
+    const rows = (await db.execute(
+      sql`SELECT prune_kbjwt_replay_log(${interval}::interval) AS deleted`,
+    )) as Array<{ deleted: number | string | bigint }>;
+    const raw = rows[0]?.deleted ?? 0;
+    const deleted = typeof raw === "number" ? raw : Number(raw);
+    return { deleted, days };
+  } finally {
+    await db.$client.end({ timeout: 5 });
+  }
+};
 
 export default app;
