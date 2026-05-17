@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { generateEd25519Keypair } from "@getpact/crypto";
+import { parseDurationToSeconds } from "../duration.js";
 
 const DEFAULT_API_BASE = "https://issuer.getpact.dev";
 const TTL_DEFAULT = 300;
@@ -260,7 +261,8 @@ const runMint = async (
   } catch (e) {
     throw new Error(`--scope must be valid JSON: ${(e as Error).message}`);
   }
-  const ttlSeconds = optionalInt(parsed, "ttl") ?? TTL_DEFAULT;
+  const ttlFlag = parsed.flags.get("ttl");
+  const ttlSeconds = ttlFlag !== undefined ? parseDurationToSeconds(ttlFlag) : TTL_DEFAULT;
   const maxRedeems = optionalInt(parsed, "max-redeems") ?? REDEEMS_DEFAULT;
   let cnfJwk: Record<string, unknown> | undefined;
   const cnfFile = parsed.flags.get("cnf-jwk");
@@ -401,7 +403,7 @@ export const runAgent = async (
       default:
         io.err(
           [
-            "usage: pact agent mint --agent <id> --on-behalf-of <user> --tool <name> --scope <json> --audience <aud> [--ttl s] [--max-redeems n] [--cnf-jwk file] [--dump-holder-key file]",
+            "usage: pact agent mint --agent <id> --on-behalf-of <user> --tool <name> --scope <json> --audience <aud> [--ttl 7d|1h|300] [--max-redeems n] [--cnf-jwk file] [--dump-holder-key file]",
             "       (if --cnf-jwk is omitted an ephemeral holder keypair is generated; the resulting token is not redeemable unless --dump-holder-key is used)",
             "       pact agent revoke <jti> [--no-cascade] [--reason text]",
             "       pact agent list [--workspace id] [--status active|suspended|revoked] [--format json|table]",

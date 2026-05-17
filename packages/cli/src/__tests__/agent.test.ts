@@ -219,6 +219,107 @@ describe("runAgent mint", () => {
     expect(joined).toContain("bad token");
   });
 
+  it("accepts --ttl preset like 1d and forwards ttl_seconds=86400", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.ttl_seconds).toBe(86400);
+      return Response.json(
+        {
+          jti: "00000000-0000-4000-8000-000000000003",
+          sd_jwt: "eyJ.PAYLOAD.SIG~",
+          exp: 1_700_000_000,
+        },
+        { status: 201 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { io } = makeIo();
+    const res = await runAgent(
+      [
+        "mint",
+        "--agent",
+        "agent-1",
+        "--on-behalf-of",
+        "alice@example.com",
+        "--tool",
+        "t",
+        "--scope",
+        "{}",
+        "--audience",
+        "aud",
+        "--ttl",
+        "1d",
+      ],
+      io,
+      baseEnv,
+    );
+    expect(res.exitCode).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts bare integer --ttl 3600 as raw seconds", async () => {
+    const fetchMock = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.ttl_seconds).toBe(3600);
+      return Response.json(
+        { jti: "00000000-0000-4000-8000-000000000004", sd_jwt: "x~", exp: 1 },
+        { status: 201 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { io } = makeIo();
+    const res = await runAgent(
+      [
+        "mint",
+        "--agent",
+        "agent-1",
+        "--on-behalf-of",
+        "alice@example.com",
+        "--tool",
+        "t",
+        "--scope",
+        "{}",
+        "--audience",
+        "aud",
+        "--ttl",
+        "3600",
+      ],
+      io,
+      baseEnv,
+    );
+    expect(res.exitCode).toBe(0);
+  });
+
+  it("rejects a malformed --ttl value before any network call", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("should not be called");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { io, err } = makeIo();
+    const res = await runAgent(
+      [
+        "mint",
+        "--agent",
+        "agent-1",
+        "--on-behalf-of",
+        "alice@example.com",
+        "--tool",
+        "t",
+        "--scope",
+        "{}",
+        "--audience",
+        "aud",
+        "--ttl",
+        "7y",
+      ],
+      io,
+      baseEnv,
+    );
+    expect(res.exitCode).toBe(1);
+    expect(err.join("")).toContain("--ttl");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("exits 1 when PACT_ADMIN_TOKEN is missing", async () => {
     const { io, err } = makeIo();
     const res = await runAgent(
