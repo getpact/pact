@@ -37,7 +37,7 @@ const COMPILED_TRUTH_BOOST = 2.0;
 const BACKLINK_BOOST_COEF = 0.05;
 const MAX_SEARCH_LIMIT = 200;
 
-/** Embedding function injected by the caller; same shape as embedding/EmbedFn. */
+/** Embedding function injected by the caller. */
 export type HybridEmbedFn = (text: string) => Promise<Float32Array>;
 
 export interface HybridSearchOpts extends SearchOpts {

@@ -7,9 +7,11 @@
 
 import type { ChunkOptions, TextChunk } from "./chunkers/recursive.js";
 import { chunkText } from "./chunkers/recursive.js";
-import type { EmbedFn } from "./embedding/index.js";
 import type { BrainTracer, SpanAttrs } from "./otel.js";
 import { mergeAttrs, noopTracer } from "./otel.js";
+
+/** Caller-provided embedding function. The pipeline expects a Float32Array. */
+export type EmbedFn = (text: string) => Promise<Float32Array>;
 
 export interface IngestResult {
   chunks: TextChunk[];

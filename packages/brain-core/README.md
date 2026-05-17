@@ -15,7 +15,6 @@ What ships:
 - Zero-LLM query intent classifier and intent-weighted RRF
 - Token budget enforcement on the final result list
 - Recursive delimiter-aware text chunker with CJK support
-- Embedding provider recipes (metadata only; bring your own client)
 
 What you bring:
 

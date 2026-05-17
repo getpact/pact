@@ -29,10 +29,6 @@
     "./chunkers": {
       "types": "./src/chunkers/index.ts",
       "import": "./src/chunkers/index.ts"
-    },
-    "./embedding": {
-      "types": "./src/embedding/index.ts",
-      "import": "./src/embedding/index.ts"
     }
   },
   "files": [
