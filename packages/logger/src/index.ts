@@ -38,8 +38,14 @@ const safeStringify = (value: unknown): string => {
   });
 };
 
+const envLogLevel = (): LogLevel | undefined => {
+  const raw = typeof process !== "undefined" && process.env ? process.env.LOG_LEVEL : undefined;
+  if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
+  return undefined;
+};
+
 export const createLogger = (opts: LoggerOptions = {}): Logger => {
-  const minLevel = LEVEL_ORDER[opts.level ?? "info"];
+  const minLevel = LEVEL_ORDER[opts.level ?? envLogLevel() ?? "info"];
   const base = opts.base ?? {};
   const sink = opts.sink ?? ((line: string) => process.stdout.write(`${line}\n`));
 

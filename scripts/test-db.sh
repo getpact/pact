@@ -32,6 +32,7 @@ export RLS_TEST_DB="${RLS_TEST_DB:-postgres://pact_app:pact_app@${DB_HOST}:${DB_
 export PG_POOL_MAX="${PG_POOL_MAX:-1}"
 export PG_IDLE_TIMEOUT="${PG_IDLE_TIMEOUT:-1}"
 export PACT_REQUIRE_DB=1
+export LOG_LEVEL="${LOG_LEVEL:-warn}"
 
 if [ "$EXTERNAL_DB" = "false" ]; then
   if ! docker info >/dev/null 2>&1; then
