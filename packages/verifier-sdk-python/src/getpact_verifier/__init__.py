@@ -21,7 +21,21 @@ import jwt
 from jwt import PyJWKClient
 from jwt.algorithms import OKPAlgorithm
 
-__version__ = "0.1.0"
+from .pact_token import (
+    DEFAULT_KB_IAT_MAX_AGE_SECONDS,
+    DEFAULT_KB_IAT_SKEW_SECONDS,
+    DenyReason,
+    JwksCache,
+    JwksFetchError,
+    ReplayCache,
+    VerifyDenied,
+    VerifyOpts,
+    VerifyResult,
+    shared_jwks_cache,
+    verify_pact_token,
+)
+
+__version__ = "0.2.0"
 
 _ALGORITHMS: list[str] = ["EdDSA"]
 
@@ -132,11 +146,22 @@ def _now() -> int:
 
 
 __all__ = [
+    "DEFAULT_KB_IAT_MAX_AGE_SECONDS",
+    "DEFAULT_KB_IAT_SKEW_SECONDS",
+    "DenyReason",
+    "JwksCache",
+    "JwksFetchError",
+    "ReplayCache",
+    "StaticVerifierOptions",
     "Verifier",
     "VerifierOptions",
-    "StaticVerifierOptions",
-    "create_verifier",
-    "create_static_verifier",
-    "set_clock_skew_tolerance",
+    "VerifyDenied",
+    "VerifyOpts",
+    "VerifyResult",
     "__version__",
+    "create_static_verifier",
+    "create_verifier",
+    "set_clock_skew_tolerance",
+    "shared_jwks_cache",
+    "verify_pact_token",
 ]
