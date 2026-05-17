@@ -120,7 +120,20 @@ Residual: the chain is tamper-evident, not tamper-proof. An operator with direct
 - Rate limit: DB-backed UPSERT per `(workspace_id, brain_kind, client_ip)` bucket after verifier allow.
 - TLS at Cloudflare; HSTS in production; CSP `default-src 'none'` and no-referrer everywhere.
 
-### 7. Key wrap
+### 7. PKCE OAuth flow for `pact init`
+
+What it protects: the CLI must prove that the human running `pact init` controls the admin email that gets bound as workspace owner.
+
+Attack: a process on the same loopback can race to the callback or plant a forged `id_token` on disk.
+
+Mitigations:
+- The CLI is a courier, not a verifier. It runs OAuth 2.0 PKCE (RFC 7636) against Google, captures the `id_token`, and posts it to the issuer. The issuer is the verifier: `apps/issuer/src/google.ts` validates the JWT signature against Google's JWKS, checks `iss`, `aud` (`PACT_GOOGLE_CLIENT_ID` on the server), `exp`, and requires `email_verified: true` before binding the workspace admin.
+- The CLI binds a random 127.0.0.1 port and rejects any callback whose `state` does not match the value it generated for the request.
+- The PKCE code verifier never leaves the CLI process; the auth code is single-use at Google's token endpoint.
+
+Residual: a compromised local loopback handler could plant a forged token in transit, but the issuer rejects it on signature, audience, issuer, or `email_verified`. CLI-side claim inspection is best-effort and not load-bearing.
+
+### 8. Key wrap
 
 - Per-secret DEK wrapped by the deployment MEK with AAD bound to workspace + kind + target (`packages/keystore/src/index.ts:52-53`, `326-327`).
 - Signing keys: AAD `keystore:v1:<workspace>:<kind>`. HMAC keys: AAD `keystore:hmac:v1:<workspace>:<kind>`.
