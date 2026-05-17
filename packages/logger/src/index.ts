@@ -38,6 +38,8 @@ const safeStringify = (value: unknown): string => {
   });
 };
 
+// Node-only fallback. CF Workers expose env via c.env, not process.env, so workers
+// should pass opts.level explicitly from their Env binding.
 const envLogLevel = (): LogLevel | undefined => {
   const raw = typeof process !== "undefined" && process.env ? process.env.LOG_LEVEL : undefined;
   if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw;
