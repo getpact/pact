@@ -2,7 +2,12 @@ import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { sdjwt } from "@getpact/crypto";
-import { type HolderKey, loadOrCreateHolderKey } from "../holder-key.js";
+import {
+  type HolderKey,
+  holderKeyPath,
+  loadHolderKey,
+  loadOrCreateHolderKey,
+} from "../holder-key.js";
 
 export type BridgeOptions = {
   upstream: string;
@@ -284,7 +289,11 @@ export const runMcpBridge = async (
 
   const audience = parsed.flags.get("audience") ?? env.PACT_AUDIENCE;
 
-  const holder = await loadOrCreateHolderKey();
+  const preexisting = await loadHolderKey();
+  const holder = preexisting ?? (await loadOrCreateHolderKey());
+  if (!preexisting) {
+    io.out(`generated new holder key at ${holderKeyPath()} (chmod 0600)\n`);
+  }
 
   const handle = await startBridge({
     upstream,
