@@ -76,7 +76,7 @@ Mitigations:
 
 Residual:
 - HMAC key compromise is unbounded forgery within that workspace. There is no per-document key derivation.
-- Attestations are not stored after verification; replay within the 300s skew window against the same `(source_uri, content_hash)` is not separately rate-limited, but a duplicate page insert is rejected by the `(workspace_id, source_uri, content_hash)` lookup (`findExistingPage`).
+- Replay is bounded by content binding, not by a separate replay log. The verifier recomputes `content_hash` from the submitted body before calling `verifyDriveAttestation` (`apps/mcp-server/src/tools/brain.ts:348-399`); a captured attestation only validates against the exact `(source_uri, content_hash)` it was issued for, and the second insert is then rejected by the `(workspace_id, source_uri, content_hash)` lookup in `findExistingPage`. There is no MAC value at rest; the chain server-side hash plus dedup is the defense.
 - Only the `gdrive://` prefix is fenced today. Other connector URIs are accepted on trust until they grow their own attestation.
 
 ### 4. Brain provenance signature
