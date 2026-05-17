@@ -1,13 +1,19 @@
 import { fromBase64 } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
-import { brainChunkEmbeddings, brainChunks, brainPages, workspaces } from "@getpact/db/schema";
+import {
+  brainChunkEmbeddings,
+  brainChunks,
+  brainPages,
+  workspaceSigningKeys,
+  workspaces,
+} from "@getpact/db/schema";
 import {
   buildTestEnv,
   createTestWorkspace,
   issueTestToken,
   uniqueSlug,
 } from "@getpact/test-helpers";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
 import { handleMcp } from "../handler.js";
@@ -150,8 +156,15 @@ run("brain mcp tools", () => {
         chunk_id: string | null;
         snippet: string;
         score: number;
-        provenance: { source_uri: string; chunk_index: number; chunk_id: string | null };
+        provenance: {
+          source_uri: string;
+          chunk_index: number;
+          chunk_id: string | null;
+          kid?: string;
+          signature?: string;
+        };
       }>;
+      meta: { signing_kid: string | null };
     }>(searchBody);
     expect(searchResult.results.length).toBeGreaterThan(0);
     const top = searchResult.results[0];
@@ -160,6 +173,38 @@ run("brain mcp tools", () => {
     expect(top?.page_id).toBe(putResult.page_id);
     expect(top?.provenance.source_uri).toBe("note://round-trip");
     expect(typeof top?.provenance.chunk_index).toBe("number");
+
+    const provenanceRows = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ id: workspaceSigningKeys.id })
+        .from(workspaceSigningKeys)
+        .where(
+          and(
+            eq(workspaceSigningKeys.workspaceId, created.workspaceId),
+            eq(workspaceSigningKeys.kind, "provenance"),
+          ),
+        ),
+    );
+    const auditRows = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ id: workspaceSigningKeys.id })
+        .from(workspaceSigningKeys)
+        .where(
+          and(
+            eq(workspaceSigningKeys.workspaceId, created.workspaceId),
+            eq(workspaceSigningKeys.kind, "audit"),
+          ),
+        ),
+    );
+    expect(provenanceRows.length).toBe(1);
+    expect(auditRows.length).toBe(1);
+    const provenanceKid = provenanceRows[0]?.id;
+    const auditKid = auditRows[0]?.id;
+    expect(provenanceKid).toBeDefined();
+    expect(auditKid).toBeDefined();
+    expect(provenanceKid).not.toBe(auditKid);
+    expect(top?.provenance.kid).toBe(provenanceKid);
+    expect(searchResult.meta.signing_kid).toBe(provenanceKid);
   });
 
   it("is idempotent when the same content is put twice", async () => {

@@ -670,7 +670,7 @@ const loadProvenanceSigner = async (
 ): Promise<ProvenanceSigner | null> => {
   try {
     return await withWorkspace(db, workspaceId, async (tx) => {
-      const key = await loadActiveSigningKey(tx, workspaceId, "audit", rawMek);
+      const key = await loadActiveSigningKey(tx, workspaceId, "provenance", rawMek);
       return { id: key.id, privateKey: key.privateKey };
     });
   } catch {
