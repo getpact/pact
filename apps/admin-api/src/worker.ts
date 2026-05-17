@@ -9,6 +9,7 @@ const runPrune = async (env: Env): Promise<void> => {
     logger.info("scheduled.prune_replay_log", { deleted, retentionDays: days });
   } catch (err) {
     logger.error("scheduled.prune_replay_log_failed", { err });
+    throw err;
   }
 };
 
