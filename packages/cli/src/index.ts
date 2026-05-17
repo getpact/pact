@@ -4,6 +4,7 @@ import { googleExchange, refresh } from "./api.js";
 import { runAuditCheckpoint, runAuditVerify } from "./audit-verify.js";
 import { runAdmin } from "./commands/admin.js";
 import { runAgent } from "./commands/agent.js";
+import { runAuditCmd } from "./commands/audit.js";
 import { runGroup } from "./commands/group.js";
 import { runInitFromArgv } from "./commands/init.js";
 import { runInvite } from "./commands/invite.js";
@@ -46,6 +47,7 @@ const help = () => {
       "  mcp bridge       local http MCP bridge that signs a kb-jwt per call (Cursor, Codex, Claude Code http)",
       "  audit verify     verify the workspace audit chain end to end",
       "  audit checkpoint export a signed audit head checkpoint",
+      "  audit tail       list recent audit events for a workspace",
       "  agent mint       mint an agent capability token",
       "  agent revoke     revoke an agent capability by jti",
       "  agent list       list agents in a workspace",
@@ -219,9 +221,17 @@ const mcp = async () => {
 
 const audit = async () => {
   const sub = process.argv[3];
+  if (sub === "tail") {
+    const result = await runAuditCmd(process.argv.slice(3));
+    if (result.exitCode !== 0) process.exit(result.exitCode);
+    return;
+  }
   if (sub !== "verify" && sub !== "checkpoint") {
     process.stderr.write("usage: pact audit verify\n");
     process.stderr.write("       pact audit checkpoint\n");
+    process.stderr.write(
+      "       pact audit tail [--workspace id] [--limit 100] [--format table|json]\n",
+    );
     process.exit(1);
   }
   const cfg = await loadConfig();
