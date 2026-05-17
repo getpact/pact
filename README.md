@@ -66,6 +66,20 @@ PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap list
 PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap revoke <id> --reason "..."
 ```
 
+## Performance
+
+PRD goal G1: `npx pact init` takes a fresh customer from zero to a working MCP endpoint in under 10 minutes. The init flow boils down to six measurable steps: workspace create, admin bearer issue, first user upsert, MCP audience bearer issue, JWKS fetch, and JWT verify roundtrip.
+
+`apps/issuer/src/__tests__/init-wallclock.test.ts` times every step in process against a local Postgres and asserts the total stays under 5 seconds (a 5x headroom over real local-stack HTTP and a 120x headroom under the PRD G1 ceiling). The test is DB-gated and runs as part of `pnpm test:db`. To run it alone:
+
+```
+DATABASE_URL=postgres://pact:pact@localhost:5432/pact \
+RLS_TEST_DB=postgres://pact_app:pact_app@localhost:5432/pact \
+pnpm --filter @getpact/issuer exec vitest run src/__tests__/init-wallclock.test.ts
+```
+
+Each run prints a single line of JSON tagged `pact_init_wallclock` with `totalMs`, per-phase `ms`, and the slowest phase. Pipe it through `jq` to track regressions over time.
+
 ## Connecting Cursor, Claude Code, and Codex
 
 MCP clients like Cursor, Claude Code, and Codex cannot sign holder-bound KB-JWTs on their own. The `pact mcp bridge` subcommand runs a local HTTP server that holds the holder Ed25519 key, signs a fresh KB-JWT on every forwarded call, and proxies to the remote MCP endpoint.
