@@ -69,8 +69,8 @@ PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap revoke <id> --reason ".
 OSS (MIT):
 
 - `@getpact/cli`
-- `@getpact/verifier-sdk` (Node.js + edge JWT verifier)
+- `@getpact/verifier-sdk` (Node.js + edge JWT verifier; exports `verifyPactToken`, `verifyProvenance`, and `JwksCache` for JWKS reuse)
 - `@getpact/adapter-sdk`
 - `getpact-verifier` (Python, beta; EdDSA JWT verifier)
 
-Internal: `@getpact/core`, `@getpact/db`, `@getpact/crypto`, `@getpact/policy`, `@getpact/audit`, `@getpact/vault`, `@getpact/keystore`, `@getpact/logger`, `@getpact/ratelimit`, `@getpact/test-helpers`.
+Internal: `@getpact/core`, `@getpact/db`, `@getpact/crypto`, `@getpact/policy`, `@getpact/audit`, `@getpact/auth`, `@getpact/brain-core`, `@getpact/vault`, `@getpact/keystore`, `@getpact/logger`, `@getpact/ratelimit`, `@getpact/test-helpers`.
