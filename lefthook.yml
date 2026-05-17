@@ -20,22 +20,33 @@ pre-commit:
         if [ -z "$files" ]; then exit 0; fi
         python3 - <<'PY' $files
         import sys
-        bads = [chr(c) for c in (0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026)]
+        # Paths permitted to contain non-ASCII (Unicode data, locales, fixtures).
+        allow_paths = {
+            "packages/brain-core/src/cjk.ts",
+        }
+        # Permitted control characters: tab, LF, CR.
+        allow_cc = {0x09, 0x0A, 0x0D}
         found = False
         for f in sys.argv[1:]:
+            if f in allow_paths:
+                continue
             try:
                 with open(f, "r", encoding="utf-8") as fh:
-                    content = fh.read()
-            except Exception:
+                    for n, line in enumerate(fh, 1):
+                        for col, c in enumerate(line, 1):
+                            o = ord(c)
+                            if 0x20 <= o <= 0x7E or o in allow_cc:
+                                continue
+                            print(f"{f}:{n}:{col}: non-ASCII U+{o:04X} ({c!r})")
+                            found = True
+                            break
+            except (UnicodeDecodeError, OSError):
                 continue
-            for b in bads:
-                if b in content:
-                    print(f"{f}: contains U+{ord(b):04X}")
-                    found = True
-                    break
         if found:
             print()
-            print("ASCII tell detected. Replace with single hyphen, straight quote, three dots.")
+            print("Non-ASCII detected. Use plain ASCII: single hyphen, straight quote, three dots.")
+            print("This blocks foreign-language comments, smart punctuation, NBSP, zero-width chars.")
+            print("Legitimate Unicode data: add the path to allow_paths in lefthook.yml ascii-tells.")
             sys.exit(1)
         PY
     secret-patterns:
