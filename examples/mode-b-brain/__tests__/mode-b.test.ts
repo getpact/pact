@@ -98,8 +98,11 @@ const signKbJwt = async (
   return `${sdJwt}${kb}`;
 };
 
+let originalFetch: typeof fetch | null = null;
+
 const installJwksMock = (issuerKey: SignerKey): void => {
-  const realFetch = globalThis.fetch;
+  if (originalFetch === null) originalFetch = globalThis.fetch;
+  const realFetch = originalFetch;
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     const url = typeof input === "string" ? input : (input as Request).url;
     if (url === JWKS_URI) {
@@ -112,6 +115,13 @@ const installJwksMock = (issuerKey: SignerKey): void => {
     }
     return realFetch(input as Parameters<typeof fetch>[0], init);
   }) as typeof fetch;
+};
+
+const restoreJwksMock = (): void => {
+  if (originalFetch !== null) {
+    globalThis.fetch = originalFetch;
+    originalFetch = null;
+  }
 };
 
 let running: RunningServer;
@@ -137,6 +147,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (running) await running.close();
+  restoreJwksMock();
 });
 
 const presentToken = async (overrides?: {
