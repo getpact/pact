@@ -146,6 +146,12 @@ const writeAgentAudit = async (
 const isUniqueViolation = (err: unknown): boolean =>
   !!err && typeof err === "object" && "code" in err && (err as { code?: unknown }).code === "23505";
 
+const uniqueViolationConstraint = (err: unknown): string | null => {
+  if (!err || typeof err !== "object") return null;
+  const name = (err as { constraint_name?: unknown }).constraint_name;
+  return typeof name === "string" ? name : null;
+};
+
 const slugify = (raw: string): string => {
   const base = raw
     .toLowerCase()
@@ -425,6 +431,19 @@ export const registerAgentRoutes = <T extends { Bindings: AgentsEnv }>(app: Hono
       return c.json({ agent: serializeAgent(result.row) }, 201);
     } catch (e) {
       if (isUniqueViolation(e)) {
+        const constraint = uniqueViolationConstraint(e);
+        if (constraint === "agents_workspace_slug_idx") {
+          return c.json(
+            { error: "conflict", code: "slug_taken", message: "agent slug already exists" },
+            409,
+          );
+        }
+        if (constraint === "agents_workspace_thumbprint_idx") {
+          return c.json(
+            { error: "conflict", code: "pubkey_taken", message: "agent pubkey already exists" },
+            409,
+          );
+        }
         return c.json({ error: "conflict", message: "agent slug or pubkey already exists" }, 409);
       }
       const message = e instanceof Error ? e.message : "create failed";

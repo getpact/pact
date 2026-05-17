@@ -360,6 +360,70 @@ run("admin api agents", () => {
     expect(mintBody.error).toBe("grant_expired");
   });
 
+  it("returns slug_taken when the same slug is reused", async () => {
+    const { env, created, token, pubkeyJwk } = await setup();
+    const runtime = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+    };
+    const first = await callApi(
+      "/agents",
+      token,
+      "POST",
+      { name: "dup-slug", owner_user_id: created.adminUserId, pubkey_jwk: pubkeyJwk },
+      created.workspaceId,
+      runtime,
+    );
+    expect(first.status).toBe(201);
+
+    const otherKp = await generateEd25519Keypair();
+    const otherJwk = await exportEd25519Jwk(otherKp.publicKey);
+    const second = await callApi(
+      "/agents",
+      token,
+      "POST",
+      { name: "dup-slug", owner_user_id: created.adminUserId, pubkey_jwk: otherJwk },
+      created.workspaceId,
+      runtime,
+    );
+    expect(second.status).toBe(409);
+    const body = (await second.json()) as { error: string; code?: string };
+    expect(body.error).toBe("conflict");
+    expect(body.code).toBe("slug_taken");
+  });
+
+  it("returns pubkey_taken when the same pubkey is reused", async () => {
+    const { env, created, token, pubkeyJwk } = await setup();
+    const runtime = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+    };
+    const first = await callApi(
+      "/agents",
+      token,
+      "POST",
+      { name: "pubkey-a", owner_user_id: created.adminUserId, pubkey_jwk: pubkeyJwk },
+      created.workspaceId,
+      runtime,
+    );
+    expect(first.status).toBe(201);
+
+    const second = await callApi(
+      "/agents",
+      token,
+      "POST",
+      { name: "pubkey-b", owner_user_id: created.adminUserId, pubkey_jwk: pubkeyJwk },
+      created.workspaceId,
+      runtime,
+    );
+    expect(second.status).toBe(409);
+    const body = (await second.json()) as { error: string; code?: string };
+    expect(body.error).toBe("conflict");
+    expect(body.code).toBe("pubkey_taken");
+  });
+
   it("rejects sub_agent kind at create until parent grant wiring lands", async () => {
     const { env, created, token, pubkeyJwk } = await setup();
     const runtime = {
