@@ -214,17 +214,28 @@ export const invites = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    jti: uuid("jti").notNull(),
     email: text("email").notNull(),
+    groupIds: uuid("group_ids").array().notNull().default(sql`'{}'::uuid[]`),
     scope: jsonb("scope").notNull(),
     ttl: text("ttl").notNull(),
+    ttlSeconds: integer("ttl_seconds").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    consumedUserId: uuid("consumed_user_id").references(() => users.id, { onDelete: "set null" }),
+    consumedUserIdSnapshot: uuid("consumed_user_id_snapshot"),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     status: text("status").notNull().default("pending"),
   },
-  (t) => [index("invites_email_idx").on(t.email)],
+  (t) => [
+    index("invites_email_idx").on(t.email),
+    uniqueIndex("invites_jti_unique").on(t.workspaceId, t.jti),
+    index("invites_pending_email_idx").on(t.workspaceId, t.email).where(sql`consumed_at IS NULL`),
+  ],
 );
 
 export type Workspace = typeof workspaces.$inferSelect;
