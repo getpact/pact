@@ -1,3 +1,8 @@
+// In-process simulation of consent, ingestion, search, and capability verification.
+// No DB, daemon, or network. Exercises the real crypto primitives (Ed25519, HMAC,
+// SD-JWT, KB-JWT) but mocks the storage and HTTP transport. For end-to-end coverage
+// against live services, see scripts/test-db.sh + DB-gated app tests.
+
 import { fileURLToPath } from "node:url";
 import {
   type DriveAttestation,
