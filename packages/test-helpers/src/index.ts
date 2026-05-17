@@ -14,7 +14,33 @@ export type TestEnv = {
   MCP_AUDIENCE: string;
 };
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
+
+const isLocalHost = (host: string): boolean => {
+  if (LOCAL_HOSTS.has(host)) return true;
+  if (host.endsWith(".local")) return true;
+  return false;
+};
+
+const assertLocalDatabase = (databaseUrl: string): void => {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("refusing to enable workspace bypass in NODE_ENV=production");
+  }
+  let host: string;
+  try {
+    host = new URL(databaseUrl).hostname;
+  } catch {
+    throw new Error("refusing to enable workspace bypass against unparsable database url");
+  }
+  if (!isLocalHost(host)) {
+    throw new Error(
+      `refusing to enable workspace bypass against non-test database (host=${host || "<empty>"})`,
+    );
+  }
+};
+
 export const buildTestEnv = async (databaseUrl: string): Promise<TestEnv> => {
+  assertLocalDatabase(databaseUrl);
   const mek = await generateAesKey();
   return {
     DATABASE_URL: databaseUrl,
