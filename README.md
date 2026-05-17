@@ -61,7 +61,7 @@ Run `pnpm verify` before push to catch CI mismatches locally (clears caches, rei
 
 ## MVP Smoke
 
-`scripts/smoke-demo.sh` walks the founder demo end-to-end against real loopback HTTP. It boots Postgres, applies migrations, starts the four Workers under `wrangler dev`, runs `pact init --skip-oauth`, creates a group + agent + grant via the admin-api, mints a capability SD-JWT, starts `pact mcp bridge`, invokes `pact.whoami` over the bridge, replays the call to assert `kb_replay_detected`, and checks that the expected audit events are present. The script prints a per-phase wall-clock summary and fails if total exceeds the PRD G1 budget (600s).
+`scripts/smoke-demo.sh` walks the founder demo end-to-end against real loopback HTTP. It boots Postgres, applies migrations, starts the four Workers under `wrangler dev`, runs `pact init --skip-oauth`, creates a group, registers an agent with `pact agent create`, grants it via the admin-api, mints a capability SD-JWT with `pact agent mint`, starts `pact mcp bridge`, invokes `pact.whoami` over the bridge, replays the call to assert `kb_replay_detected`, then lists the resulting events with `pact audit tail`. The script prints a per-phase wall-clock summary and fails if total exceeds the PRD G1 budget (600s).
 
 ```
 bash scripts/smoke-demo.sh
@@ -100,6 +100,18 @@ PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap grant --grantee <user-i
 PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap list
 PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap revoke <id> --reason "..."
 ```
+
+Register a new agent and inspect the workspace audit log with the CLI:
+
+```
+pact agent generate-keypair --out ./agent.key --public-out ./agent.pub.json
+PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... \
+  pact agent create my-agent --owner <admin-user-id> --public-key ./agent.pub.json
+PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... \
+  pact audit tail --limit 50
+```
+
+`pact agent generate-keypair` writes an Ed25519 keypair in the same shape `~/.pact/holder.key` uses (mode 0600). `pact audit tail` calls the admin API audit/events route and renders a table, or pass `--format json` for the raw response.
 
 ## Performance
 
