@@ -15,7 +15,7 @@ import type { DbClient, Tx } from "@getpact/db";
 import { schema, withWorkspace } from "@getpact/db";
 import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 
-export type SigningKeyKind = "jwt" | "audit";
+export type SigningKeyKind = "jwt" | "audit" | "provenance";
 
 export type HmacKeyKind = "adapter-drive";
 
