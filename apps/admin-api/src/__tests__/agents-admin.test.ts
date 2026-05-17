@@ -7,7 +7,7 @@ import {
   issueTestToken,
   uniqueSlug,
 } from "@getpact/test-helpers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import issuer from "../../../../apps/issuer/src/index.js";
 import app from "../index.js";
@@ -251,6 +251,98 @@ run("admin api agents", () => {
       runtime,
     );
     expect(res.status).toBe(403);
+  });
+
+  it("persists grant expires_at and rejects mint after it lapses", async () => {
+    const { env, created, token, subjectId, pubkeyJwk } = await setup();
+    const runtime = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+    };
+
+    const agentRes = await callApi(
+      "/agents",
+      token,
+      "POST",
+      { name: "ttl-bot", owner_user_id: created.adminUserId, pubkey_jwk: pubkeyJwk },
+      created.workspaceId,
+      runtime,
+    );
+    expect(agentRes.status).toBe(201);
+    const agent = ((await agentRes.json()) as { agent: { id: string } }).agent;
+
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const grantRes = await callApi(
+      `/agents/${agent.id}/grants`,
+      token,
+      "POST",
+      {
+        tool_name: "pact.brain.search",
+        audience: "pact-mcp",
+        scope: { group_in: ["eng"] },
+        on_behalf_of_user_id: subjectId,
+        expires_at: future,
+      },
+      created.workspaceId,
+      runtime,
+    );
+    expect(grantRes.status).toBe(201);
+    const grant = ((await grantRes.json()) as { grant: { id: string; expires_at: string } }).grant;
+    expect(grant.expires_at).toBe(future);
+
+    const stored = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx
+        .select({ expiresAt: agentCapabilityGrants.expiresAt })
+        .from(agentCapabilityGrants)
+        .where(
+          and(
+            eq(agentCapabilityGrants.workspaceId, created.workspaceId),
+            eq(agentCapabilityGrants.id, grant.id),
+          ),
+        ),
+    );
+    expect(stored[0]?.expiresAt).not.toBeNull();
+    expect(stored[0]?.expiresAt?.toISOString()).toBe(future);
+
+    await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx.execute(
+        sql`UPDATE agent_capability_grants
+            SET expires_at = NOW() - INTERVAL '1 minute'
+            WHERE workspace_id = ${created.workspaceId}::uuid
+              AND id = ${grant.id}::uuid`,
+      ),
+    );
+
+    const subjectRow = await withWorkspace(adminDb, created.workspaceId, (tx) =>
+      tx.select({ email: users.email }).from(users).where(eq(users.id, subjectId)),
+    );
+    const subjectEmail = subjectRow[0]?.email as string;
+
+    const recipient = await generateEd25519Keypair();
+    const cnfJwk = await exportEd25519Jwk(recipient.publicKey);
+
+    const mintRes = await issuer.request(
+      `/v1/agents/${agent.id}/capabilities`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          on_behalf_of: subjectEmail,
+          tool_name: "pact.brain.search",
+          scope: { group_in: ["eng"] },
+          audience: "pact-mcp",
+          cnf_jwk: cnfJwk,
+        }),
+      },
+      { ...runtime, ISSUER_BASE_URL: "https://issuer.test/acme", ENVIRONMENT: "test" },
+    );
+    expect(mintRes.status).toBe(403);
+    const mintBody = (await mintRes.json()) as { error: string };
+    expect(mintBody.error).toBe("grant_expired");
   });
 
   it("isolates agents across tenants via RLS", async () => {

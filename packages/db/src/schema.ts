@@ -581,12 +581,16 @@ export const agentCapabilityGrants = pgTable(
       .references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
   },
   (t) => [
     index("agent_capability_grants_agent_tool_idx")
       .on(t.workspaceId, t.agentId, t.toolName)
       .where(sql`revoked_at IS NULL`),
     index("agent_capability_grants_scope_gin").using("gin", sql`${t.scope} jsonb_path_ops`),
+    index("agent_capability_grants_expires_at_idx")
+      .on(t.workspaceId, t.expiresAt)
+      .where(sql`revoked_at IS NULL AND expires_at IS NOT NULL`),
     check(
       "agent_capability_grants_on_behalf_of_check",
       sql`${t.onBehalfOfUserId} IS NOT NULL OR ${t.onBehalfOfPattern} IS NOT NULL`,

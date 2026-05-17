@@ -253,6 +253,13 @@
       "when": 1778502000000,
       "tag": "0035_signed_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1778503000000,
+      "tag": "0036_add_grant_expires_at",
+      "breakpoints": true
     }
   ]
 }

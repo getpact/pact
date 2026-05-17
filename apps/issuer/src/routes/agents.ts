@@ -144,6 +144,7 @@ type GrantRow = {
   scope: unknown;
   created_by_user_id: string;
   audience: string[];
+  expires_at: Date | string | null;
 };
 
 const loadAgent = async (
@@ -172,7 +173,7 @@ const findGrant = async (
 ): Promise<GrantRow | null> => {
   const scopeJson = JSON.stringify(input.scope);
   const rows = (await tx.execute(
-    sql`SELECT id, agent_id, on_behalf_of_user_id, on_behalf_of_pattern, max_uses_per_day, scope, created_by_user_id, audience
+    sql`SELECT id, agent_id, on_behalf_of_user_id, on_behalf_of_pattern, max_uses_per_day, scope, created_by_user_id, audience, expires_at
         FROM agent_capability_grants
         WHERE workspace_id = ${input.workspaceId}
           AND agent_id = ${input.agentId}
@@ -517,6 +518,28 @@ export const registerAgentRoutes = (app: IssuerApp): void => {
             code: "forbidden",
             message: "caller is not the grant owner",
           };
+        }
+
+        if (grant.expires_at !== null) {
+          const grantExp =
+            grant.expires_at instanceof Date ? grant.expires_at : new Date(grant.expires_at);
+          if (!Number.isNaN(grantExp.getTime()) && grantExp.getTime() <= Date.now()) {
+            await writeAgentAudit(tx, {
+              workspaceId,
+              rawMek,
+              actorUserId: ctx.userId,
+              action: "agent.capability.minted",
+              target: { agent_id: agentId, grant_id: grant.id, tool_name: parsed.toolName },
+              decision: "deny",
+              supporting: { reason: "grant_expired", expires_at: grantExp.toISOString() },
+            });
+            return {
+              kind: "error" as const,
+              status: 403,
+              code: "grant_expired",
+              message: "capability grant has expired",
+            };
+          }
         }
 
         const recent = await countRecentInvocations(tx, workspaceId, grant.id);

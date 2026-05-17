@@ -190,6 +190,7 @@ const serializeGrant = (row: {
   onBehalfOfPattern: string | null;
   createdAt: Date;
   revokedAt: Date | null;
+  expiresAt: Date | null;
 }) => ({
   id: row.id,
   agent_id: row.agentId,
@@ -201,6 +202,7 @@ const serializeGrant = (row: {
   on_behalf_of_pattern: row.onBehalfOfPattern,
   created_at: row.createdAt.toISOString(),
   revoked_at: row.revokedAt ? row.revokedAt.toISOString() : null,
+  expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
 });
 
 type CreateAgentBody = {
@@ -267,6 +269,7 @@ type ParsedGrant = {
   maxUsesPerDay: number;
   onBehalfOfUserId: string | null;
   onBehalfOfPattern: string | null;
+  expiresAt: Date | null;
 };
 
 const parseCreateGrantBody = (body: CreateGrantBody): ParsedGrant | string => {
@@ -294,14 +297,13 @@ const parseCreateGrantBody = (body: CreateGrantBody): ParsedGrant | string => {
     }
     maxUsesPerDay = n;
   }
-  // expires_at is accepted for forward compatibility but the grant row itself
-  // has no expiry column today; minted invocations carry the ttl. We still
-  // validate the shape so callers do not pass malformed values silently.
+  let expiresAt: Date | null = null;
   if (body.expires_at !== undefined && body.expires_at !== null) {
     if (typeof body.expires_at !== "string") return "expires_at must be an ISO string";
     const parsed = new Date(body.expires_at);
     if (Number.isNaN(parsed.valueOf())) return "expires_at is not a valid date";
     if (parsed.getTime() <= Date.now()) return "expires_at must be in the future";
+    expiresAt = parsed;
   }
   let onBehalfOfUserId: string | null = null;
   let onBehalfOfPattern: string | null = null;
@@ -327,6 +329,7 @@ const parseCreateGrantBody = (body: CreateGrantBody): ParsedGrant | string => {
     maxUsesPerDay,
     onBehalfOfUserId,
     onBehalfOfPattern,
+    expiresAt,
   };
 };
 
@@ -508,6 +511,7 @@ export const registerAgentRoutes = <T extends { Bindings: AgentsEnv }>(app: Hono
             maxUsesPerDay: parsed.maxUsesPerDay,
             onBehalfOfUserId: parsed.onBehalfOfUserId,
             onBehalfOfPattern: parsed.onBehalfOfPattern,
+            expiresAt: parsed.expiresAt,
             createdByUserId: ctx.userId,
           })
           .returning();
