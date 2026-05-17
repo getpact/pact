@@ -103,22 +103,44 @@ export const groups = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("groups_workspace_name_idx").on(t.workspaceId, t.name)],
+  (t) => [
+    uniqueIndex("groups_workspace_name_idx").on(t.workspaceId, t.name),
+    index("groups_workspace_active_idx").on(t.workspaceId).where(sql`revoked_at IS NULL`),
+  ],
 );
 
 export const groupMembers = pgTable(
   "group_members",
   {
+    id: uuid("id").notNull().defaultRandom(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
     groupId: uuid("group_id")
       .notNull()
       .references(() => groups.id, { onDelete: "cascade" }),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
-  (t) => [primaryKey({ columns: [t.groupId, t.userId] })],
+  (t) => [
+    primaryKey({ columns: [t.groupId, t.userId] }),
+    index("group_members_user_active_idx")
+      .on(t.workspaceId, t.userId)
+      .where(sql`revoked_at IS NULL`),
+    index("group_members_group_active_idx")
+      .on(t.workspaceId, t.groupId)
+      .where(sql`revoked_at IS NULL`),
+  ],
 );
+
+export type GroupMember = typeof groupMembers.$inferSelect;
+export type NewGroupMember = typeof groupMembers.$inferInsert;
 
 export const policies = pgTable(
   "policies",

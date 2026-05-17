@@ -239,6 +239,13 @@
       "when": 1778500000000,
       "tag": "0033_agent_invocations_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1778501000000,
+      "tag": "0034_groups_and_members",
+      "breakpoints": true
     }
   ]
 }
