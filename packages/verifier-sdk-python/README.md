@@ -97,6 +97,8 @@ else:
 
 The replay cache key is `f"{jti}:{kb_iat}:{sd_hash}"`. Supplying a cache turns single-use semantics into hard rejects on the second presentation within the iat window.
 
+`JwksCache.resolve` and `verify_pact_token` are synchronous and use `httpx.get` for JWKS fetches. Calling them directly from an async event loop (FastAPI, Starlette) blocks the loop. From async code wrap the call in `asyncio.to_thread(verify_pact_token, sd_jwt, opts)` or pass a custom `fetcher` that does async I/O off-thread.
+
 ## Algorithm
 
 Pact issues EdDSA (Ed25519) tokens. The SDK rejects all other `alg` values to defend against algorithm-confusion attacks.
