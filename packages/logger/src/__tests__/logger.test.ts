@@ -4,7 +4,7 @@ import { createLogger, newRequestId } from "../index.js";
 describe("logger", () => {
   it("emits a single json line per call", () => {
     const lines: string[] = [];
-    const log = createLogger({ sink: (l) => lines.push(l) });
+    const log = createLogger({ level: "info", sink: (l) => lines.push(l) });
     log.info("hello", { foo: "bar" });
     expect(lines.length).toBe(1);
     const parsed = JSON.parse(lines[0] as string) as Record<string, unknown>;
@@ -37,7 +37,7 @@ describe("logger", () => {
 
   it("serializes Error to name/message/stack", () => {
     const lines: string[] = [];
-    const log = createLogger({ sink: (l) => lines.push(l) });
+    const log = createLogger({ level: "info", sink: (l) => lines.push(l) });
     log.error("failed", { err: new Error("bad") });
     const parsed = JSON.parse(lines[0] as string) as { err: { name: string; message: string } };
     expect(parsed.err.name).toBe("Error");
@@ -46,7 +46,7 @@ describe("logger", () => {
 
   it("handles circular references", () => {
     const lines: string[] = [];
-    const log = createLogger({ sink: (l) => lines.push(l) });
+    const log = createLogger({ level: "info", sink: (l) => lines.push(l) });
     const a: Record<string, unknown> = {};
     a.self = a;
     log.info("circ", { a });
