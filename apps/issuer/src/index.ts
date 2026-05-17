@@ -41,6 +41,7 @@ import {
 } from "./issue.js";
 import { buildWorkspaceJwks } from "./jwks.js";
 import { registerAgentRoutes } from "./routes/agents.js";
+import { registerInviteAcceptRoutes } from "./routes/invites.js";
 import { createWorkspace } from "./workspace.js";
 
 type AppVariables = {
@@ -148,6 +149,7 @@ app.use("/v1/dev/issue", (c, next) =>
 app.get("/health", (c) => c.json({ ok: true }));
 
 registerAgentRoutes(app);
+registerInviteAcceptRoutes(app);
 
 const googleAuthzBody = (e: AuthzError): { error: string; message: string } => {
   if (e instanceof GoogleIdentityMismatchError) {

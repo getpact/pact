@@ -15,6 +15,7 @@ export type Env = {
   DEV_ISSUE_SECRET?: string;
   WEB_ISSUER_SERVICE_TOKEN?: string;
   WEB_OAUTH_REDIRECT_URI?: string;
+  MCP_BASE_URL?: string;
   TOKEN_TTL_SECONDS?: string;
   SENTRY_DSN?: string;
   SENTRY_ENVIRONMENT?: string;
