@@ -24,6 +24,27 @@ pnpm --filter @getpact/db db:migrate
 pnpm dev
 ```
 
+## Quickstart: pact init
+
+`pact init` creates a workspace on the issuer and stores admin credentials in `~/.pact/credentials`. The issuer requires a Google ID token for `POST /v1/workspaces`, so the CLI runs an OAuth 2.0 PKCE flow (RFC 7636) over a 127.0.0.1 loopback redirect.
+
+```
+PACT_GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com \
+pact init --endpoint https://issuer.getpact.dev \
+          --workspace acme \
+          --email admin@acme.com
+```
+
+The CLI binds a random loopback port, opens `https://accounts.google.com/o/oauth2/v2/auth` in your browser, captures the redirect on `http://127.0.0.1:<port>/callback`, validates the state token, exchanges the auth code with Google directly (public client, no client secret), and posts the resulting `id_token` to the issuer. The admin email must match the verified Google email.
+
+Requirements for the Google OAuth client:
+
+- Type: Web application (loopback addresses are accepted by Google for installed apps).
+- Authorized redirect URIs: leave blank (loopback ports are wildcarded by Google).
+- Pass the client id via `PACT_GOOGLE_CLIENT_ID` or `--client-id`.
+
+For local development against an issuer that sets `PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE=true`, skip the browser step with `--skip-oauth`. The CLI prints a warning and posts the workspace request without a Google token. Do not use `--skip-oauth` against any non-dev issuer; it will fail with `401 unauthorized`.
+
 ## Running tests
 
 DB-gated suites (admin, audit, gateway, issuer, mcp, verifier, vault, keystore, db, audit) require a running Postgres with `DATABASE_URL` and `RLS_TEST_DB` set.
