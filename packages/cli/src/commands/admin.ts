@@ -1,11 +1,17 @@
 import { DEFAULT_AUDIENCES } from "@getpact/core";
 import { fromBase64 } from "@getpact/crypto";
 import { createClient, type DbClient, schema, withWorkspace } from "@getpact/db";
-import { createHmacKey, loadActiveHmacKey } from "@getpact/keystore";
+import {
+  createHmacKey,
+  createSigningKey,
+  loadActiveHmacKey,
+  loadActiveSigningKey,
+} from "@getpact/keystore";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 const DEFAULT_OLDER_THAN = "7d";
 const ADAPTER_DRIVE_KIND = "adapter-drive" as const;
+const PROVENANCE_KIND = "provenance" as const;
 
 export type ParsedFlags = {
   positional: string[];
@@ -131,12 +137,14 @@ export type BackfillAction = {
   workspaceId: string;
   workspaceSlug: string;
   hmacCreated: boolean;
+  provenanceCreated: boolean;
   audiencesInserted: string[];
 };
 
 export type BackfillSummary = {
   scanned: number;
   hmacCreated: number;
+  provenanceCreated: number;
   audiencesInserted: number;
   actions: BackfillAction[];
 };
@@ -159,6 +167,27 @@ const ensureHmacKey = async (
     } catch {
       if (dryRun) return true;
       await createHmacKey(tx, { workspaceId, kind: ADAPTER_DRIVE_KIND, rawMek });
+      return true;
+    }
+  });
+};
+
+const ensureProvenanceKey = async (
+  db: DbClient,
+  workspaceId: string,
+  rawMek: Uint8Array,
+  dryRun: boolean,
+): Promise<boolean> => {
+  return withWorkspace(db, workspaceId, async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${workspaceId} || ':' || ${PROVENANCE_KIND}, ${HMAC_BACKFILL_LOCK_TAG}))`,
+    );
+    try {
+      await loadActiveSigningKey(tx, workspaceId, PROVENANCE_KIND, rawMek);
+      return false;
+    } catch {
+      if (dryRun) return true;
+      await createSigningKey(tx, { workspaceId, kind: PROVENANCE_KIND, rawMek });
       return true;
     }
   });
@@ -221,6 +250,7 @@ export const runBackfill = async (opts: BackfillOptions): Promise<BackfillSummar
 
   const actions: BackfillAction[] = [];
   let hmacCreated = 0;
+  let provenanceCreated = 0;
   let audiencesInserted = 0;
 
   for (const ws of workspaceRows) {
@@ -228,12 +258,15 @@ export const runBackfill = async (opts: BackfillOptions): Promise<BackfillSummar
       workspaceId: ws.id,
       workspaceSlug: ws.slug,
       hmacCreated: false,
+      provenanceCreated: false,
       audiencesInserted: [],
     };
 
     if (opts.what === "keys" || opts.what === "all") {
       action.hmacCreated = await ensureHmacKey(db, ws.id, opts.rawMek, opts.dryRun);
       if (action.hmacCreated) hmacCreated += 1;
+      action.provenanceCreated = await ensureProvenanceKey(db, ws.id, opts.rawMek, opts.dryRun);
+      if (action.provenanceCreated) provenanceCreated += 1;
     }
 
     if (opts.what === "audiences" || opts.what === "all") {
@@ -247,6 +280,7 @@ export const runBackfill = async (opts: BackfillOptions): Promise<BackfillSummar
   return {
     scanned: workspaceRows.length,
     hmacCreated,
+    provenanceCreated,
     audiencesInserted,
     actions,
   };
@@ -259,6 +293,7 @@ export const formatBackfillSummary = (summary: BackfillSummary, dryRun: boolean)
   for (const a of summary.actions) {
     const parts: string[] = [];
     if (a.hmacCreated) parts.push(`${prefix}create adapter-drive hmac key`);
+    if (a.provenanceCreated) parts.push(`${prefix}create provenance signing key`);
     if (a.audiencesInserted.length > 0) {
       parts.push(`${prefix}insert audiences [${a.audiencesInserted.join(", ")}]`);
     }
@@ -266,7 +301,7 @@ export const formatBackfillSummary = (summary: BackfillSummary, dryRun: boolean)
     lines.push(`${a.workspaceSlug} (${a.workspaceId}): ${parts.join("; ")}`);
   }
   lines.push(
-    `total: ${prefix}create ${summary.hmacCreated} hmac key${summary.hmacCreated === 1 ? "" : "s"}, ${prefix}insert ${summary.audiencesInserted} audience row${summary.audiencesInserted === 1 ? "" : "s"}`,
+    `total: ${prefix}create ${summary.hmacCreated} hmac key${summary.hmacCreated === 1 ? "" : "s"}, ${prefix}create ${summary.provenanceCreated} provenance key${summary.provenanceCreated === 1 ? "" : "s"}, ${prefix}insert ${summary.audiencesInserted} audience row${summary.audiencesInserted === 1 ? "" : "s"}`,
   );
   return `${lines.join("\n")}\n`;
 };

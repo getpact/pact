@@ -1,7 +1,7 @@
 import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
 import { createClient, type DbClient, withWorkspace } from "@getpact/db";
 import { workspaceAudiences, workspaceSigningKeys, workspaces } from "@getpact/db/schema";
-import { loadActiveHmacKey } from "@getpact/keystore";
+import { loadActiveHmacKey, loadActiveSigningKey } from "@getpact/keystore";
 import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runAdmin, runBackfill } from "../commands/admin.js";
@@ -85,6 +85,21 @@ run("admin backfill against postgres", () => {
     return rows.length;
   };
 
+  const countProvenanceKeys = async (workspaceId: string): Promise<number> => {
+    const rows = await withWorkspace(db, workspaceId, (tx) =>
+      tx
+        .select({ id: workspaceSigningKeys.id })
+        .from(workspaceSigningKeys)
+        .where(
+          and(
+            eq(workspaceSigningKeys.workspaceId, workspaceId),
+            eq(workspaceSigningKeys.kind, "provenance"),
+          ),
+        ),
+    );
+    return rows.length;
+  };
+
   it("creates a missing adapter-drive hmac key when --what keys", async () => {
     const wsId = await seedBareWorkspace("bk-keys");
     expect(await countAdapterDriveKeys(wsId)).toBe(0);
@@ -107,6 +122,28 @@ run("admin backfill against postgres", () => {
     expect(await countAdapterDriveKeys(wsId)).toBe(1);
   });
 
+  it("creates a missing provenance signing key when --what keys", async () => {
+    const wsId = await seedBareWorkspace("bk-prov");
+    expect(await countProvenanceKeys(wsId)).toBe(0);
+
+    const summary = await runBackfill({
+      databaseUrl: url as string,
+      rawMek,
+      workspaceId: wsId,
+      what: "keys",
+      dryRun: false,
+    });
+    expect(summary.scanned).toBe(1);
+    expect(summary.provenanceCreated).toBe(1);
+    expect(summary.actions[0]?.provenanceCreated).toBe(true);
+
+    const loaded = await withWorkspace(db, wsId, (tx) =>
+      loadActiveSigningKey(tx, wsId, "provenance", rawMek),
+    );
+    expect(loaded.id).toBeDefined();
+    expect(await countProvenanceKeys(wsId)).toBe(1);
+  });
+
   it("is idempotent on re-run", async () => {
     const wsId = await seedBareWorkspace("bk-idem");
 
@@ -118,6 +155,7 @@ run("admin backfill against postgres", () => {
       dryRun: false,
     });
     expect(first.hmacCreated).toBe(1);
+    expect(first.provenanceCreated).toBe(1);
     expect(first.audiencesInserted).toBeGreaterThan(0);
 
     const second = await runBackfill({
@@ -129,8 +167,10 @@ run("admin backfill against postgres", () => {
     });
     expect(second.scanned).toBe(1);
     expect(second.hmacCreated).toBe(0);
+    expect(second.provenanceCreated).toBe(0);
     expect(second.audiencesInserted).toBe(0);
     expect(second.actions[0]?.hmacCreated).toBe(false);
+    expect(second.actions[0]?.provenanceCreated).toBe(false);
     expect(second.actions[0]?.audiencesInserted).toEqual([]);
   });
 
@@ -148,6 +188,7 @@ run("admin backfill against postgres", () => {
     expect(summary.scanned).toBe(1);
     expect(summary.audiencesInserted).toBeGreaterThan(0);
     expect(summary.hmacCreated).toBe(0);
+    expect(summary.provenanceCreated).toBe(0);
 
     const count = await countAudiences(wsId);
     expect(count).toBe(summary.audiencesInserted);
@@ -158,6 +199,7 @@ run("admin backfill against postgres", () => {
     const wsId = await seedBareWorkspace("bk-dry");
     expect(await countAudiences(wsId)).toBe(0);
     expect(await countAdapterDriveKeys(wsId)).toBe(0);
+    expect(await countProvenanceKeys(wsId)).toBe(0);
 
     const summary = await runBackfill({
       databaseUrl: url as string,
@@ -167,10 +209,12 @@ run("admin backfill against postgres", () => {
       dryRun: true,
     });
     expect(summary.hmacCreated).toBe(1);
+    expect(summary.provenanceCreated).toBe(1);
     expect(summary.audiencesInserted).toBeGreaterThan(0);
 
     expect(await countAudiences(wsId)).toBe(0);
     expect(await countAdapterDriveKeys(wsId)).toBe(0);
+    expect(await countProvenanceKeys(wsId)).toBe(0);
   });
 
   it("runs end-to-end via the CLI entry point and prints a summary", async () => {
@@ -185,8 +229,10 @@ run("admin backfill against postgres", () => {
     const stdout = out.join("");
     expect(stdout).toContain(`(${wsId})`);
     expect(stdout).toContain("create adapter-drive hmac key");
+    expect(stdout).toContain("create provenance signing key");
     expect(stdout).toContain("insert audiences");
     expect(await countAdapterDriveKeys(wsId)).toBe(1);
+    expect(await countProvenanceKeys(wsId)).toBe(1);
     expect(await countAudiences(wsId)).toBeGreaterThanOrEqual(5);
   });
 });
