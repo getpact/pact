@@ -114,3 +114,43 @@ export const buildGoogleAuthorizeUrl = (params: {
 };
 
 export const newState = (): string => base64url(nodeRandomBytes(16));
+
+export type PublicTokenExchangeInput = {
+  clientId: string;
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
+  tokenEndpoint?: string;
+};
+
+export type PublicTokenExchangeResult = {
+  idToken: string;
+};
+
+const DEFAULT_GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+
+export const exchangeGoogleCodePublic = async (
+  input: PublicTokenExchangeInput,
+): Promise<PublicTokenExchangeResult> => {
+  const endpoint = input.tokenEndpoint ?? DEFAULT_GOOGLE_TOKEN_ENDPOINT;
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: input.clientId,
+      code: input.code,
+      code_verifier: input.codeVerifier,
+      grant_type: "authorization_code",
+      redirect_uri: input.redirectUri,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`google token exchange failed (${res.status}): ${text}`);
+  }
+  const body = (await res.json()) as { id_token?: unknown };
+  if (typeof body.id_token !== "string" || body.id_token.length === 0) {
+    throw new Error("google token exchange returned no id_token");
+  }
+  return { idToken: body.id_token };
+};
