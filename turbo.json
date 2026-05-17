@@ -18,7 +18,9 @@
         "MCP_AUDIENCE",
         "GATEWAY_AUDIENCE",
         "PG_POOL_MAX",
-        "PG_IDLE_TIMEOUT"
+        "PG_IDLE_TIMEOUT",
+        "LOG_LEVEL",
+        "PACT_QUIET_PG_NOTICES"
       ]
     },
     "typecheck": {
