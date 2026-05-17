@@ -88,3 +88,32 @@ export const evaluate = (input: EvaluateInput): EvaluateResult => {
   }
   return { allow: false, reasons: ["default deny"] };
 };
+
+export type ScopeSubject = {
+  groups: string[];
+};
+
+const isStringArray = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((x) => typeof x === "string");
+
+// group_in: subject must hold at least one of the listed group names.
+// Returns null when the predicate does not apply, so callers can compose with
+// other scope-matching logic and only fail when this predicate explicitly denies.
+export const matchGroupInPredicate = (
+  scopeValue: unknown,
+  subject: ScopeSubject,
+): boolean | null => {
+  if (!isStringArray(scopeValue)) return null;
+  if (scopeValue.length === 0) return false;
+  const have = new Set(subject.groups);
+  return scopeValue.some((g) => have.has(g));
+};
+
+export const scopeAllowsGroupIn = (
+  scope: Record<string, unknown>,
+  subject: ScopeSubject,
+): boolean => {
+  if (!("group_in" in scope)) return true;
+  const result = matchGroupInPredicate(scope.group_in, subject);
+  return result === true;
+};

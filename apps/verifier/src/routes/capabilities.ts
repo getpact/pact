@@ -11,6 +11,7 @@ import {
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys, loadActiveSigningKey } from "@getpact/keystore";
+import { matchGroupInPredicate } from "@getpact/policy";
 import { eq, sql } from "drizzle-orm";
 import type { Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -124,18 +125,50 @@ const matchPattern = (scopeValue: unknown, requested: unknown): boolean => {
     return scopeValue.some((v) => matchPattern(v, requested));
   }
   if (isPlainObject(scopeValue) && isPlainObject(requested)) {
+    // Nested scopes are evaluated with an empty subject context. group_in is
+    // only meaningful at the top level where the actor identity is known.
     return matchScope(scopeValue, requested);
   }
   return scopeValue === requested;
 };
 
-const matchScope = (scope: Record<string, unknown>, resource: Record<string, unknown>): boolean => {
+export type ScopeContext = {
+  subjectGroups: string[];
+};
+
+const matchScope = (
+  scope: Record<string, unknown>,
+  resource: Record<string, unknown>,
+  ctx?: ScopeContext,
+): boolean => {
   for (const [k, v] of Object.entries(scope)) {
     if (k === "tool_name") continue;
+    if (k === "group_in") {
+      const groupCheck = matchGroupInPredicate(v, { groups: ctx?.subjectGroups ?? [] });
+      if (groupCheck === true) continue;
+      return false;
+    }
     if (!(k in resource)) return false;
     if (!matchPattern(v, resource[k])) return false;
   }
   return true;
+};
+
+export const subjectGroups = async (
+  tx: Tx,
+  workspaceId: string,
+  userId: string,
+): Promise<string[]> => {
+  const rows = (await tx.execute(
+    sql`SELECT g.name AS name
+        FROM group_members gm
+        JOIN groups g ON g.id = gm.group_id
+        WHERE gm.workspace_id = ${workspaceId}
+          AND gm.user_id = ${userId}::uuid
+          AND gm.revoked_at IS NULL
+          AND g.revoked_at IS NULL`,
+  )) as Array<{ name: string }>;
+  return rows.map((r) => r.name);
 };
 
 const exportEd25519PublicJwk = async (
@@ -535,7 +568,13 @@ export const registerCapabilityRoutes = (app: Hono<any>): void => {
         return { ok: false, status: 403, reasons: ["audience_mismatch"] };
       }
 
-      if (!matchScope(inv.scope_claim, body.resource)) {
+      const needsGroups =
+        isPlainObject(inv.scope_claim) && Object.hasOwn(inv.scope_claim, "group_in");
+      const groupsForSubject =
+        needsGroups && inv.on_behalf_of_user_id
+          ? await subjectGroups(tx, workspaceId, inv.on_behalf_of_user_id)
+          : [];
+      if (!matchScope(inv.scope_claim, body.resource, { subjectGroups: groupsForSubject })) {
         await writeCapabilityAudit(
           tx,
           workspaceId,
