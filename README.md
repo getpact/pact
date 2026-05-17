@@ -66,6 +66,30 @@ PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap list
 PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap revoke <id> --reason "..."
 ```
 
+## Connecting Cursor, Claude Code, and Codex
+
+MCP clients like Cursor, Claude Code, and Codex cannot sign holder-bound KB-JWTs on their own. The `pact mcp bridge` subcommand runs a local HTTP server that holds the holder Ed25519 key, signs a fresh KB-JWT on every forwarded call, and proxies to the remote MCP endpoint.
+
+Run the bridge:
+
+```
+PACT_SD_JWT=<sd-jwt compact form> pact mcp bridge --upstream https://mcp.example.com/acme/mcp --port 8765
+```
+
+The bridge defaults to `127.0.0.1:8765`. The audience is taken from the SD-JWT `aud` claim unless `--audience` is passed. The holder key is stored at `~/.pact/holder.key` (mode 0600 in a 0700 directory) and is reused across restarts. Delete the file to rotate.
+
+Point each client at the local bridge:
+
+```
+{ "mcpServers": { "pact-acme": { "url": "http://localhost:8765/mcp" } } }
+```
+
+For Claude Code add the entry to `~/.config/claude-code/config.json` under `mcpServers`. For Cursor and Codex use the same shape in their respective MCP config files.
+
+`--host 0.0.0.0` is supported but not recommended: the bridge signs every forwarded call with the holder key, so anything that can reach the listener can mint presentations until the SD-JWT expires.
+
+The SD-JWT in `PACT_SD_JWT` is readable through `/proc/<pid>/environ` on Linux. For longer-running deployments, prefer a wrapper that reads the token from a file with restricted permissions before exec-ing the bridge.
+
 ## Packages
 
 OSS (MIT):
