@@ -22,8 +22,17 @@ export type VerifyResult =
   | { ok: false; brokenAt: { index: number; reason: string } };
 
 const normalizeTs = (ts: string | Date): string => {
-  if (ts instanceof Date) return ts.toISOString();
-  return new Date(ts).toISOString();
+  if (ts === null || ts === undefined) {
+    throw new Error(`audit chain verify: invalid ts: ${String(ts)}`);
+  }
+  if (typeof ts === "string" && ts.length === 0) {
+    throw new Error("audit chain verify: invalid ts: ");
+  }
+  const d = ts instanceof Date ? ts : new Date(ts as string | Date);
+  if (Number.isNaN(d.getTime())) {
+    throw new Error(`audit chain verify: invalid ts: ${String(ts)}`);
+  }
+  return d.toISOString();
 };
 
 const buildCanonicalBody = (event: StoredEvent) => ({

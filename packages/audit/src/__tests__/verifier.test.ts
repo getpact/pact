@@ -162,6 +162,21 @@ describe("verifyChain", () => {
     expect(result.ok).toBe(true);
   });
 
+  it.each([
+    ["null", null as unknown as string],
+    ["NaN-numeric", Number.NaN as unknown as string],
+    ["empty string", ""],
+    ["gibberish", "not-a-date"],
+  ])("rejects invalid ts (%s)", async (_label, badTs) => {
+    const { privateKey, publicKey } = await generateEd25519Keypair();
+    const genesis = await computeGenesisHash(workspaceId, createdAt);
+    const events = await buildChain(workspaceId, genesis, privateKey, 1);
+    const broken: StoredEvent[] = events.map((e) => ({ ...e, ts: badTs }));
+    await expect(verifyChain(broken, { "ws-audit-v1": publicKey }, genesis)).rejects.toThrow(
+      /invalid ts/,
+    );
+  });
+
   it("fails with wrong genesis", async () => {
     const { privateKey, publicKey } = await generateEd25519Keypair();
     const genesis = await computeGenesisHash(workspaceId, createdAt);
