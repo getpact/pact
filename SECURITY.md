@@ -44,6 +44,7 @@ Residual:
 - Two concurrent verifier instances can both accept a replayed KB-JWT in the narrow window before the first transaction commits. The unique index serializes them; the second commit fails and is denied. There is no global lock before insert.
 - The SDK `replayCache` is per-process; multi-process consumers without a shared cache rely on the verifier as the canonical replay arbiter.
 - An attacker who controls both the issuer key and the holder key can mint and replay at will; this is outside the threat model.
+- The `kbjwt_replay_log` path is only exercised when `max_redeems > 1`. With `max_redeems = 1` the token is revoked on the first successful redeem, so any second presentation is rejected by the revocation check as `token_revoked` before the replay log is consulted. The replay defense is still in place; the surfaced reason code just changes. Operators who want `kb_replay_detected` to appear in audit must mint with `max_redeems >= 2`.
 
 ### 2. Send caps (recipient consent for brain writes)
 
