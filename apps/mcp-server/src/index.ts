@@ -14,7 +14,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { authenticate } from "./auth.js";
 import { handleMcp } from "./handler.js";
-import { httpVerifyClient } from "./verify-client.js";
+import { httpRedeemClient, httpVerifyClient } from "./verify-client.js";
 
 type Env = {
   DATABASE_URL: string;
@@ -105,6 +105,7 @@ app.post("/:workspace/mcp", async (c) => {
   const body = await c.req.json();
   const verifier = c.env.VERIFIER_SERVICE ?? c.env.VERIFIER_URL;
   const verify = verifier ? httpVerifyClient(verifier, c.env.VERIFIER_SERVICE_TOKEN) : undefined;
+  const redeem = verifier ? httpRedeemClient(verifier, c.env.VERIFIER_SERVICE_TOKEN) : undefined;
   const response = await handleMcp(body, ctx, {
     audience,
     deps: {
@@ -118,6 +119,7 @@ app.post("/:workspace/mcp", async (c) => {
       },
     },
     ...(verify ? { verify } : {}),
+    ...(redeem ? { redeem } : {}),
   });
   if (response.error) {
     const bodyRecord =

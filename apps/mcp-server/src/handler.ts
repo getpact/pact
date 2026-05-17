@@ -1,7 +1,7 @@
 import { defaultToolAuthorization } from "@getpact/adapter-sdk";
 import type { AuthContext } from "./auth.js";
 import { createConfiguredToolRegistry, listTools, type Tool, type ToolDeps } from "./tools.js";
-import type { VerifyClient } from "./verify-client.js";
+import type { RedeemClient, VerifyClient } from "./verify-client.js";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -37,6 +37,7 @@ const err = (
 export type HandleOptions = {
   audience: string;
   verify?: VerifyClient;
+  redeem?: RedeemClient;
   deps: ToolDeps;
   registry?: Map<string, Tool>;
 };
@@ -68,11 +69,36 @@ export const handleMcp = async (
       if (!tool) return err(id, -32601, `unknown tool: ${name}`);
 
       const authorization = tool.authorize?.(args, ctx) ?? defaultToolAuthorization(name);
-      if (!opts.verify) {
-        return err(id, -32002, "verifier unavailable");
-      }
 
-      {
+      if (ctx.kind === "sd_jwt") {
+        if (!opts.redeem) {
+          return err(id, -32002, "verifier unavailable");
+        }
+        let verdict: Awaited<ReturnType<RedeemClient>>;
+        try {
+          verdict = await opts.redeem({
+            sd_jwt: ctx.token,
+            jti: ctx.jti,
+            tool_name: name,
+            resource: {
+              tool_name: name,
+              resource: authorization.resource,
+              action: authorization.action,
+            },
+          });
+        } catch {
+          return err(id, -32002, "verification failed");
+        }
+        if (!verdict.allow) {
+          return err(id, -32001, "denied", {
+            reasons: verdict.reasons,
+            status: verdict.status,
+          });
+        }
+      } else {
+        if (!opts.verify) {
+          return err(id, -32002, "verifier unavailable");
+        }
         let verdict: Awaited<ReturnType<VerifyClient>>;
         try {
           verdict = await opts.verify({
