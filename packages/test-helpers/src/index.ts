@@ -8,6 +8,7 @@ export type TestEnv = {
   ISSUER_BASE_URL: string;
   ENVIRONMENT: string;
   ENABLE_DEV_ISSUE: string;
+  PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE: string;
   ADMIN_AUDIENCE: string;
   AUDIT_AUDIENCE: string;
   MCP_AUDIENCE: string;
@@ -23,6 +24,7 @@ export const buildTestEnv = async (databaseUrl: string): Promise<TestEnv> => {
     ISSUER_BASE_URL: "https://issuer.test/acme",
     ENVIRONMENT: "test",
     ENABLE_DEV_ISSUE: "true",
+    PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE: "true",
     ADMIN_AUDIENCE: "pact-admin",
     AUDIT_AUDIENCE: "pact-audit",
     MCP_AUDIENCE: "pact-mcp",
