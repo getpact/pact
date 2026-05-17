@@ -328,6 +328,19 @@ importers:
         version: 4.90.0(@cloudflare/workers-types@4.20260509.1)
 
   examples/god-mode-demo:
+    dependencies:
+      '@getpact/adapter-drive':
+        specifier: workspace:*
+        version: link:../../packages/adapter-drive
+      '@getpact/verifier-sdk':
+        specifier: workspace:*
+        version: link:../../packages/verifier-sdk-node
+      canonicalize:
+        specifier: ^2.0.0
+        version: 2.1.0
+      jose:
+        specifier: ^5.9.0
+        version: 5.10.0
     devDependencies:
       '@types/node':
         specifier: ^22.0.0

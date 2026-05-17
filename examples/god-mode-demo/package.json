@@ -8,9 +8,16 @@
     "demo:seed": "tsx seed.ts",
     "demo:before": "tsx before.ts",
     "demo:after": "tsx after.ts",
+    "demo:full-stack": "tsx full-stack.ts",
     "demo:run": "bash run.sh",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@getpact/adapter-drive": "workspace:*",
+    "@getpact/verifier-sdk": "workspace:*",
+    "canonicalize": "^2.0.0",
+    "jose": "^5.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

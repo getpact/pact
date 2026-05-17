@@ -115,12 +115,41 @@ under a minute. The live path is what proves the wiring works end to end.
 Operators are welcome to record their own walkthrough (Loom, asciinema,
 etc.). No artifact is committed to the repo.
 
+## Full-stack scenario
+
+`full-stack.ts` is a self-contained scenario that exercises the crypto
+primitives the daily demo glosses over. It runs in-process, no DB or
+network required.
+
+```
+pnpm --filter @getpact/example-god-mode demo:full-stack
+```
+
+Six steps, one line of output each:
+
+1. Setup: workspace id, alice (writer), bob (recipient).
+2. Consent: bob mints a SendCap granting alice permission to address him as
+   audience.
+3. Ingest: alice calls `brain.put` for `gdrive://doc/Q4-planning`. Without a
+   drive attestation the call returns 403 `drive_attestation_invalid`. With
+   a valid HMAC attestation it returns 201 with a page id.
+4. Search: bob calls `brain.search`. The result list is filtered by his
+   audience. Each hit carries an Ed25519 provenance signature.
+5. Verify provenance: `verifyProvenance` from `@getpact/verifier-sdk`
+   asserts the signature. A tampered `source_uri` is rejected with
+   `signature_mismatch`.
+6. Mint capability and verify: an SD-JWT with KB-JWT presentation is
+   verified by `verifyPactToken`. A replay of the same KB-JWT is rejected
+   with `kb_replay_detected`.
+
 ## Files
 
 - `seed.ts` - ingests the fixture into the brain via `pact.brain.put`
 - `before.ts` - god-mode path
 - `after.ts` - scoped path
+- `full-stack.ts` - in-process scenario covering SendCap, drive attestation, audience filter, provenance signing, and capability verify
 - `drive-fixture.json` - 5000 files, 20 folders, 12 in `folder_X`
 - `run.sh` - one-shot runner that prints before, after, and the diff
 - `__tests__/demo.test.ts` - call-shape and diff-math tests
-- `package.json` - scripts (`demo:seed`, `demo:before`, `demo:after`, `demo:run`, `test`, `typecheck`)
+- `__tests__/full-stack.test.ts` - in-process assertions for the full-stack scenario
+- `package.json` - scripts (`demo:seed`, `demo:before`, `demo:after`, `demo:full-stack`, `demo:run`, `test`, `typecheck`)
