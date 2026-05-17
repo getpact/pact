@@ -4,9 +4,7 @@ import { computeGenesisHash, type StoredEvent, verifyChain } from "@getpact/audi
 import { type Ed25519PublicJwk, generateEd25519Keypair, sdjwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import {
-  agentCapabilityGrants,
   agentInvocations,
-  agents,
   auditEvents,
   groupMembers,
   groups,
@@ -190,54 +188,63 @@ run("composition end-to-end demo loop", () => {
     );
     expect(memberRes.status).toBe(201);
 
-    // Step 6: there is no admin-api route for agents or capability grants
-    // today, so seed them directly. This is the same path the existing
-    // issuer mint tests use. The drift is documented in the test report.
+    // Step 6: create the agent and its grants via the admin-api routes. The
+    // holder keypair is generated locally so the test retains the private
+    // key needed to sign kb-jwts; only the public JWK is sent to the server.
     const agentPair = await generateEd25519Keypair();
     const agentPubJwk = await exportEd25519Jwk(agentPair.publicKey);
-    const agentSlug = `agent-${Date.now().toString(36)}`;
-    const agentThumb = await sdjwt.jwkThumbprint(agentPubJwk);
-    const { agentId, grantId } = await withWorkspace(adminDb, wsId, async (tx) => {
-      const [agentRow] = await tx
-        .insert(agents)
-        .values({
-          workspaceId: wsId,
-          slug: agentSlug,
-          displayName: "Composition Agent",
-          kind: "service",
-          ownerUserId: created.adminUserId,
-          pubkeyJwk: agentPubJwk,
-          pubkeyThumbprint: agentThumb,
-        })
-        .returning({ id: agents.id });
-      if (!agentRow) throw new Error("agent insert failed");
-      const [grantRow] = await tx
-        .insert(agentCapabilityGrants)
-        .values({
-          workspaceId: wsId,
-          agentId: agentRow.id,
-          onBehalfOfUserId: alice2Id,
-          toolName: "pact.brain.search",
+    const agentRes = await callJson(
+      adminApi,
+      `/v1/workspaces/${wsId}/agents`,
+      {
+        method: "POST",
+        headers: authHeaders(adminToken),
+        body: JSON.stringify({
+          name: `agent-${Date.now().toString(36)}`,
+          owner_user_id: created.adminUserId,
+          pubkey_jwk: agentPubJwk,
+        }),
+      },
+      adminEnv,
+    );
+    expect(agentRes.status).toBe(201);
+    const agentId = (agentRes.body as { agent: { id: string } }).agent.id;
+
+    const grantRes = await callJson(
+      adminApi,
+      `/v1/workspaces/${wsId}/agents/${agentId}/grants`,
+      {
+        method: "POST",
+        headers: authHeaders(adminToken),
+        body: JSON.stringify({
+          tool_name: "pact.brain.search",
+          audience: "pact-mcp",
           scope: { group_in: ["eng"] },
-          audience: ["pact-mcp"],
-          createdByUserId: created.adminUserId,
-        })
-        .returning({ id: agentCapabilityGrants.id });
-      if (!grantRow) throw new Error("grant insert failed");
-      // Seed a second grant for pact.whoami so step 11b can mint another
-      // capability targeting the mcp-server's built-in whoami tool.
-      await tx.insert(agentCapabilityGrants).values({
-        workspaceId: wsId,
-        agentId: agentRow.id,
-        onBehalfOfUserId: alice2Id,
-        toolName: "pact.whoami",
-        scope: {},
-        audience: ["pact-mcp"],
-        createdByUserId: created.adminUserId,
-      });
-      return { agentId: agentRow.id, grantId: grantRow.id };
-    });
+          on_behalf_of_user_id: alice2Id,
+        }),
+      },
+      adminEnv,
+    );
+    expect(grantRes.status).toBe(201);
+    const grantId = (grantRes.body as { grant: { id: string } }).grant.id;
     expect(grantId).toBeTruthy();
+
+    const whoamiGrantRes = await callJson(
+      adminApi,
+      `/v1/workspaces/${wsId}/agents/${agentId}/grants`,
+      {
+        method: "POST",
+        headers: authHeaders(adminToken),
+        body: JSON.stringify({
+          tool_name: "pact.whoami",
+          audience: "pact-mcp",
+          scope: {},
+          on_behalf_of_user_id: alice2Id,
+        }),
+      },
+      adminEnv,
+    );
+    expect(whoamiGrantRes.status).toBe(201);
 
     // Step 7: mint the capability SD-JWT via the issuer. The holder is the
     // agent keypair generated above; its public JWK is the cnf.
