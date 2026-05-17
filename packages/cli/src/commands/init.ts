@@ -112,7 +112,9 @@ export const runInit = async (opts: InitOptions, io: InitIo = defaultIo): Promis
       googleIdToken = await opts.fetchIdToken({ redirectUri: "" });
     } else {
       if (!opts.clientId) {
-        throw new Error("missing google client id: set PACT_GOOGLE_CLIENT_ID or pass --client-id");
+        throw new Error(
+          "missing google client id: set PACT_GOOGLE_CLIENT_ID (or PACT_GOOGLE_CLIENT) or pass --client-id",
+        );
       }
       googleIdToken = await runOauthIdToken({
         clientId: opts.clientId,
@@ -178,7 +180,8 @@ export const runInitFromArgv = async (
   const name = parseFlag(argv, "name") ?? env.PACT_NAME ?? slug;
   const adminName = parseFlag(argv, "admin-name") ?? env.PACT_ADMIN_NAME;
   const audience = env.PACT_AUDIENCE ?? "pact-mcp";
-  const clientId = parseFlag(argv, "client-id") ?? env.PACT_GOOGLE_CLIENT_ID;
+  const clientId =
+    parseFlag(argv, "client-id") ?? env.PACT_GOOGLE_CLIENT_ID ?? env.PACT_GOOGLE_CLIENT;
   const skipOauth = hasFlag(argv, "skip-oauth");
 
   if (!slug) throw new Error("missing workspace slug: pass --workspace or set PACT_SLUG");

@@ -283,4 +283,136 @@ describe("runInit flow", () => {
       runInitFromArgv(["--workspace", "x", "--email", "y@z.dev"], { env: {} }),
     ).rejects.toThrow(/google client id/);
   });
+
+  it("runInitFromArgv falls back to PACT_GOOGLE_CLIENT when CLIENT_ID is unset", async () => {
+    // Mock the OAuth loopback so resolution can be observed without a browser.
+    const seen: { clientId?: string } = {};
+    vi.doMock("../oauth.js", async (importOriginal) => {
+      const actual = (await importOriginal()) as Record<string, unknown>;
+      return {
+        ...actual,
+        captureLoopbackCallback: async () => ({
+          port: 1,
+          redirectUri: "http://127.0.0.1:1/callback",
+          awaitCallback: async () => ({ code: "c", state: "s" }),
+        }),
+        openBrowser: () => undefined,
+        newState: () => "s",
+        generatePkce: async () => ({ codeVerifier: "v", codeChallenge: "ch" }),
+        buildGoogleAuthorizeUrl: (params: { clientId: string }) => {
+          seen.clientId = params.clientId;
+          return "https://accounts.google.com/o/oauth2/v2/auth";
+        },
+        exchangeGoogleCodePublic: async (params: { clientId: string }) => {
+          seen.clientId = params.clientId;
+          return { idToken: "fake.id.token" };
+        },
+      };
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = input.toString();
+        if (url.endsWith("/v1/workspaces")) {
+          return Response.json(
+            {
+              workspaceId: "ws-c",
+              adminUserId: "u-c",
+              jwtKeyId: "k",
+              auditKeyId: "k",
+            },
+            { status: 201 },
+          );
+        }
+        if (url.endsWith("/v1/dev/issue")) {
+          return Response.json({
+            token: "t",
+            jti: "j",
+            exp: 1_900_000_000,
+            userId: "u-c",
+            refreshToken: "r",
+            refreshExpiresAt: "2099-01-01T00:00:00Z",
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+    const { runInitFromArgv } = await import("../commands/init.js");
+    await runInitFromArgv(
+      ["--endpoint", "https://compat.test", "--workspace", "compat", "--email", "u@compat.dev"],
+      {
+        env: { PACT_GOOGLE_CLIENT: "legacy.apps.googleusercontent.com" },
+        io: { out: () => {}, err: () => {} },
+      },
+    );
+    expect(seen.clientId).toBe("legacy.apps.googleusercontent.com");
+    vi.doUnmock("../oauth.js");
+  });
+
+  it("runInitFromArgv prefers PACT_GOOGLE_CLIENT_ID over PACT_GOOGLE_CLIENT", async () => {
+    const seen: { clientId?: string } = {};
+    vi.doMock("../oauth.js", async (importOriginal) => {
+      const actual = (await importOriginal()) as Record<string, unknown>;
+      return {
+        ...actual,
+        captureLoopbackCallback: async () => ({
+          port: 1,
+          redirectUri: "http://127.0.0.1:1/callback",
+          awaitCallback: async () => ({ code: "c", state: "s" }),
+        }),
+        openBrowser: () => undefined,
+        newState: () => "s",
+        generatePkce: async () => ({ codeVerifier: "v", codeChallenge: "ch" }),
+        buildGoogleAuthorizeUrl: (params: { clientId: string }) => {
+          seen.clientId = params.clientId;
+          return "https://accounts.google.com/o/oauth2/v2/auth";
+        },
+        exchangeGoogleCodePublic: async (params: { clientId: string }) => {
+          seen.clientId = params.clientId;
+          return { idToken: "fake.id.token" };
+        },
+      };
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = input.toString();
+        if (url.endsWith("/v1/workspaces")) {
+          return Response.json(
+            {
+              workspaceId: "ws-p",
+              adminUserId: "u-p",
+              jwtKeyId: "k",
+              auditKeyId: "k",
+            },
+            { status: 201 },
+          );
+        }
+        if (url.endsWith("/v1/dev/issue")) {
+          return Response.json({
+            token: "t",
+            jti: "j",
+            exp: 1_900_000_000,
+            userId: "u-p",
+            refreshToken: "r",
+            refreshExpiresAt: "2099-01-01T00:00:00Z",
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+    const { runInitFromArgv } = await import("../commands/init.js");
+    await runInitFromArgv(
+      ["--endpoint", "https://pref.test", "--workspace", "pref", "--email", "u@pref.dev"],
+      {
+        env: {
+          PACT_GOOGLE_CLIENT_ID: "preferred.apps.googleusercontent.com",
+          PACT_GOOGLE_CLIENT: "legacy.apps.googleusercontent.com",
+        },
+        io: { out: () => {}, err: () => {} },
+      },
+    );
+    expect(seen.clientId).toBe("preferred.apps.googleusercontent.com");
+    vi.doUnmock("../oauth.js");
+  });
 });

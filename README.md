@@ -41,7 +41,7 @@ Requirements for the Google OAuth client:
 
 - Type: Web application (loopback addresses are accepted by Google for installed apps).
 - Authorized redirect URIs: leave blank (loopback ports are wildcarded by Google).
-- Pass the client id via `PACT_GOOGLE_CLIENT_ID` or `--client-id`.
+- Pass the client id via `PACT_GOOGLE_CLIENT_ID` or `--client-id`. `PACT_GOOGLE_CLIENT` is honored as a fallback for users with an existing `pact login` setup; `PACT_GOOGLE_CLIENT_ID` wins when both are set.
 
 For local development against an issuer that sets `PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE=true`, skip the browser step with `--skip-oauth`. The CLI prints a warning and posts the workspace request without a Google token. Do not use `--skip-oauth` against any non-dev issuer; it will fail with `401 unauthorized`.
 
