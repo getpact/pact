@@ -86,21 +86,22 @@ What it protects: a search hit returned by `pact.brain.search` was actually comp
 Attack: a compromised middleware between brain and verifier swaps the hits and reports a different source for a chunk than what was actually retrieved.
 
 Mitigations:
-- Each hit's provenance metadata is signed with the workspace `audit` Ed25519 signing key, JCS-canonicalized, returned as base64url (`apps/mcp-server/src/tools/brain.ts:612-695`).
-- `kid` returned alongside signature so SDK can pin verification to a key from the workspace JWKS.
+- Each hit's provenance metadata is signed with a dedicated workspace `provenance` Ed25519 signing key, JCS-canonicalized, returned as base64url (`apps/mcp-server/src/tools/brain.ts:612-695`).
+- `kid` returned alongside signature so SDK can pin verification to a key from the workspace provenance JWKS (`/v1/workspaces/:id/.well-known/provenance-jwks.json`).
 - SDK `verifyProvenance` checks signature, `issued_at` freshness (default 3600s), and that the provenance shape is complete (`packages/verifier-sdk-node/src/verifyProvenance.ts`).
+- The provenance signing kind is distinct from `audit`, so compromise of the audit signing key no longer forges search-hit provenance and vice versa. Rotation cadence is set independently per kind.
 
 Residual:
 - Only metadata is signed, not the snippet body. An attacker who can rewrite `snippet` while preserving the signed tuple is not detected by signature verification alone. Higher-trust deployments should add chunk-content hashing into the signed payload.
 - If `deps.rawMek` is unavailable, brain.search falls back to an unsigned `provenanceBase` (`apps/mcp-server/src/tools/brain.ts:627-641`). SDK consumers must reject hits with `missing_signature_fields` rather than accept them.
-- The signing key is reused from the `audit` kind. Compromise of the audit signing key forges both audit events and provenance.
+- Workspaces created before the provenance kind shipped have no `provenance` key. brain.search will return unsigned hits until the operator runs `pact admin backfill --what keys`, which seeds the missing key under an advisory lock. Track backfill completion before relying on signed provenance for legacy tenants.
 
 ### 5. Audit chain
 
 - Hash-linked + Ed25519-signed events under the workspace `audit` signing key, ordered by `audit_seq` with `pg_advisory_xact_lock` per workspace (`packages/audit/src/writer.ts:29-91`).
 - Genesis hash binds `(workspaceId, workspaceCreatedAt)` so the chain cannot be silently reseeded.
 - Admin mutations write audit in the same transaction as the mutation; audit failure rolls back mutation and returns 503.
-- `pact admin prune-replay-log --older-than 7d` purges old `kbjwt_replay_log` rows; the primary key still prevents replay regardless of retention window.
+- Old `kbjwt_replay_log` rows are purged on a daily Worker schedule in `pact-admin-api` (`0 3 * * *` UTC, see `apps/admin-api/wrangler.toml`) via `prune_kbjwt_replay_log`; `PACT_REPLAY_RETENTION_DAYS` overrides the default 7 day window. The `pact admin prune-replay-log --older-than 7d` CLI remains for ad-hoc runs. The primary key still prevents replay regardless of retention window.
 
 Residual: the chain is tamper-evident, not tamper-proof. An operator with direct Postgres access can rewrite history and resign forward; detection requires periodic external anchoring, which is not in v1.
 
