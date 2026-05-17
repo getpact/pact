@@ -554,6 +554,9 @@ importers:
 
   packages/verifier-sdk-node:
     dependencies:
+      '@getpact/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       canonicalize:
         specifier: ^2.0.0
         version: 2.1.0

@@ -1,7 +1,7 @@
 import { writeEvent } from "@getpact/audit";
 import { authenticateBearer, type BearerClaims } from "@getpact/auth";
 import { canonicalizeEmail, isUuid } from "@getpact/core";
-import { sdjwt } from "@getpact/crypto";
+import { sdjwt, validateCnfJwk } from "@getpact/crypto";
 import type { Tx } from "@getpact/db";
 import { createClient, withWorkspace } from "@getpact/db";
 import { revokedJtis, workspaceAudiences, workspaces } from "@getpact/db/schema";
@@ -96,15 +96,11 @@ const parseMintBody = (body: MintBody): ParsedMint | string => {
     if (typeof body.intent_jti !== "string") return "intent_jti must be a string";
     intentJti = body.intent_jti;
   }
-  if (
-    body.cnf_jwk === undefined ||
-    body.cnf_jwk === null ||
-    typeof body.cnf_jwk !== "object" ||
-    Array.isArray(body.cnf_jwk)
-  ) {
-    return "cnf_jwk is required and must be an object";
+  const validatedCnf = validateCnfJwk(body.cnf_jwk);
+  if ("error" in validatedCnf) {
+    return validatedCnf.error;
   }
-  const cnfJwk = body.cnf_jwk as Record<string, unknown>;
+  const cnfJwk = validatedCnf as unknown as Record<string, unknown>;
   return {
     onBehalfOf: body.on_behalf_of,
     toolName: body.tool_name,

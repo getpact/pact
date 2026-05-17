@@ -1,4 +1,4 @@
-import { type Ed25519PublicJwk, signEd25519, verifyEd25519 } from "./ed25519.js";
+import { type Ed25519PublicJwk, signEd25519, validateCnfJwk, verifyEd25519 } from "./ed25519.js";
 import { fromBase64Url, sha256, toBase64Url } from "./hash.js";
 import { jcsCanonicalize } from "./jcs.js";
 
@@ -237,15 +237,19 @@ export const verifySdJwt = async (opts: VerifySdJwtOptions): Promise<VerifySdJwt
 
   let kbClaims: Record<string, unknown> | undefined;
   if (kbJwt) {
-    const cnf = claims.cnf as { jwk?: Ed25519PublicJwk } | undefined;
+    const cnf = claims.cnf as { jwk?: unknown } | undefined;
     if (!cnf?.jwk) {
       throw new SdJwtError("kb_without_cnf", "kb-jwt presented but issuer jwt has no cnf.jwk");
+    }
+    const validated = validateCnfJwk(cnf.jwk);
+    if ("error" in validated) {
+      throw new SdJwtError("kb_cnf_invalid", validated.error);
     }
     const parsedKb = splitJws(kbJwt);
     if (parsedKb.header.typ !== KB_JWT_TYP) {
       throw new SdJwtError("kb_wrong_typ", `kb-jwt typ must be ${KB_JWT_TYP}`);
     }
-    const holderKey = await importEd25519Verify(cnf.jwk);
+    const holderKey = await importEd25519Verify(validated);
     const kbOk = await verifyEd25519(holderKey, parsedKb.signingInput, parsedKb.signature);
     if (!kbOk) {
       throw new SdJwtError("kb_sig_invalid", "kb-jwt signature did not verify under cnf.jwk");

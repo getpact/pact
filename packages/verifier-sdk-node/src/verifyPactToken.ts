@@ -1,3 +1,4 @@
+import { validateCnfJwk } from "@getpact/crypto";
 import { compactVerify, decodeProtectedHeader, importJWK, type KeyLike } from "jose";
 import { type JwksCache, JwksFetchError, sharedJwksCache } from "./jwks.js";
 
@@ -283,12 +284,13 @@ export async function verifyPactToken(
   if (!isPlainObject(cnf) || !isPlainObject(cnf.jwk)) {
     return deny("kb_binding_invalid", "issuer payload missing cnf.jwk");
   }
+  const validatedCnf = validateCnfJwk(cnf.jwk);
+  if ("error" in validatedCnf) {
+    return deny("kb_binding_invalid", validatedCnf.error);
+  }
   let holderKey: KeyLike | Uint8Array;
   try {
-    holderKey = await importJWK(
-      cnf.jwk as unknown as Parameters<typeof importJWK>[0],
-      kbHeader.alg ?? "EdDSA",
-    );
+    holderKey = await importJWK(validatedCnf, kbHeader.alg ?? "EdDSA");
   } catch (err) {
     return deny("kb_binding_invalid", err instanceof Error ? err.message : String(err));
   }

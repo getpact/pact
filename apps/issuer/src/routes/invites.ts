@@ -1,6 +1,6 @@
 import { writeEvent } from "@getpact/audit";
 import { canonicalizeEmail, isUuid } from "@getpact/core";
-import { type Ed25519PublicJwk, fromBase64Url, sdjwt } from "@getpact/crypto";
+import { type Ed25519PublicJwk, fromBase64Url, sdjwt, validateCnfJwk } from "@getpact/crypto";
 import { createClient, type Tx, withWorkspace } from "@getpact/db";
 import { invites, workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys, loadActiveSigningKey } from "@getpact/keystore";
@@ -33,19 +33,9 @@ const parseAccept = (body: unknown): ParsedAccept | string => {
   if (typeof body.google_id_token !== "string" || body.google_id_token.length === 0) {
     return "google_id_token is required";
   }
-  if (!isRecord(body.cnf_jwk)) {
-    return "cnf_jwk is required and must be an object";
-  }
-  const j = body.cnf_jwk;
-  if (j.kty !== "OKP" || j.crv !== "Ed25519" || typeof j.x !== "string") {
-    return "cnf_jwk must be an Ed25519 OKP jwk";
-  }
-  try {
-    if (fromBase64Url(j.x).length !== 32) {
-      return "cnf_jwk x must decode to 32 bytes";
-    }
-  } catch {
-    return "cnf_jwk x must be valid base64url";
+  const validatedCnf = validateCnfJwk(body.cnf_jwk);
+  if ("error" in validatedCnf) {
+    return validatedCnf.error;
   }
   const audience =
     typeof body.audience === "string" && body.audience.length > 0
@@ -54,7 +44,7 @@ const parseAccept = (body: unknown): ParsedAccept | string => {
   return {
     inviteToken: body.invite_token,
     googleIdToken: body.google_id_token,
-    cnfJwk: { kty: "OKP", crv: "Ed25519", x: j.x },
+    cnfJwk: validatedCnf,
     audience,
   };
 };

@@ -50,3 +50,40 @@ export type Ed25519PublicJwk = {
 
 export const importPublicJwkEd25519 = async (jwk: Ed25519PublicJwk): Promise<CryptoKey> =>
   crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, true, ["verify"]);
+
+export type ValidatedCnfJwk = { kty: "OKP"; crv: "Ed25519"; x: string };
+
+export type ValidateCnfJwkResult = ValidatedCnfJwk | { error: string };
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const fromBase64UrlBytes = (s: string): Uint8Array => {
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
+
+export const validateCnfJwk = (jwk: unknown): ValidateCnfJwkResult => {
+  if (!isRecord(jwk)) {
+    return { error: "cnf_jwk must be an object" };
+  }
+  if (jwk.kty !== "OKP") return { error: "cnf_jwk kty must be OKP" };
+  if (jwk.crv !== "Ed25519") return { error: "cnf_jwk crv must be Ed25519" };
+  if (typeof jwk.x !== "string" || jwk.x.length === 0) {
+    return { error: "cnf_jwk x must be a non-empty string" };
+  }
+  let raw: Uint8Array;
+  try {
+    raw = fromBase64UrlBytes(jwk.x);
+  } catch {
+    return { error: "cnf_jwk x must be valid base64url" };
+  }
+  if (raw.length !== 32) {
+    return { error: "cnf_jwk x must decode to 32 bytes" };
+  }
+  return { kty: "OKP", crv: "Ed25519", x: jwk.x };
+};
