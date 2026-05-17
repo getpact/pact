@@ -260,6 +260,13 @@
       "when": 1778503000000,
       "tag": "0036_add_grant_expires_at",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1778504000000,
+      "tag": "0037_agents_kind_check",
+      "breakpoints": true
     }
   ]
 }
