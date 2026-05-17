@@ -2,7 +2,7 @@ import { fromBase64, jcsBytes, sha256, toBase64, verifyEd25519 } from "@getpact/
 
 export type StoredEvent = {
   workspaceId: string;
-  ts: string;
+  ts: string | Date;
   actorKind: string;
   actorId: string | null;
   action: string;
@@ -21,9 +21,14 @@ export type VerifyResult =
   | { ok: true }
   | { ok: false; brokenAt: { index: number; reason: string } };
 
+const normalizeTs = (ts: string | Date): string => {
+  if (ts instanceof Date) return ts.toISOString();
+  return new Date(ts).toISOString();
+};
+
 const buildCanonicalBody = (event: StoredEvent) => ({
   workspaceId: event.workspaceId,
-  ts: event.ts,
+  ts: normalizeTs(event.ts),
   actorKind: event.actorKind,
   actorId: event.actorId,
   action: event.action,

@@ -140,6 +140,28 @@ describe("verifyChain", () => {
     }
   });
 
+  it("accepts ts as Date instance", async () => {
+    const { privateKey, publicKey } = await generateEd25519Keypair();
+    const genesis = await computeGenesisHash(workspaceId, createdAt);
+    const events = await buildChain(workspaceId, genesis, privateKey, 3);
+    const asDateTs: StoredEvent[] = events.map((e) => ({ ...e, ts: new Date(e.ts as string) }));
+    const result = await verifyChain(asDateTs, { "ws-audit-v1": publicKey }, genesis);
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts ts as postgres TIMESTAMPTZ text", async () => {
+    const { privateKey, publicKey } = await generateEd25519Keypair();
+    const genesis = await computeGenesisHash(workspaceId, createdAt);
+    const events = await buildChain(workspaceId, genesis, privateKey, 3);
+    const asPgText: StoredEvent[] = events.map((e) => {
+      const iso = e.ts as string;
+      const pgText = iso.replace("T", " ").replace("Z", "+00");
+      return { ...e, ts: pgText };
+    });
+    const result = await verifyChain(asPgText, { "ws-audit-v1": publicKey }, genesis);
+    expect(result.ok).toBe(true);
+  });
+
   it("fails with wrong genesis", async () => {
     const { privateKey, publicKey } = await generateEd25519Keypair();
     const genesis = await computeGenesisHash(workspaceId, createdAt);

@@ -169,7 +169,7 @@ export const runAuditVerify = async (
     for (const e of page.events) {
       all.push({
         workspaceId: e.workspaceId,
-        ts: typeof e.ts === "string" ? e.ts : new Date(e.ts).toISOString(),
+        ts: e.ts,
         actorKind: e.actorKind,
         actorId: e.actorId,
         action: e.action,
