@@ -146,7 +146,7 @@ run("admin api invites", () => {
       {
         email: "vc@example.com",
         ttl_seconds: 3600,
-        group_ids: ["00000000-0000-0000-0000-000000000000"],
+        group_ids: ["11111111-1111-4111-8111-111111111111"],
       },
       envBag,
     );
