@@ -1,4 +1,6 @@
 import canonicalize from "canonicalize";
+import { exportJWK, type KeyLike } from "jose";
+import { type JwksCache, JwksFetchError, sharedJwksCache } from "./jwks.js";
 
 export type ProvenanceSigned = {
   source_uri: string;
@@ -14,12 +16,22 @@ export type SearchHit = {
   provenance: ProvenanceSigned;
 };
 
-export type VerifyProvenanceOptions = {
+export type VerifyProvenanceOptionsKey = {
   workspaceId: string;
   publicKey: CryptoKey;
   maxAgeSeconds?: number;
   now?: () => Date;
 };
+
+export type VerifyProvenanceOptionsJwks = {
+  workspaceId: string;
+  jwksUri: string;
+  maxAgeSeconds?: number;
+  now?: () => Date;
+  jwksCache?: JwksCache;
+};
+
+export type VerifyProvenanceOptions = VerifyProvenanceOptionsKey | VerifyProvenanceOptionsJwks;
 
 export type VerifyProvenanceResult = { ok: true } | { ok: false; reason: string };
 
@@ -47,6 +59,49 @@ const isProvenanceShape = (value: unknown): value is ProvenanceSigned => {
   return true;
 };
 
+const hasJwksUri = (o: VerifyProvenanceOptions): o is VerifyProvenanceOptionsJwks =>
+  typeof (o as VerifyProvenanceOptionsJwks).jwksUri === "string" &&
+  (o as VerifyProvenanceOptionsJwks).jwksUri.length > 0;
+
+const resolveKeyFromJwks = async (
+  opts: VerifyProvenanceOptionsJwks,
+  kid: string,
+): Promise<{ ok: true; key: KeyLike | Uint8Array } | { ok: false; reason: string }> => {
+  const cache = opts.jwksCache ?? sharedJwksCache;
+  try {
+    const key = await cache.resolve(opts.jwksUri, kid);
+    return { ok: true, key };
+  } catch (err) {
+    if (err instanceof JwksFetchError) {
+      if (err.message.includes("has no key with kid")) {
+        return { ok: false, reason: "unknown_kid" };
+      }
+      return { ok: false, reason: "jwks_fetch_failed" };
+    }
+    return { ok: false, reason: "jwks_fetch_failed" };
+  }
+};
+
+const toCryptoKey = async (key: CryptoKey | KeyLike): Promise<CryptoKey> => {
+  if (key instanceof CryptoKey) return key;
+  const jwk = await exportJWK(key as KeyLike);
+  return crypto.subtle.importKey("jwk", jwk, { name: "Ed25519" }, true, ["verify"]);
+};
+
+const verifySignatureBytes = async (
+  key: CryptoKey | KeyLike,
+  signature: Uint8Array,
+  bytes: Uint8Array,
+): Promise<boolean> => {
+  const cryptoKey = await toCryptoKey(key);
+  return crypto.subtle.verify(
+    "Ed25519",
+    cryptoKey,
+    signature as BufferSource,
+    bytes as BufferSource,
+  );
+};
+
 export const verifyProvenance = async (
   hit: SearchHit,
   options: VerifyProvenanceOptions,
@@ -64,6 +119,20 @@ export const verifyProvenance = async (
   const now = (options.now ?? (() => new Date()))().getTime();
   if (Math.abs(now - issuedAtMs) > maxAge * 1000) {
     return { ok: false, reason: "stale" };
+  }
+
+  let key: CryptoKey | KeyLike;
+  if (hasJwksUri(options)) {
+    const resolved = await resolveKeyFromJwks(options, p.kid);
+    if (!resolved.ok) {
+      return { ok: false, reason: resolved.reason };
+    }
+    if (resolved.key instanceof Uint8Array) {
+      return { ok: false, reason: "unsupported_key_type" };
+    }
+    key = resolved.key;
+  } else {
+    key = options.publicKey;
   }
 
   const payload = {
@@ -89,12 +158,7 @@ export const verifyProvenance = async (
 
   let ok: boolean;
   try {
-    ok = await crypto.subtle.verify(
-      "Ed25519",
-      options.publicKey,
-      signature as BufferSource,
-      bytes as BufferSource,
-    );
+    ok = await verifySignatureBytes(key, signature, bytes);
   } catch {
     return { ok: false, reason: "verify_failed" };
   }

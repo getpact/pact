@@ -16,6 +16,8 @@ export {
   type ProvenanceSigned,
   type SearchHit,
   type VerifyProvenanceOptions,
+  type VerifyProvenanceOptionsJwks,
+  type VerifyProvenanceOptionsKey,
   type VerifyProvenanceResult,
   verifyProvenance,
 } from "./verifyProvenance.js";

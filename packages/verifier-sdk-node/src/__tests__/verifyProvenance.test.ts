@@ -1,5 +1,7 @@
 import canonicalize from "canonicalize";
+import { exportJWK } from "jose";
 import { describe, expect, it } from "vitest";
+import { JwksCache } from "../jwks.js";
 import { type ProvenanceSigned, verifyProvenance } from "../verifyProvenance.js";
 
 const WORKSPACE_ID = "11111111-1111-1111-1111-111111111111";
@@ -129,6 +131,61 @@ describe("verifyProvenance", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.reason).toBe("signature_mismatch");
+  });
+
+  it("verifies via jwksUri when the kid matches a published key", async () => {
+    const pair = await generateKey();
+    const issuedAt = new Date().toISOString();
+    const provenance = await signProvenance(pair.privateKey, WORKSPACE_ID, buildBase(issuedAt));
+    const jwk = await exportJWK(pair.publicKey);
+    const jwksUri = "https://issuer.test/v1/workspaces/ws/.well-known/provenance-jwks.json";
+    const cache = new JwksCache({
+      fetcher: async () => ({
+        keys: [{ ...jwk, kid: provenance.kid, alg: "EdDSA", use: "sig" }],
+      }),
+    });
+    const result = await verifyProvenance(
+      { provenance },
+      { workspaceId: WORKSPACE_ID, jwksUri, jwksCache: cache },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("denies with unknown_kid when the kid is not in the jwks", async () => {
+    const pair = await generateKey();
+    const issuedAt = new Date().toISOString();
+    const provenance = await signProvenance(pair.privateKey, WORKSPACE_ID, buildBase(issuedAt));
+    const jwk = await exportJWK(pair.publicKey);
+    const jwksUri = "https://issuer.test/v1/workspaces/ws/.well-known/provenance-jwks.json";
+    const cache = new JwksCache({
+      fetcher: async () => ({
+        keys: [{ ...jwk, kid: "different-kid", alg: "EdDSA", use: "sig" }],
+      }),
+    });
+    const result = await verifyProvenance(
+      { provenance },
+      { workspaceId: WORKSPACE_ID, jwksUri, jwksCache: cache },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toBe("unknown_kid");
+  });
+
+  it("denies with jwks_fetch_failed when the fetcher errors", async () => {
+    const pair = await generateKey();
+    const issuedAt = new Date().toISOString();
+    const provenance = await signProvenance(pair.privateKey, WORKSPACE_ID, buildBase(issuedAt));
+    const jwksUri = "https://issuer.test/v1/workspaces/ws/.well-known/provenance-jwks.json";
+    const cache = new JwksCache({
+      fetcher: async () => {
+        throw new Error("network down");
+      },
+    });
+    const result = await verifyProvenance(
+      { provenance },
+      { workspaceId: WORKSPACE_ID, jwksUri, jwksCache: cache },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toBe("jwks_fetch_failed");
   });
 
   it("rejects a hit missing signature fields", async () => {
