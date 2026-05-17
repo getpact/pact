@@ -59,6 +59,20 @@ Without those env vars, DB-gated suites silently skip (with `describe.skip`). CI
 
 Run `pnpm verify` before push to catch CI mismatches locally (clears caches, reinstalls from frozen lockfile, runs typecheck and lint). Run `pnpm verify:ci` for the full CI parity check including DB tests (requires docker). Lefthook auto-runs `pnpm test:db` on `git push`; set `PACT_SKIP_PREPUSH_TESTS=1` to skip when iterating fast (CI is still authoritative).
 
+## MVP Smoke
+
+`scripts/smoke-demo.sh` walks the founder demo end-to-end against real loopback HTTP. It boots Postgres, applies migrations, starts the four Workers under `wrangler dev`, runs `pact init --skip-oauth`, creates a group + agent + grant via the admin-api, mints a capability SD-JWT, starts `pact mcp bridge`, invokes `pact.whoami` over the bridge, replays the call to assert `kb_replay_detected`, and checks that the expected audit events are present. The script prints a per-phase wall-clock summary and fails if total exceeds the PRD G1 budget (600s).
+
+```
+bash scripts/smoke-demo.sh
+```
+
+The script is idempotent. It kills orphaned listeners from prior runs, backs up an existing `~/.pact/holder.key` while it runs, and restores it on exit. Pass `PACT_SMOKE_TEARDOWN_DB=1` to also `docker compose down` on exit. Pass `PACT_SMOKE_KEEP=1` to leave Postgres running.
+
+The script writes its own `~/.pact/holder.key`, appends `PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE=true` to `apps/issuer/.dev.vars` if missing (gitignored file), and runs the issuer Worker with `ENVIRONMENT=test` so the CLI can reach `/v1/dev/issue` without the dev-issue-secret header.
+
+This script catches what `pnpm test:db` cannot: real `wrangler dev` boot, TCP port binding across four workers, `.dev.vars` loading, service-to-service URLs over loopback, the `pact mcp bridge` holder-key roundtrip, and end-to-end SD-JWT presentation through real HTTP.
+
 ## Operations
 
 `kbjwt_replay_log` grows once per redeem attempt and has no built-in TTL. The `pact-admin-api` Worker runs a daily scheduled trigger (`0 3 * * *` UTC) that calls `prune_kbjwt_replay_log` across every workspace, so a healthy deploy needs no operator action. Set `PACT_REPLAY_RETENTION_DAYS` on the Worker to change the default 7 day window.
