@@ -41,6 +41,13 @@ const parseAccept = (body: unknown): ParsedAccept | string => {
   if (j.kty !== "OKP" || j.crv !== "Ed25519" || typeof j.x !== "string") {
     return "cnf_jwk must be an Ed25519 OKP jwk";
   }
+  try {
+    if (fromBase64Url(j.x).length !== 32) {
+      return "cnf_jwk x must decode to 32 bytes";
+    }
+  } catch {
+    return "cnf_jwk x must be valid base64url";
+  }
   const audience =
     typeof body.audience === "string" && body.audience.length > 0
       ? body.audience
@@ -352,7 +359,18 @@ export const registerInviteAcceptRoutes = <T extends { Bindings: Env }>(app: Hon
           .where(eq(invites.id, claimed.id));
 
         if (claimed.group_ids.length > 0) {
+          // Validate every group still exists and is not revoked. Stops a stale
+          // group_id (group revoked between invite mint and accept) from silently
+          // attaching the user to a tombstoned group.
+          const activeRows = (await tx.execute(
+            sql`SELECT id::text AS id FROM groups
+                WHERE workspace_id = ${workspaceId}
+                  AND id = ANY(${claimed.group_ids}::uuid[])
+                  AND revoked_at IS NULL`,
+          )) as Array<{ id: string }>;
+          const active = new Set(activeRows.map((r) => r.id));
           for (const gid of claimed.group_ids) {
+            if (!active.has(gid)) continue;
             await tx.execute(
               sql`INSERT INTO group_members (workspace_id, group_id, user_id)
                   VALUES (${workspaceId}, ${gid}::uuid, ${userId}::uuid)
