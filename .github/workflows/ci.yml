@@ -13,6 +13,8 @@ jobs:
       RLS_TEST_DB: postgres://pact_app:pact_app@localhost:5432/pact
       PG_POOL_MAX: "2"
       PG_IDLE_TIMEOUT: "1"
+      LOG_LEVEL: "warn"
+      PACT_QUIET_PG_NOTICES: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
