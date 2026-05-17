@@ -6,14 +6,13 @@ import { invites, workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys, loadActiveSigningKey } from "@getpact/keystore";
 import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
-import { createRemoteJWKSet, exportJWK, jwtVerify } from "jose";
+import { exportJWK, jwtVerify } from "jose";
 import { decodeMek, type Env } from "../env.js";
+import { GoogleIdentityVerificationError, verifyGoogleIdToken } from "../google.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
 const INVITE_AUDIENCE = "pact-invite";
-const GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs";
-const GOOGLE_ISSUER = "https://accounts.google.com";
 const ACCEPT_AUDIENCE_DEFAULT = "pact-mcp";
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -255,17 +254,16 @@ export const registerInviteAcceptRoutes = <T extends { Bindings: Env }>(app: Hon
       return c.json({ error: "forbidden", message: "invite_expired" }, 403);
     }
 
-    const googleJwksUri = c.env.GOOGLE_JWKS_URI ?? GOOGLE_JWKS_URI;
-    const googleIssuer = c.env.GOOGLE_ISSUER ?? GOOGLE_ISSUER;
-    const googleJwks = createRemoteJWKSet(new URL(googleJwksUri));
-    let googlePayload: Awaited<ReturnType<typeof jwtVerify>>["payload"];
+    let googleIdentity: Awaited<ReturnType<typeof verifyGoogleIdToken>>;
     try {
-      ({ payload: googlePayload } = await jwtVerify(parsed.googleIdToken, googleJwks, {
-        issuer: googleIssuer,
-        audience: c.env.GOOGLE_OAUTH_CLIENT_ID,
-        algorithms: ["RS256"],
-      }));
-    } catch {
+      googleIdentity = await verifyGoogleIdToken({
+        clientId: c.env.GOOGLE_OAUTH_CLIENT_ID,
+        idToken: parsed.googleIdToken,
+        ...(c.env.GOOGLE_JWKS_URI ? { jwksUri: c.env.GOOGLE_JWKS_URI } : {}),
+        ...(c.env.GOOGLE_ISSUER ? { expectedIssuer: c.env.GOOGLE_ISSUER } : {}),
+      });
+    } catch (e) {
+      if (!(e instanceof GoogleIdentityVerificationError)) throw e;
       await denyOutsideTx(
         c.env as Env,
         workspaceId,
@@ -276,11 +274,9 @@ export const registerInviteAcceptRoutes = <T extends { Bindings: Env }>(app: Hon
       return c.json({ error: "unauthorized", message: "google_id_token_invalid" }, 401);
     }
 
-    const googleEmail =
-      typeof googlePayload.email === "string" ? canonicalizeEmail(googlePayload.email) : null;
-    const googleSub = typeof googlePayload.sub === "string" ? googlePayload.sub : null;
-    const emailVerified = googlePayload.email_verified === true;
-    if (!googleEmail || !googleSub || !emailVerified) {
+    const googleEmail = googleIdentity.email;
+    const googleSub = googleIdentity.sub;
+    if (!googleIdentity.emailVerified) {
       await denyOutsideTx(
         c.env as Env,
         workspaceId,

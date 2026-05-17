@@ -13,6 +13,7 @@ export type Env = {
   ENVIRONMENT?: string;
   ENABLE_DEV_ISSUE?: string;
   DEV_ISSUE_SECRET?: string;
+  PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE?: string;
   WEB_ISSUER_SERVICE_TOKEN?: string;
   WEB_OAUTH_REDIRECT_URI?: string;
   MCP_BASE_URL?: string;
@@ -35,4 +36,9 @@ export const tokenTtlSeconds = (env: Env): number => {
 
 export const isDevIssueEnabled = (env: Env): boolean => {
   return env.ENABLE_DEV_ISSUE === "true" && env.ENVIRONMENT !== "production";
+};
+
+export const isUnauthedWorkspaceCreateAllowed = (env: Env): boolean => {
+  if (env.ENVIRONMENT === "production") return false;
+  return env.PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE === "true";
 };

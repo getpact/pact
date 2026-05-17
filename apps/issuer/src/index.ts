@@ -1,5 +1,6 @@
 import {
   AuthzError,
+  canonicalizeEmail,
   type Email,
   isStrongSharedSecret,
   isUuid,
@@ -26,11 +27,18 @@ import {
 } from "@getpact/ratelimit";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { decodeMek, type Env, isDevIssueEnabled, tokenTtlSeconds } from "./env.js";
+import {
+  decodeMek,
+  type Env,
+  isDevIssueEnabled,
+  isUnauthedWorkspaceCreateAllowed,
+  tokenTtlSeconds,
+} from "./env.js";
 import {
   exchangeGoogleCode,
   GoogleIdentityVerificationError,
   GoogleTokenExchangeError,
+  verifyGoogleIdToken,
 } from "./google.js";
 import {
   GoogleEmailNotAuthoritativeError,
@@ -204,9 +212,55 @@ app.post("/v1/workspaces", async (c) => {
     region?: string;
     adminEmail: string;
     adminName?: string;
+    google_id_token?: string;
   }>();
+
+  const idToken = typeof body.google_id_token === "string" ? body.google_id_token : "";
+  if (!idToken) {
+    if (!isUnauthedWorkspaceCreateAllowed(c.env)) {
+      return c.json({ error: "unauthorized", message: "google_id_token is required" }, 401);
+    }
+  } else {
+    let identity: Awaited<ReturnType<typeof verifyGoogleIdToken>>;
+    try {
+      identity = await verifyGoogleIdToken({
+        clientId: c.env.GOOGLE_OAUTH_CLIENT_ID,
+        idToken,
+        ...(c.env.GOOGLE_JWKS_URI ? { jwksUri: c.env.GOOGLE_JWKS_URI } : {}),
+        ...(c.env.GOOGLE_ISSUER ? { expectedIssuer: c.env.GOOGLE_ISSUER } : {}),
+      });
+    } catch (e) {
+      if (e instanceof GoogleIdentityVerificationError) {
+        return c.json(
+          {
+            error: "google_identity_verification_failed",
+            message: "Google identity verification failed",
+          },
+          401,
+        );
+      }
+      throw e;
+    }
+    if (!identity.emailVerified) {
+      return c.json({ error: "email_not_verified" }, 403);
+    }
+    const claimedEmail = canonicalizeEmail(body.adminEmail ?? "");
+    if (claimedEmail !== identity.email) {
+      return c.json(
+        { error: "admin_email_mismatch", message: "adminEmail does not match google id token" },
+        403,
+      );
+    }
+  }
+
   try {
-    const result = await createWorkspace(c.env.DATABASE_URL, decodeMek(c.env), body);
+    const result = await createWorkspace(c.env.DATABASE_URL, decodeMek(c.env), {
+      slug: body.slug,
+      name: body.name,
+      ...(body.region ? { region: body.region } : {}),
+      adminEmail: body.adminEmail,
+      ...(body.adminName ? { adminName: body.adminName } : {}),
+    });
     return c.json(result, 201);
   } catch (e) {
     if (e instanceof PactError) {

@@ -53,12 +53,55 @@ const domainForEmail = (email: string): string | null => {
   return at > 0 ? email.slice(at + 1).toLowerCase() : null;
 };
 
+export type VerifyIdTokenOptions = {
+  clientId: string;
+  idToken: string;
+  jwksUri?: string;
+  expectedIssuer?: string;
+};
+
+export const verifyGoogleIdToken = async (
+  opts: VerifyIdTokenOptions,
+): Promise<GoogleVerifiedIdentity> => {
+  const jwksUri = opts.jwksUri ?? DEFAULT_JWKS_URI;
+  const expectedIssuer = opts.expectedIssuer ?? DEFAULT_ISSUER;
+
+  const jwks = createRemoteJWKSet(new URL(jwksUri));
+  let payload: Awaited<ReturnType<typeof jwtVerify>>["payload"];
+  try {
+    ({ payload } = await jwtVerify(opts.idToken, jwks, {
+      issuer: expectedIssuer,
+      audience: opts.clientId,
+      algorithms: ["RS256"],
+    }));
+  } catch (e) {
+    throw new GoogleIdentityVerificationError(
+      e instanceof Error ? e.message : "google id_token verification failed",
+    );
+  }
+
+  const email = payload.email;
+  const sub = payload.sub;
+  if (typeof email !== "string" || typeof sub !== "string") {
+    throw new GoogleIdentityVerificationError("google id_token missing email or sub");
+  }
+  const canonicalEmail = canonicalizeEmail(email);
+  const emailDomain = domainForEmail(canonicalEmail);
+  const hostedDomain = typeof payload.hd === "string" ? payload.hd.trim().toLowerCase() : undefined;
+  const googleHostedEmail = emailDomain === "gmail.com" || !!hostedDomain;
+  return {
+    email: canonicalEmail,
+    emailVerified: payload.email_verified === true,
+    emailAuthoritative: payload.email_verified === true && googleHostedEmail,
+    ...(hostedDomain ? { hostedDomain } : {}),
+    sub,
+  };
+};
+
 export const exchangeGoogleCode = async (
   opts: ExchangeOptions,
 ): Promise<GoogleVerifiedIdentity> => {
   const tokenEndpoint = opts.tokenEndpoint ?? DEFAULT_TOKEN_ENDPOINT;
-  const jwksUri = opts.jwksUri ?? DEFAULT_JWKS_URI;
-  const expectedIssuer = opts.expectedIssuer ?? DEFAULT_ISSUER;
 
   const tokenRes = await fetch(tokenEndpoint, {
     method: "POST",
@@ -90,34 +133,10 @@ export const exchangeGoogleCode = async (
     throw new GoogleIdentityVerificationError("google token exchange returned no id_token");
   }
 
-  const jwks = createRemoteJWKSet(new URL(jwksUri));
-  let payload: Awaited<ReturnType<typeof jwtVerify>>["payload"];
-  try {
-    ({ payload } = await jwtVerify(body.id_token, jwks, {
-      issuer: expectedIssuer,
-      audience: opts.clientId,
-      algorithms: ["RS256"],
-    }));
-  } catch (e) {
-    throw new GoogleIdentityVerificationError(
-      e instanceof Error ? e.message : "google id_token verification failed",
-    );
-  }
-
-  const email = payload.email;
-  const sub = payload.sub;
-  if (typeof email !== "string" || typeof sub !== "string") {
-    throw new GoogleIdentityVerificationError("google id_token missing email or sub");
-  }
-  const canonicalEmail = canonicalizeEmail(email);
-  const emailDomain = domainForEmail(canonicalEmail);
-  const hostedDomain = typeof payload.hd === "string" ? payload.hd.trim().toLowerCase() : undefined;
-  const googleHostedEmail = emailDomain === "gmail.com" || !!hostedDomain;
-  return {
-    email: canonicalEmail,
-    emailVerified: payload.email_verified === true,
-    emailAuthoritative: payload.email_verified === true && googleHostedEmail,
-    ...(hostedDomain ? { hostedDomain } : {}),
-    sub,
-  };
+  return verifyGoogleIdToken({
+    clientId: opts.clientId,
+    idToken: body.id_token,
+    ...(opts.jwksUri ? { jwksUri: opts.jwksUri } : {}),
+    ...(opts.expectedIssuer ? { expectedIssuer: opts.expectedIssuer } : {}),
+  });
 };
