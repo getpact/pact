@@ -355,6 +355,31 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@22.19.18)(tsx@4.21.0)
 
+  examples/mode-b-brain:
+    dependencies:
+      '@getpact/verifier-sdk':
+        specifier: workspace:*
+        version: link:../../packages/verifier-sdk-node
+      hono:
+        specifier: ^4.6.0
+        version: 4.12.18
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
+      jose:
+        specifier: ^5.9.0
+        version: 5.10.0
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@22.19.18)(tsx@4.21.0)
+
   packages/adapter-drive:
     dependencies:
       '@getpact/adapter-sdk':
