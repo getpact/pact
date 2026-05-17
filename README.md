@@ -56,7 +56,7 @@ Existing workspaces created before the drive HMAC fence or default-audience seed
 DATABASE_URL=postgres://... MEK=... pact admin backfill [--workspace <id>] [--what keys|audiences|all] [--dry-run]
 ```
 
-`--what keys` seeds the missing `adapter-drive` HMAC key. `--what audiences` seeds the missing default audiences. `all` does both.
+`--what keys` seeds the missing `adapter-drive` HMAC and `provenance` Ed25519 signing keys. `--what audiences` seeds the missing default audiences. `all` does both.
 
 Recipient send-caps gate `brain.put` writes. Issue, list, and revoke them with the CLI against the admin API:
 
