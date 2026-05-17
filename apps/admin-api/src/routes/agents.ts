@@ -241,6 +241,9 @@ const parseCreateAgentBody = (body: CreateAgentBody): ParsedAgent | string => {
     if (body.kind !== "service" && body.kind !== "user_delegated" && body.kind !== "sub_agent") {
       return "kind must be one of service, user_delegated, sub_agent";
     }
+    if (body.kind === "sub_agent") {
+      return "sub_agent kind requires parent-grant wiring not yet implemented in admin api";
+    }
     kind = body.kind;
   }
   return {

@@ -360,6 +360,32 @@ run("admin api agents", () => {
     expect(mintBody.error).toBe("grant_expired");
   });
 
+  it("rejects sub_agent kind at create until parent grant wiring lands", async () => {
+    const { env, created, token, pubkeyJwk } = await setup();
+    const runtime = {
+      DATABASE_URL: env.DATABASE_URL,
+      MEK: env.MEK,
+      ADMIN_AUDIENCE: env.ADMIN_AUDIENCE,
+    };
+    const res = await callApi(
+      "/agents",
+      token,
+      "POST",
+      {
+        name: "sub",
+        owner_user_id: created.adminUserId,
+        pubkey_jwk: pubkeyJwk,
+        kind: "sub_agent",
+      },
+      created.workspaceId,
+      runtime,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe("invalid_body");
+    expect(body.message).toMatch(/sub_agent kind requires parent-grant wiring/);
+  });
+
   it("isolates agents across tenants via RLS", async () => {
     const a = await setup();
     const b = await setup();
