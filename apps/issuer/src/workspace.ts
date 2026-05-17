@@ -20,6 +20,7 @@ export type CreateWorkspaceResult = {
   adminUserId: string;
   jwtKeyId: string;
   auditKeyId: string;
+  provenanceKeyId: string;
   adapterDriveKeyId: string;
 };
 
@@ -79,6 +80,11 @@ export const createWorkspace = async (
       kind: "audit",
       rawMek,
     });
+    const provenanceKey = await createSigningKey(tx, {
+      workspaceId: ws.id,
+      kind: "provenance",
+      rawMek,
+    });
     const adapterDriveKey = await createHmacKey(tx, {
       workspaceId: ws.id,
       kind: "adapter-drive",
@@ -90,6 +96,7 @@ export const createWorkspace = async (
       adminUserId: user.id,
       jwtKeyId: jwtKey.id,
       auditKeyId: auditKey.id,
+      provenanceKeyId: provenanceKey.id,
       adapterDriveKeyId: adapterDriveKey.id,
     };
   });

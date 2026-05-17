@@ -40,6 +40,10 @@ export type IssuerApp = {
 export type CreatedWorkspace = {
   workspaceId: string;
   adminUserId: string;
+  jwtKeyId?: string;
+  auditKeyId?: string;
+  provenanceKeyId?: string;
+  adapterDriveKeyId?: string;
 };
 
 export type CreateWorkspaceInput = {

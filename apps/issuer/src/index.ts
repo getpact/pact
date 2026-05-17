@@ -446,8 +446,15 @@ app.get("/v1/workspaces/:id/.well-known/audit-jwks.json", async (c) => {
   return c.json(jwks, 200, { "cache-control": "public, max-age=300" });
 });
 
+app.get("/v1/workspaces/:id/.well-known/provenance-jwks.json", async (c) => {
+  const id = c.req.param("id");
+  const jwks = await buildWorkspaceJwks(c.env.DATABASE_URL, id, "provenance");
+  return c.json(jwks, 200, { "cache-control": "public, max-age=300" });
+});
+
 const JWT_KEY_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
 const AUDIT_KEY_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+const PROVENANCE_KEY_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 const VERIFICATION_GRACE_SECONDS = 7 * 24 * 60 * 60;
 
 export const rotateAllStale = async (
@@ -455,6 +462,7 @@ export const rotateAllStale = async (
 ): Promise<{
   jwt: { rotated: number; errors: number };
   audit: { rotated: number; errors: number };
+  provenance: { rotated: number; errors: number };
   rateBucketsSwept: number;
 }> => {
   const rawMek = decodeMek(env);
@@ -473,8 +481,15 @@ export const rotateAllStale = async (
     AUDIT_KEY_MAX_AGE_SECONDS,
     VERIFICATION_GRACE_SECONDS,
   );
+  const provenance = await rotateStaleKeys(
+    db,
+    rawMek,
+    "provenance",
+    PROVENANCE_KEY_MAX_AGE_SECONDS,
+    VERIFICATION_GRACE_SECONDS,
+  );
   const rateBucketsSwept = await sweepExpiredRateBuckets(db);
-  return { jwt, audit, rateBucketsSwept };
+  return { jwt, audit, provenance, rateBucketsSwept };
 };
 
 export default app;
