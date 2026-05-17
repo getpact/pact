@@ -56,6 +56,14 @@ DATABASE_URL=postgres://... MEK=... pact admin backfill [--workspace <id>] [--wh
 
 `--what keys` seeds the missing `adapter-drive` HMAC key. `--what audiences` seeds the missing default audiences. `all` does both.
 
+Recipient send-caps gate `brain.put` writes. Issue, list, and revoke them with the CLI against the admin API:
+
+```
+PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap grant --grantee <user-id>
+PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap list
+PACT_ADMIN_TOKEN=... PACT_WORKSPACE_ID=... pact send-cap revoke <id> --reason "..."
+```
+
 ## Packages
 
 OSS (MIT):
