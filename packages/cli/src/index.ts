@@ -6,6 +6,7 @@ import { runAdmin } from "./commands/admin.js";
 import { runAgent } from "./commands/agent.js";
 import { runGroup } from "./commands/group.js";
 import { runInvite } from "./commands/invite.js";
+import { runMcpBridge } from "./commands/mcp-bridge.js";
 import { runSendCap } from "./commands/send-cap.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { type ClientId, installMcpServer } from "./mcp-install.js";
@@ -41,6 +42,7 @@ const help = () => {
       "  status           show endpoint and credential expiry",
       "  mcp install      register Pact MCP server with an agent client",
       "  mcp serve        run the Pact MCP stdio proxy (used by clients)",
+      "  mcp bridge       run a local http bridge that signs kb-jwt per call",
       "  audit verify     verify the workspace audit chain end to end",
       "  audit checkpoint export a signed audit head checkpoint",
       "  agent mint       mint an agent capability token",
@@ -209,6 +211,11 @@ const mcp = async () => {
     case "serve":
       await serveStdio();
       return;
+    case "bridge": {
+      const result = await runMcpBridge(process.argv.slice(4));
+      if (result.exitCode !== 0) process.exit(result.exitCode);
+      return;
+    }
     case "install": {
       const idx = process.argv.indexOf("--client");
       const client = (idx >= 0 ? process.argv[idx + 1] : "claude-desktop") as ClientId;
@@ -227,6 +234,7 @@ const mcp = async () => {
         "usage: pact mcp install [--client claude-desktop|claude-code|cursor]\n",
       );
       process.stderr.write("       pact mcp serve\n");
+      process.stderr.write("       pact mcp bridge --upstream <url> [--port 8765]\n");
       process.exit(1);
   }
 };
