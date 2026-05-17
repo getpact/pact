@@ -1,6 +1,6 @@
 # mode-b-brain
 
-Drop `verifyPactToken` into your existing brain in ~50 LOC. This shows it.
+Drop `verifyPactToken` into your existing brain via one Hono handler. This shows it.
 
 The god-mode demo simulates the issuer, MCP, and brain in one process. This
 example does the part most teams actually need to ship: a downstream brain that

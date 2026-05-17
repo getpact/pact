@@ -1,6 +1,6 @@
 // Mode B reference brain.
 //
-// Drop verifyPactToken into your existing brain in ~50 LOC. This file is the
+// Drop verifyPactToken into your existing brain via one Hono handler. This file is the
 // canonical "I am a downstream brain, here is the only authn/authz I do"
 // example. The MCP-side issuer has already minted an SD-JWT; the brain just
 // checks that the bearer matches our audience, the requested tool, and the
