@@ -17,8 +17,6 @@ import {
   type User,
 } from "../full-stack.js";
 
-const dbGated = process.env.DATABASE_URL ? describe : describe.skip;
-
 const aliceFixture = (): User => ({ id: "11111111-1111-1111-1111-111111111111", email: "a@x" });
 const bobFixture = (): User => ({ id: "22222222-2222-2222-2222-222222222222", email: "b@x" });
 
@@ -210,8 +208,8 @@ describe("capability: verifyPactToken + replay", () => {
   });
 });
 
-dbGated("end-to-end (DB-gated)", () => {
-  it("runFullStack drives all six steps", async () => {
+describe("end-to-end runFullStack", () => {
+  it("drives all nine steps", async () => {
     const result = await runFullStack();
     const names = result.steps.map((s) => s.step);
     expect(names).toEqual([
