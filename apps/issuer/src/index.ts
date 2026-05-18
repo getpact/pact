@@ -274,7 +274,9 @@ app.post("/v1/dev/issue", async (c) => {
   if (!isDevIssueEnabled(c.env)) {
     return c.json({ error: "not_found" }, 404);
   }
-  if (c.env.ENVIRONMENT !== "test") {
+  const env = c.env.ENVIRONMENT;
+  const requiresSecret = env !== "test" && env !== "development" && env !== "local";
+  if (requiresSecret) {
     if (!c.env.DEV_ISSUE_SECRET) return c.json({ error: "not_found" }, 404);
     if (!isStrongSharedSecret(c.env.DEV_ISSUE_SECRET)) {
       return c.json({ error: "misconfigured", message: "dev issue secret is too weak" }, 503);

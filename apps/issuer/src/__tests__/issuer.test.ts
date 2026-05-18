@@ -219,6 +219,45 @@ run("issuer end-to-end", () => {
     expect(result.payload.mode).toBe("A");
   });
 
+  it("allows dev issue without secret header in development", async () => {
+    const env = await buildEnv();
+    const slug = `iss-dev-${Date.now()}`;
+    const createRes = await app.request(
+      "/v1/workspaces",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          name: "Dev Open",
+          adminEmail: "alice@example.com",
+        }),
+      },
+      env,
+    );
+    const created = (await createRes.json()) as { workspaceId: string };
+    cleanup.push(created.workspaceId);
+    const devEnv = {
+      ...env,
+      ENVIRONMENT: "development",
+      DEV_ISSUE_SECRET: "0123456789abcdef0123456789abcdef",
+    };
+    const res = await app.request(
+      "/v1/dev/issue",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: created.workspaceId,
+          email: "alice@example.com",
+          audience: "pact-mcp",
+        }),
+      },
+      devEnv,
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("requires matching dev issue secret outside test", async () => {
     const env = await buildEnv();
     const slug = `iss-secret-${Date.now()}`;
