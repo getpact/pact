@@ -16,6 +16,21 @@
     "test": "vitest run --passWithNoTests --silent",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@getpact/adapter-drive": "workspace:*",
+    "@getpact/adapter-sdk": "workspace:*",
+    "@getpact/audit": "workspace:*",
+    "@getpact/auth": "workspace:*",
+    "@getpact/brain-core": "workspace:*",
+    "@getpact/core": "workspace:*",
+    "@getpact/crypto": "workspace:*",
+    "@getpact/db": "workspace:*",
+    "@getpact/keystore": "workspace:*",
+    "@getpact/logger": "workspace:*",
+    "@getpact/policy": "workspace:*",
+    "@getpact/ratelimit": "workspace:*",
+    "@getpact/vault": "workspace:*"
+  },
   "files": [
     "src"
   ]

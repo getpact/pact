@@ -549,7 +549,47 @@ importers:
         specifier: ^4.6.0
         version: 4.12.18
 
-  packages/test-harness: {}
+  packages/test-harness:
+    dependencies:
+      '@getpact/adapter-drive':
+        specifier: workspace:*
+        version: link:../adapter-drive
+      '@getpact/adapter-sdk':
+        specifier: workspace:*
+        version: link:../adapter-sdk
+      '@getpact/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@getpact/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@getpact/brain-core':
+        specifier: workspace:*
+        version: link:../brain-core
+      '@getpact/core':
+        specifier: workspace:*
+        version: link:../core
+      '@getpact/crypto':
+        specifier: workspace:*
+        version: link:../crypto
+      '@getpact/db':
+        specifier: workspace:*
+        version: link:../db
+      '@getpact/keystore':
+        specifier: workspace:*
+        version: link:../keystore
+      '@getpact/logger':
+        specifier: workspace:*
+        version: link:../logger
+      '@getpact/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@getpact/ratelimit':
+        specifier: workspace:*
+        version: link:../ratelimit
+      '@getpact/vault':
+        specifier: workspace:*
+        version: link:../vault
 
   packages/test-helpers:
     dependencies:
