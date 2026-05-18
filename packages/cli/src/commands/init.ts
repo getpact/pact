@@ -24,6 +24,7 @@ export type InitOptions = {
   clientId?: string;
   skipOauth: boolean;
   oauthTimeoutMs?: number;
+  devIssueSecret?: string;
   fetchIdToken?: (input: { redirectUri: string }) => Promise<string>;
 };
 
@@ -132,11 +133,15 @@ export const runInit = async (opts: InitOptions, io: InitIo = defaultIo): Promis
     ...(googleIdToken ? { googleIdToken } : {}),
   });
 
-  const issued = await devIssue(opts.endpoint, {
-    workspaceId: created.workspaceId,
-    email: opts.adminEmail,
-    audience: opts.audience,
-  });
+  const issued = await devIssue(
+    opts.endpoint,
+    {
+      workspaceId: created.workspaceId,
+      email: opts.adminEmail,
+      audience: opts.audience,
+    },
+    opts.devIssueSecret ? { devIssueSecret: opts.devIssueSecret } : undefined,
+  );
 
   const previous = (await loadConfig()) ?? { endpoint: opts.endpoint };
   await saveConfig({
@@ -183,6 +188,7 @@ export const runInitFromArgv = async (
   const clientId =
     parseFlag(argv, "client-id") ?? env.PACT_GOOGLE_CLIENT_ID ?? env.PACT_GOOGLE_CLIENT;
   const skipOauth = hasFlag(argv, "skip-oauth");
+  const devIssueSecret = parseFlag(argv, "dev-issue-secret") ?? env.PACT_DEV_ISSUE_SECRET;
 
   if (!slug) throw new Error("missing workspace slug: pass --workspace or set PACT_SLUG");
   if (!adminEmail) throw new Error("missing admin email: pass --email or set PACT_ADMIN_EMAIL");
@@ -197,6 +203,7 @@ export const runInitFromArgv = async (
       audience,
       ...(clientId ? { clientId } : {}),
       skipOauth,
+      ...(devIssueSecret ? { devIssueSecret } : {}),
     },
     io,
   );

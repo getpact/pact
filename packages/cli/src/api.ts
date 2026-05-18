@@ -14,10 +14,17 @@ type IssueResponse = {
   refreshExpiresAt: string;
 };
 
-const post = async <T>(endpoint: string, path: string, body: unknown): Promise<T> => {
+const post = async <T>(
+  endpoint: string,
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<T> => {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   const res = await fetch(`${endpoint}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -46,7 +53,13 @@ export const createWorkspace = (
 export const devIssue = (
   endpoint: string,
   body: { workspaceId: string; email: string; audience: string },
-): Promise<IssueResponse> => post(endpoint, "/v1/dev/issue", body);
+  options?: { devIssueSecret?: string },
+): Promise<IssueResponse> => {
+  const extra = options?.devIssueSecret
+    ? { "x-pact-dev-issue-secret": options.devIssueSecret }
+    : undefined;
+  return post(endpoint, "/v1/dev/issue", body, extra);
+};
 
 export const refresh = (
   endpoint: string,

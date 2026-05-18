@@ -226,6 +226,105 @@ describe("runInit flow", () => {
     expect(err.join("")).toContain("warning: --skip-oauth");
   });
 
+  it("forwards dev issue secret header when PACT_DEV_ISSUE_SECRET is set", async () => {
+    let devIssueHeader: string | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = input.toString();
+        if (url === "https://secret.test/v1/workspaces") {
+          return Response.json(
+            {
+              workspaceId: "ws-s",
+              adminUserId: "u-s",
+              jwtKeyId: "k",
+              auditKeyId: "k",
+            },
+            { status: 201 },
+          );
+        }
+        if (url === "https://secret.test/v1/dev/issue") {
+          const headers = new Headers(init?.headers);
+          devIssueHeader = headers.get("x-pact-dev-issue-secret");
+          return Response.json({
+            token: "t",
+            jti: "j",
+            exp: 1_900_000_000,
+            userId: "u-s",
+            refreshToken: "r",
+            refreshExpiresAt: "2099-01-01T00:00:00Z",
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+    const { runInitFromArgv } = await import("../commands/init.js");
+    await runInitFromArgv(
+      [
+        "--endpoint",
+        "https://secret.test",
+        "--workspace",
+        "secret",
+        "--email",
+        "owner@secret.dev",
+        "--skip-oauth",
+      ],
+      {
+        env: { PACT_DEV_ISSUE_SECRET: "abc-secret-123" },
+        io: { out: () => {}, err: () => {} },
+      },
+    );
+    expect(devIssueHeader).toBe("abc-secret-123");
+  });
+
+  it("omits dev issue secret header when PACT_DEV_ISSUE_SECRET is unset", async () => {
+    let devIssueHeader: string | null = "unset-sentinel";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL, init?: RequestInit) => {
+        const url = input.toString();
+        if (url === "https://nosec.test/v1/workspaces") {
+          return Response.json(
+            {
+              workspaceId: "ws-n",
+              adminUserId: "u-n",
+              jwtKeyId: "k",
+              auditKeyId: "k",
+            },
+            { status: 201 },
+          );
+        }
+        if (url === "https://nosec.test/v1/dev/issue") {
+          const headers = new Headers(init?.headers);
+          devIssueHeader = headers.get("x-pact-dev-issue-secret");
+          return Response.json({
+            token: "t",
+            jti: "j",
+            exp: 1_900_000_000,
+            userId: "u-n",
+            refreshToken: "r",
+            refreshExpiresAt: "2099-01-01T00:00:00Z",
+          });
+        }
+        return new Response("unexpected", { status: 500 });
+      }),
+    );
+    const { runInitFromArgv } = await import("../commands/init.js");
+    await runInitFromArgv(
+      [
+        "--endpoint",
+        "https://nosec.test",
+        "--workspace",
+        "nosec",
+        "--email",
+        "owner@nosec.dev",
+        "--skip-oauth",
+      ],
+      { env: {}, io: { out: () => {}, err: () => {} } },
+    );
+    expect(devIssueHeader).toBeNull();
+  });
+
   it("runInitFromArgv reads --workspace/--email/--endpoint flags", async () => {
     const seen: { workspaces?: Record<string, unknown> } = {};
     vi.stubGlobal(

@@ -45,6 +45,8 @@ Requirements for the Google OAuth client:
 
 For local development against an issuer that sets `PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE=true`, skip the browser step with `--skip-oauth`. The CLI prints a warning and posts the workspace request without a Google token. Do not use `--skip-oauth` against any non-dev issuer; it will fail with `401 unauthorized`.
 
+The CLI also mints an admin bearer via the issuer's `/v1/dev/issue` route during init. That route is gated by `ENABLE_DEV_ISSUE=true` on the issuer, and is closed off entirely when `ENVIRONMENT=production`. In development (`ENVIRONMENT=development`, `local`, or `test`) the route accepts requests without a shared secret. In staging or any other non-prod env, set `DEV_ISSUE_SECRET` on the issuer and pass the same value to the CLI via `PACT_DEV_ISSUE_SECRET` (or `--dev-issue-secret`).
+
 ## Running tests
 
 DB-gated suites (admin, audit, gateway, issuer, mcp, verifier, vault, keystore, db, audit) require a running Postgres with `DATABASE_URL` and `RLS_TEST_DB` set.
