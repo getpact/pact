@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pact Dashboard</title>
+    <link rel="stylesheet" href="/assets/app.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">pact v0.1</p>
+          <h1>Authorization for company brains.</h1>
+          <p class="lede">Sign in, connect sources, and keep agent access tied to identity and audit proof.</p>
+        </div>
+        <button id="logout" class="ghost hidden" type="button">Sign out</button>
+      </header>
+      <section id="loading" class="panel" aria-busy="true">
+        <div class="panel-head">
+          <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>session</span>
+          <span class="panel-meta">checking</span>
+        </div>
+        <div class="panel-body">
+          <p class="terminal-line">awaiting workspace session...</p>
+        </div>
+      </section>
+      <section id="login" class="panel hidden">
+        <div class="panel-head">
+          <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>google login</span>
+          <span class="panel-meta">workspace scoped</span>
+        </div>
+        <div class="panel-body login-grid">
+          <div>
+            <h2>Open a workspace.</h2>
+            <p>Google proves the human. Pact mints workspace-scoped tokens for admin and audit surfaces.</p>
+            <p id="oauth-help" class="notice hidden"></p>
+          </div>
+          <form id="login-form">
+            <p id="workspace-summary" class="workspace-summary hidden"></p>
+            <div id="workspace-field">
+              <label for="workspace-id">workspace id</label>
+              <input id="workspace-id" name="workspaceId" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="text" required aria-describedby="workspace-help" placeholder="00000000-0000-4000-8000-000000000000">
+              <p id="workspace-help" class="help">Paste the UUID for the workspace you want to administer.</p>
+            </div>
+            <button id="login-submit" type="submit">Continue with Google</button>
+          </form>
+        </div>
+      </section>
+      <section id="dashboard" class="hidden">
+        <div class="metrics">
+          <article class="metric">
+            <span class="label">workspace</span>
+            <strong id="metric-workspace">-</strong>
+          </article>
+          <article class="metric">
+            <span class="label">users</span>
+            <strong id="metric-users">-</strong>
+          </article>
+          <article class="metric">
+            <span class="label">drive</span>
+            <strong id="metric-drive">checking</strong>
+          </article>
+          <article class="metric">
+            <span class="label">audit</span>
+            <strong id="metric-audit">checking</strong>
+          </article>
+        </div>
+        <div class="grid">
+          <article class="panel">
+            <div class="panel-head"><span>identity</span><span class="panel-meta">signed session</span></div>
+            <div class="panel-body"><dl id="session-details"></dl></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><span>google drive</span><span class="panel-meta">source</span></div>
+            <div class="panel-body">
+              <p id="drive-status">Checking connection...</p>
+              <div class="row">
+                <button id="drive-connect" type="button" aria-describedby="drive-help">Connect Drive</button>
+                <button id="drive-disconnect" class="ghost hidden" type="button">Disconnect</button>
+              </div>
+              <p id="drive-help" class="help">Connect the signed-in Google account with read-only Drive access.</p>
+            </div>
+          </article>
+          <article class="panel wide">
+            <div class="panel-head"><span>drive retrieval</span><span class="panel-meta">index + search</span></div>
+            <div class="panel-body">
+              <div class="retrieval-grid">
+                <section>
+                  <div class="row">
+                    <button id="drive-files-refresh" class="ghost" type="button">Load files</button>
+                    <button id="drive-index" type="button" disabled>Index selected</button>
+                  </div>
+                  <label for="drive-files" class="select-label">Drive files</label>
+                  <select id="drive-files" disabled>
+                    <option value="">Connect Drive and load files</option>
+                  </select>
+                  <p id="drive-index-result" class="help">Index one Google Drive file before searching.</p>
+                </section>
+                <section>
+                  <form id="drive-search-form" class="search-form">
+                    <label for="drive-search-query">Search indexed context</label>
+                    <div class="row">
+                      <input id="drive-search-query" name="query" autocomplete="off" spellcheck="false" placeholder="customer notes, roadmap, contract terms">
+                      <button id="drive-search-submit" type="submit" disabled>Search</button>
+                    </div>
+                  </form>
+                  <div id="drive-search-results" class="results-list" aria-live="polite"></div>
+                </section>
+              </div>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><span>agent access</span><span class="panel-meta">mcp</span></div>
+            <div class="panel-body">
+              <p id="mcp-status">Checking MCP setup...</p>
+              <pre id="mcp-config" class="config-block hidden"></pre>
+              <div class="row">
+                <button id="mcp-test" class="ghost" type="button">Test MCP</button>
+              </div>
+              <p id="mcp-test-result" class="help"></p>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><span>audit log</span><span class="panel-meta">proof</span></div>
+            <div class="panel-body"><p id="audit-status">Checking audit log...</p></div>
+          </article>
+        </div>
+      </section>
+      <p id="error" role="alert"></p>
+    </main>
+    <script src="/assets/app.js" type="module"></script>
+  </body>
+</html>

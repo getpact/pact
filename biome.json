@@ -10,7 +10,9 @@
       "!**/migrations",
       "!_bmad",
       "!_bmad-output",
-      "!pnpm-lock.yaml"
+      "!pnpm-lock.yaml",
+      "!apps/web/src/assets",
+      "!apps/web/src/generated-assets.ts"
     ]
   },
   "linter": {
