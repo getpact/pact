@@ -97,18 +97,19 @@ pre-commit:
 pre-push:
   parallel: false
   commands:
-    typecheck:
-      run: pnpm typecheck
-    test-db:
-      # Full CI-parity: boot postgres via docker compose, apply migrations, run all tests.
+    verify-ci:
+      # Full CI parity: clear turbo cache + dist + tsbuildinfo, frozen install,
+      # typecheck, lint, boot postgres via docker compose, apply migrations, run all tests.
+      # Catches the test-harness#build class of drift where local cached state masked a
+      # fresh-checkout failure that CI exposed.
       # Slow. Skip with PACT_SKIP_PREPUSH_TESTS=1 for quick fixes; CI is still authoritative.
       run: |
         if [ "${PACT_SKIP_PREPUSH_TESTS:-0}" = "1" ]; then
-          echo "[pre-push] PACT_SKIP_PREPUSH_TESTS=1 set; skipping test:db. CI must still pass."
+          echo "[pre-push] PACT_SKIP_PREPUSH_TESTS=1 set; skipping verify:ci. CI must still pass."
           exit 0
         fi
         if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-          echo "[pre-push] docker unavailable; skipping test:db. Set PACT_SKIP_PREPUSH_TESTS=1 to silence."
+          echo "[pre-push] docker unavailable; skipping verify:ci. Set PACT_SKIP_PREPUSH_TESTS=1 to silence."
           exit 0
         fi
-        pnpm test:db
+        pnpm verify:ci
