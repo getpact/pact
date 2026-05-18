@@ -1,5 +1,6 @@
 import { createClient } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
+import { issuerApp as issuer } from "@getpact/test-harness";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -8,7 +9,6 @@ import {
 } from "@getpact/test-helpers";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-import issuer from "../../../../apps/issuer/src/index.js";
 import app from "../index.js";
 import { type AuditQueryRow, formatCursor, parseCursor } from "../routes/audit.js";
 

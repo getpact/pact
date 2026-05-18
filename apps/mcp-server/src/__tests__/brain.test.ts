@@ -7,6 +7,7 @@ import {
   workspaceSigningKeys,
   workspaces,
 } from "@getpact/db/schema";
+import { issuerApp as issuer } from "@getpact/test-harness";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -15,7 +16,6 @@ import {
 } from "@getpact/test-helpers";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import issuer from "../../../../apps/issuer/src/index.js";
 import { handleMcp } from "../handler.js";
 
 const url = process.env.DATABASE_URL;

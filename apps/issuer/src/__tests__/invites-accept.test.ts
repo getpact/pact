@@ -3,10 +3,10 @@ import type { AddressInfo } from "node:net";
 import { exportAesKey, generateAesKey, toBase64 } from "@getpact/crypto";
 import { createClient } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
+import { adminApiApp as adminApp } from "@getpact/test-harness";
 import { eq } from "drizzle-orm";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import adminApp from "../../../../apps/admin-api/src/index.js";
 import issuerApp from "../index.js";
 
 const url = process.env.DATABASE_URL;

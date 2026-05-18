@@ -2,6 +2,7 @@ import { fromBase64, issueJwt } from "@getpact/crypto";
 import { createClient, type DbClient, withWorkspace } from "@getpact/db";
 import { auditEvents, policies, revokedJtis, workspaces } from "@getpact/db/schema";
 import { loadActiveSigningKey } from "@getpact/keystore";
+import { issuerApp as issuer } from "@getpact/test-harness";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -10,7 +11,6 @@ import {
 } from "@getpact/test-helpers";
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import issuer from "../../../../apps/issuer/src/index.js";
 import type { KVNamespace } from "../cache.js";
 import app, { allowedAudiences } from "../index.js";
 

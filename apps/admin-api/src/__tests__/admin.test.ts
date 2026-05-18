@@ -12,6 +12,7 @@ import {
   workspaceOauthConnections,
   workspaces,
 } from "@getpact/db/schema";
+import { issuerApp as issuer } from "@getpact/test-harness";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -21,7 +22,6 @@ import {
 import { storeSecret } from "@getpact/vault";
 import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import issuer from "../../../../apps/issuer/src/index.js";
 import type { KVNamespace } from "../cache.js";
 import app, { validateDriveScopes } from "../index.js";
 

@@ -10,6 +10,7 @@ import {
   workspaceOauthConnections,
   workspaces,
 } from "@getpact/db/schema";
+import { issuerApp as issuer, verifierApp as verifier } from "@getpact/test-harness";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -19,8 +20,6 @@ import {
 import { loadSecretString, storeSecret } from "@getpact/vault";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import issuer from "../../../../apps/issuer/src/index.js";
-import verifier from "../../../../apps/verifier/src/index.js";
 import { isSdJwtCompact } from "../auth.js";
 import { handleMcp } from "../handler.js";
 import app from "../index.js";

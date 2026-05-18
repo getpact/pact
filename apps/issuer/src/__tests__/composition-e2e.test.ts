@@ -13,6 +13,11 @@ import {
 } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
 import {
+  adminApiApp as adminApi,
+  mcpServerApp as mcpServer,
+  verifierApp as verifier,
+} from "@getpact/test-harness";
+import {
   buildTestEnv,
   createTestWorkspace,
   issueTestToken,
@@ -20,9 +25,6 @@ import {
 } from "@getpact/test-helpers";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import adminApi from "../../../../apps/admin-api/src/index.js";
-import mcpServer from "../../../../apps/mcp-server/src/index.js";
-import verifier from "../../../../apps/verifier/src/index.js";
 import issuer from "../index.js";
 
 const url = process.env.DATABASE_URL;

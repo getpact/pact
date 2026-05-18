@@ -1,6 +1,7 @@
 import { type Ed25519PublicJwk, generateEd25519Keypair } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { agentCapabilityGrants, auditEvents, users, workspaces } from "@getpact/db/schema";
+import { issuerApp as issuer } from "@getpact/test-harness";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -9,7 +10,6 @@ import {
 } from "@getpact/test-helpers";
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-import issuer from "../../../../apps/issuer/src/index.js";
 import app from "../index.js";
 
 const url = process.env.DATABASE_URL;

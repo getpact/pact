@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",
+    "@getpact/test-harness": "workspace:*",
     "@getpact/test-helpers": "workspace:*",
     "wrangler": "^4.0.0"
   }

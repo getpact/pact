@@ -1,10 +1,10 @@
 import { fromBase64 } from "@getpact/crypto";
 import { createClient } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
+import { issuerApp as issuer } from "@getpact/test-harness";
 import { buildTestEnv, createTestWorkspace, uniqueSlug } from "@getpact/test-helpers";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import issuer from "../../../../apps/issuer/src/index.js";
 import { handleMcp } from "../handler.js";
 
 const url = process.env.DATABASE_URL;

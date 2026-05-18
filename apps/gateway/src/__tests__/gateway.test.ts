@@ -1,6 +1,7 @@
 import { fromBase64 } from "@getpact/crypto";
 import { createClient, schema, withWorkspace } from "@getpact/db";
 import { auditEvents, workspaces } from "@getpact/db/schema";
+import { issuerApp as issuer } from "@getpact/test-harness";
 import {
   buildTestEnv,
   createTestWorkspace,
@@ -10,7 +11,6 @@ import {
 import { storeSecret } from "@getpact/vault";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import issuer from "../../../../apps/issuer/src/index.js";
 import app, {
   buildGatewayTarget,
   canonicalGatewaySearch,

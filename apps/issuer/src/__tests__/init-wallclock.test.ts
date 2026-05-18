@@ -2,10 +2,10 @@ import { verifyJwt } from "@getpact/crypto";
 import { createClient, withWorkspace } from "@getpact/db";
 import { workspaces } from "@getpact/db/schema";
 import { listVerifyingKeys } from "@getpact/keystore";
+import { adminApiApp as adminApi } from "@getpact/test-harness";
 import { buildTestEnv, createTestWorkspace, uniqueSlug } from "@getpact/test-helpers";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-import adminApi from "../../../../apps/admin-api/src/index.js";
 import issuer from "../index.js";
 
 const url = process.env.DATABASE_URL;
