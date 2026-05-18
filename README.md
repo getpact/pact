@@ -71,7 +71,7 @@ bash scripts/smoke-demo.sh
 
 The script is idempotent. It kills orphaned listeners from prior runs, backs up an existing `~/.pact/holder.key` while it runs, and restores it on exit. Pass `PACT_SMOKE_TEARDOWN_DB=1` to also `docker compose down` on exit. Pass `PACT_SMOKE_KEEP=1` to leave Postgres running.
 
-The script writes its own `~/.pact/holder.key`, appends `PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE=true` to `apps/issuer/.dev.vars` if missing (gitignored file), and runs the issuer Worker with `ENVIRONMENT=test` so the CLI can reach `/v1/dev/issue` without the dev-issue-secret header.
+The script writes its own `~/.pact/holder.key` and appends `PACT_ALLOW_UNAUTHED_WORKSPACE_CREATE=true` to `apps/issuer/.dev.vars` if missing (gitignored file). The issuer runs with `ENVIRONMENT=development` from `.dev.vars`, which lets the CLI reach `/v1/dev/issue` without the dev-issue-secret header.
 
 This script catches what `pnpm test:db` cannot: real `wrangler dev` boot, TCP port binding across four workers, `.dev.vars` loading, service-to-service URLs over loopback, the `pact mcp bridge` holder-key roundtrip, and end-to-end SD-JWT presentation through real HTTP.
 

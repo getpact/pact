@@ -289,10 +289,9 @@ phase_end "patch-dev-vars"
 # (port binding, env layering, .dev.vars loading) that a tsx shim would hide.
 
 phase_begin "boot-workers"
-# issuer runs with ENVIRONMENT=test so /v1/dev/issue accepts requests
-# without the DEV_ISSUE_SECRET header (the CLI does not pass it). The rest
-# of the workers stay in their .dev.vars ENVIRONMENT=development.
-start_worker issuer     "$ISSUER_PORT"   9229 --var ENVIRONMENT:test
+# All workers run with their .dev.vars ENVIRONMENT=development. /v1/dev/issue
+# accepts requests without the DEV_ISSUE_SECRET header in development.
+start_worker issuer     "$ISSUER_PORT"   9229
 start_worker admin-api  "$ADMIN_PORT"    9230
 start_worker verifier   "$VERIFIER_PORT" 9231
 start_worker mcp-server "$MCP_PORT"      9232
