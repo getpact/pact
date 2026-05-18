@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit",
-    "dev": "wrangler dev --env local --local-protocol=http --ip 127.0.0.1 --port 19147",
-    "deploy": "wrangler deploy",
-    "test": "vitest run --passWithNoTests --silent",
-    "typecheck": "tsc --noEmit"
+    "build": "pnpm run build:assets && tsc --noEmit",
+    "build:assets": "node scripts/build-assets.mjs",
+    "dev": "pnpm run build:assets && wrangler dev --env local --local-protocol=http --ip 127.0.0.1 --port 19147",
+    "deploy": "pnpm run build:assets && wrangler deploy",
+    "test": "pnpm run build:assets && vitest run --passWithNoTests --silent",
+    "typecheck": "pnpm run build:assets && tsc --noEmit"
   },
   "dependencies": {
     "@getpact/core": "workspace:*",
