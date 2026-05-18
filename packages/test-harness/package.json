@@ -1,0 +1,28 @@
+{
+  "name": "@getpact/test-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests --silent",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@getpact/admin-api": "workspace:*",
+    "@getpact/issuer": "workspace:*",
+    "@getpact/mcp-server": "workspace:*",
+    "@getpact/verifier": "workspace:*"
+  },
+  "files": [
+    "src"
+  ]
+}

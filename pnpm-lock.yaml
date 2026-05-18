@@ -534,6 +534,21 @@ importers:
         specifier: ^4.6.0
         version: 4.12.18
 
+  packages/test-harness:
+    dependencies:
+      '@getpact/admin-api':
+        specifier: workspace:*
+        version: link:../../apps/admin-api
+      '@getpact/issuer':
+        specifier: workspace:*
+        version: link:../../apps/issuer
+      '@getpact/mcp-server':
+        specifier: workspace:*
+        version: link:../../apps/mcp-server
+      '@getpact/verifier':
+        specifier: workspace:*
+        version: link:../../apps/verifier
+
   packages/test-helpers:
     dependencies:
       '@getpact/crypto':
