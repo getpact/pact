@@ -12,6 +12,16 @@ GATEWAY_AUDIT_MODE = "required"
 GATEWAY_FORWARD_HEADER_ALLOWLIST = "accept,accept-encoding,accept-language,content-type,user-agent"
 UPSTREAM_HOST_ALLOWLIST = "replace-with-approved-upstream-hosts"
 
+# Named environments do not inherit top-level vars or service bindings, so local
+# dev reaches the verifier over loopback instead of the VERIFIER_SERVICE binding.
+[env.local.vars]
+ENVIRONMENT = "development"
+GATEWAY_AUDIENCE = "pact-gateway"
+GATEWAY_AUDIT_MODE = "required"
+GATEWAY_FORWARD_HEADER_ALLOWLIST = "accept,accept-encoding,accept-language,content-type,user-agent"
+UPSTREAM_HOST_ALLOWLIST = "example.com"
+VERIFIER_URL = "http://127.0.0.1:8789"
+
 [[services]]
 binding = "VERIFIER_SERVICE"
 service = "pact-verifier"
