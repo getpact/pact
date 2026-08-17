@@ -19,9 +19,30 @@ const rejectTomlValue = (path, pattern, label) => {
   if (pattern.test(text)) failures.push(`${path} must not contain ${label}`);
 };
 
+// Keys in a TOML file belong to the most recent table header. Deploy gates care
+// about the deployed top-level [vars], not the [env.<name>.vars] dev overrides
+// that `wrangler dev --env local` layers on top. Matching the raw file text
+// conflates the two.
+const tableBlock = (path, table) => {
+  const lines = [];
+  let current = null;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const header = line.match(/^\s*\[\[?([^\]]+)\]\]?\s*$/);
+    if (header) {
+      current = header[1].trim();
+      continue;
+    }
+    if (current === table) lines.push(line);
+  }
+  return lines.join("\n");
+};
+
+const rejectProductionVar = (path, pattern, label) => {
+  if (pattern.test(tableBlock(path, "vars"))) failures.push(`${path} must not contain ${label}`);
+};
+
 const tomlString = (path, key) => {
-  const text = readFileSync(path, "utf8");
-  const match = text.match(new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "m"));
+  const match = tableBlock(path, "vars").match(new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "m"));
   return match?.[1] ?? null;
 };
 
@@ -195,7 +216,7 @@ const requireVerifierBinding = (app) => {
     /\[\[services\]\][\s\S]*binding\s*=\s*"VERIFIER_SERVICE"[\s\S]*service\s*=\s*"pact-verifier"/,
     "VERIFIER_SERVICE service binding",
   );
-  rejectTomlValue(wrangler, /^VERIFIER_URL\s*=/m, "production VERIFIER_URL fallback");
+  rejectProductionVar(wrangler, /^VERIFIER_URL\s*=/m, "production VERIFIER_URL fallback");
 };
 
 if (apps.includes("gateway")) requireVerifierBinding("gateway");
