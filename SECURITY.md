@@ -33,10 +33,10 @@ What it protects: an agent invocation that has been delegated by a user, bound t
 Attack: a leaked SD-JWT replayed by a passive observer; a malicious holder reusing the same KB-JWT against multiple verifier instances.
 
 Mitigations:
-- Issuer JWT signed with the workspace JWT signing key (Ed25519). `kid` lookup via JWKS at the verifier (`apps/verifier/src/routes/capabilities.ts:300-305`).
-- KB-JWT required (`requireKbBinding: true`), `typ` must be `kb+jwt`, signed by the holder key bound through `cnf.jwk` in the issuer payload (`apps/verifier/src/routes/capabilities.ts:307-315`, `packages/verifier-sdk-node/src/verifyPactToken.ts:267-309`).
+- Issuer JWT signed with the workspace JWT signing key (Ed25519). `kid` lookup via JWKS at the verifier (`apps/verifier/src/routes/capabilities.ts:333-338`).
+- KB-JWT required (`requireKbBinding: true`), `typ` must be `kb+jwt`, signed by the holder key bound through `cnf.jwk` in the issuer payload (`apps/verifier/src/routes/capabilities.ts:342-347`, `packages/verifier-sdk-node/src/verifyPactToken.ts:267-309`).
 - `sd_hash` in the KB-JWT must equal `SHA-256` over the issuer JWS plus all selected disclosures (`packages/verifier-sdk-node/src/verifyPactToken.ts:306-309`).
-- Replay defense at the verifier: every successful KB verification inserts `(workspace_id, jti, kb_iat, sd_hash)` into `kbjwt_replay_log` (migration 0030). The primary key rejects duplicates; the verifier returns `kb_replay_detected` with HTTP 410 (`apps/verifier/src/routes/capabilities.ts:406-430`).
+- Replay defense at the verifier: every successful KB verification inserts `(workspace_id, jti, kb_iat, sd_hash)` into `kbjwt_replay_log` (migration 0030). The primary key rejects duplicates; the verifier returns `kb_replay_detected` with HTTP 410 (`apps/verifier/src/routes/capabilities.ts:439-462`).
 - SDK consumers can supply an in-memory `replayCache` for additional pre-network rejection (`packages/verifier-sdk-node/src/verifyPactToken.ts:325-331`).
 - `kb_iat` must fall within `[now - kbIatMaxAgeSeconds, now + kbIatSkewSeconds]`. Both default to 300s.
 
