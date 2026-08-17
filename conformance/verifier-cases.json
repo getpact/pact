@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "generator": "scripts/gen-verifier-fixtures.mjs",
+  "nowSeconds": 1750000000,
+  "jwksUri": "https://issuer.example/v1/workspaces/ws-conformance/.well-known/jwks.json",
+  "jwks": {
+    "keys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "kid": "conformance-issuer-1"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "allow_scope_claim_without_resource",
+      "description": "Issuer scope_claim carries only tool_name, so no resource match is required.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2giLCJzY29wZV9jbGFpbSI6eyJ0b29sX25hbWUiOiJwYWN0LmJyYWluLnNlYXJjaCJ9LCJfc2QiOltdLCJfc2RfYWxnIjoic2hhLTI1NiIsImNuZiI6eyJqd2siOnsia3R5IjoiT0tQIiwiY3J2IjoiRWQyNTUxOSIsIngiOiJvSnFsOUhwbldZQXYtVlg0M0MwcUZLWEpuU08tbF9oa0VuXzVPRFJWcFBBIn19fQ.KArSdFpsCcPoX8o7c_jPfEcEOQ0D_PRh7zc810fbsOhv8bIpfwnG1-LlS5Lu6u7HGVNV1kKt9rxt_B-XA7YSDA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiTXlFTHJBUlR2R0R1RFBqMnpoRjdFaDdlMFBGMWRPSHJ3bHBMRjk5aXo1MCJ9.DtYetXGn1Jyke4pAqrIY9gJd7Izkb5w2plXmvaGVnVWSjd73Mm0-hIJ9ixxW0ssIchHA7CEOE0YTsA5fRPMBDA",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": true,
+        "jti": "jti-conformance-0001",
+        "workspaceId": "8f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f",
+        "audience": "pact-gateway",
+        "agentId": "1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9"
+      }
+    },
+    {
+      "name": "allow_disclosed_scope_wildcard_resource",
+      "description": "Disclosed scope takes precedence and doc:* matches the requested doc.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2giLCJzY29wZV9jbGFpbSI6eyJ0b29sX25hbWUiOiJpZ25vcmVkLnRvb2wifSwiX3NkIjpbImFqN1o5YnpfOGhsZG5RQUlNYl9VYWhYdWRPWmJjVVRpVzQzZnFNODF4aDAiXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.fnvFByHjfHuL_EUV5TWWU4ScQu_Won0af_zEUtj2m8P7dY3w6VLEOHR03B3svuBjIislRVDGKLHbiQxRnMZaBw~WyJjb25mb3JtYW5jZS1zYWx0LTAxIiwic2NvcGUiLHsiZG9jIjoiZG9jOioiLCJ0b29sX25hbWUiOiJwYWN0LmJyYWluLnNlYXJjaCJ9XQ~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoicHAya2lKSWhyN1lNR25MOThtS3E4ckZydy1TbzhSRFJIV1hXbEY4aFVFQSJ9.yH3Q1y_cKsXd6p7gxKgDWfoR0rbwbeKndLDacMGWP0bMUqzaqOk_v_-vf4ATs_eBNvkUieGYGBUSEn03HhMlDg",
+      "options": {
+        "audience": "pact-gateway",
+        "toolName": "pact.brain.search",
+        "resource": {
+          "doc": "doc:abc"
+        }
+      },
+      "expect": {
+        "ok": true,
+        "jti": "jti-conformance-0001",
+        "workspaceId": "8f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f",
+        "audience": "pact-gateway",
+        "agentId": "1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9"
+      }
+    },
+    {
+      "name": "deny_expired",
+      "description": "Issuer exp is in the past relative to the reference clock.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc0OTk5OTk5OSwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.rs18MO4i-dPcCWUBs3SutfDVVdFNIXUGI_x0Ug3d8dQyr8SjX_7_Yo21lnNlSoBtu2QlgHNpkYClvMX60Nc9AA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiTHgzbWxBNTZPdFJISWREdXFBcl85SkxnN0JrNk1IZDVKUUpJT1c1blhSQSJ9.juKmpJ-TlqUf9kNQF5-rry2zQfASRoR8Ubh7j8ZKJblpiEP7yh6j-4OXuoVSqizAvFOj_ZIActJUEyJY-L6nBw",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "deny_aud_mismatch",
+      "description": "Token was issued for a different audience than the verifier expects.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1tY3AiLCJqdGkiOiJqdGktY29uZm9ybWFuY2UtMDAwMSIsInN1YiI6ImFnZW50XzFmMmUzZDRjLTViNmEtNDk3OC04Njk1LWE0YjNjMmQxZTBmOSIsImlhdCI6MTc0OTk5OTk0MCwiZXhwIjoxNzUwMDAzNjAwLCJzY29wZV9jbGFpbSI6eyJ0b29sX25hbWUiOiJwYWN0LmJyYWluLnNlYXJjaCJ9LCJfc2QiOltdLCJfc2RfYWxnIjoic2hhLTI1NiIsImNuZiI6eyJqd2siOnsia3R5IjoiT0tQIiwiY3J2IjoiRWQyNTUxOSIsIngiOiJvSnFsOUhwbldZQXYtVlg0M0MwcUZLWEpuU08tbF9oa0VuXzVPRFJWcFBBIn19fQ.KdIHlCApFccJWECqpb3n-ZWXVofEvN8BFRrREjCUuKNC3vXys5JEvQeFhTo6Jsbq6Jsf0oMCYv80xIiPOXixAQ~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtbWNwIiwibm9uY2UiOiJjb25mb3JtYW5jZS1ub25jZSIsInNkX2hhc2giOiJQNk5vQ3RiMFZCTTJZVUVpNm4wYW8tNjNNanJmd0NxRnFPUzJDc2dwYmtZIn0.yjFF17uvOF_KowZHJPXqlK5XCoFqqd2e5GbHo4CYDgr3HRkxPj8XyuCLGhrHd46uh2aCD62njfxh7fiKB_ucDQ",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "aud_mismatch"
+      }
+    },
+    {
+      "name": "deny_kb_missing",
+      "description": "Compact form carries no KB-JWT, so the holder proved nothing.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.ydvwCrRc0i0K1L7tbBPNpJZCcrFrU7Wt35vb1yrTmE_oQ_PHsbVZd3yJ_9iEq8wWi2rstFP1wsSbRs7DqqUJBA~",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "kb_missing"
+      }
+    },
+    {
+      "name": "deny_kb_binding_invalid_sd_hash",
+      "description": "KB-JWT was minted over a different SD-JWT, so sd_hash does not match.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.ydvwCrRc0i0K1L7tbBPNpJZCcrFrU7Wt35vb1yrTmE_oQ_PHsbVZd3yJ_9iEq8wWi2rstFP1wsSbRs7DqqUJBA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoieDk4bHVCYTJ5Z05jWUZqYVdxOGFNMjN5RTJUT0tjc3VqUUI2ZXdZelduNCJ9.0Z4tSS0RQ8CQt0r3jzX-ISC74JbDB_IHgMTvf3OCjKOzmXVjHj_Rua8fLXwEBT18KqM-c2cce2lzi_KkvOnrCQ",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "kb_binding_invalid"
+      }
+    },
+    {
+      "name": "deny_kb_signature_invalid",
+      "description": "KB-JWT is signed by a key other than the one bound through cnf.jwk.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.ydvwCrRc0i0K1L7tbBPNpJZCcrFrU7Wt35vb1yrTmE_oQ_PHsbVZd3yJ_9iEq8wWi2rstFP1wsSbRs7DqqUJBA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiS3VfZXpULXg5YVpFdmtXeXFjUlZvNDA3QnhVejc5OW1GZmZEak9WQ1p3QSJ9.8Wk5WCG03B-Gm0XCQ-ZMXkSNtEJIHvy3CisGalOK1GMvHQPu4iK00qx8RmR9SY4ak7eoJgw4-r-1wcZN_97DBw",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "kb_signature_invalid"
+      }
+    },
+    {
+      "name": "deny_kb_iat_future",
+      "description": "kb_iat is further ahead than the permitted skew.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.ydvwCrRc0i0K1L7tbBPNpJZCcrFrU7Wt35vb1yrTmE_oQ_PHsbVZd3yJ_9iEq8wWi2rstFP1wsSbRs7DqqUJBA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NTAwMDQwMDAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiS3VfZXpULXg5YVpFdmtXeXFjUlZvNDA3QnhVejc5OW1GZmZEak9WQ1p3QSJ9.9W2DsBnhM0_uQoF3j6eXsRVLqCSRZvg2pw8tkFBr_ZmTb7smpEskqaYYsONoe5i-845DUtqvOqioyF11wD2IDw",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "kb_iat_invalid"
+      }
+    },
+    {
+      "name": "deny_kb_iat_too_old",
+      "description": "kb_iat is older than the permitted max age.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.ydvwCrRc0i0K1L7tbBPNpJZCcrFrU7Wt35vb1yrTmE_oQ_PHsbVZd3yJ_9iEq8wWi2rstFP1wsSbRs7DqqUJBA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTYwMDAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiS3VfZXpULXg5YVpFdmtXeXFjUlZvNDA3QnhVejc5OW1GZmZEak9WQ1p3QSJ9.16LQ3kMxzT8o7euvrrqRmQ8PNdEtLZlDTF8Giij5obS_5OnR2GcBMatVz1OOK_LlmhSqsW67puPn2Ixu3B9KBA",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "kb_iat_invalid"
+      }
+    },
+    {
+      "name": "deny_signature_invalid",
+      "description": "First byte of the issuer signature is altered.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.AdvwCrRc0i0K1L7tbBPNpJZCcrFrU7Wt35vb1yrTmE_oQ_PHsbVZd3yJ_9iEq8wWi2rstFP1wsSbRs7DqqUJBA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiY0hiR1lKRUp0RGZUR2FxTmdtemNlQVNmcUVyYU0tc0FJWFVIQ1M0Z0VWYyJ9.30MExgKo_TJNtcli9wQwXtuJE-CPMiqGygFiJ90omaW4L3mUUEqdHZZesn09u8JoaBhbE16_91KFlRbAQUUDBw",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "signature_invalid"
+      }
+    },
+    {
+      "name": "deny_invalid_format",
+      "description": "Input is not in SD-JWT compact form.",
+      "sdJwt": "not-a-token",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "invalid_format"
+      }
+    },
+    {
+      "name": "deny_tool_mismatch",
+      "description": "Caller asks for a tool the token was not minted for.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2giLCJzY29wZV9jbGFpbSI6eyJ0b29sX25hbWUiOiJwYWN0LmJyYWluLnNlYXJjaCJ9LCJfc2QiOltdLCJfc2RfYWxnIjoic2hhLTI1NiIsImNuZiI6eyJqd2siOnsia3R5IjoiT0tQIiwiY3J2IjoiRWQyNTUxOSIsIngiOiJvSnFsOUhwbldZQXYtVlg0M0MwcUZLWEpuU08tbF9oa0VuXzVPRFJWcFBBIn19fQ.KArSdFpsCcPoX8o7c_jPfEcEOQ0D_PRh7zc810fbsOhv8bIpfwnG1-LlS5Lu6u7HGVNV1kKt9rxt_B-XA7YSDA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiTXlFTHJBUlR2R0R1RFBqMnpoRjdFaDdlMFBGMWRPSHJ3bHBMRjk5aXo1MCJ9.DtYetXGn1Jyke4pAqrIY9gJd7Izkb5w2plXmvaGVnVWSjd73Mm0-hIJ9ixxW0ssIchHA7CEOE0YTsA5fRPMBDA",
+      "options": {
+        "audience": "pact-gateway",
+        "toolName": "pact.brain.put"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "tool_mismatch"
+      }
+    },
+    {
+      "name": "deny_scope_mismatch",
+      "description": "Requested resource is outside the scope the token grants.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2giLCJzY29wZV9jbGFpbSI6eyJ0b29sX25hbWUiOiJwYWN0LmJyYWluLnNlYXJjaCIsImRvYyI6ImRvYzphYmMifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.94SPIY3VGfoGAKbZ8unSTONnHM8eadZ1pUiG39VvRUNegUIpIYtSCLGNxeL1Vbz3z5PyXpaCaMMgJpVTEWn6AQ~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiVXZycU1wVEVoNlZEbGV3N2twZzFSRWtUOFloamltdHh5V2w2Mmp2OUZKTSJ9.ezWyJDjnCdJ2rr20UZ3hhmLmUJmTH3g6SuaPrP48HYQjoJW1Px8eobuXeBBhyp9xuNKcdLVaoz1AOAqYreI7CQ",
+      "options": {
+        "audience": "pact-gateway",
+        "toolName": "pact.brain.search",
+        "resource": {
+          "doc": "doc:zzz"
+        }
+      },
+      "expect": {
+        "ok": false,
+        "reason": "scope_mismatch"
+      }
+    },
+    {
+      "name": "deny_resource_required",
+      "description": "Token scope constrains a resource but the caller supplied none.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2giLCJzY29wZV9jbGFpbSI6eyJ0b29sX25hbWUiOiJwYWN0LmJyYWluLnNlYXJjaCIsImRvYyI6ImRvYzphYmMifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.94SPIY3VGfoGAKbZ8unSTONnHM8eadZ1pUiG39VvRUNegUIpIYtSCLGNxeL1Vbz3z5PyXpaCaMMgJpVTEWn6AQ~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiVXZycU1wVEVoNlZEbGV3N2twZzFSRWtUOFloamltdHh5V2w2Mmp2OUZKTSJ9.ezWyJDjnCdJ2rr20UZ3hhmLmUJmTH3g6SuaPrP48HYQjoJW1Px8eobuXeBBhyp9xuNKcdLVaoz1AOAqYreI7CQ",
+      "options": {
+        "audience": "pact-gateway",
+        "toolName": "pact.brain.search"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "resource_required"
+      }
+    },
+    {
+      "name": "deny_kb_replay_detected",
+      "description": "Replay cache was seeded with this exact (jti, kb_iat, sd_hash).",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.ydvwCrRc0i0K1L7tbBPNpJZCcrFrU7Wt35vb1yrTmE_oQ_PHsbVZd3yJ_9iEq8wWi2rstFP1wsSbRs7DqqUJBA~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiS3VfZXpULXg5YVpFdmtXeXFjUlZvNDA3QnhVejc5OW1GZmZEak9WQ1p3QSJ9.ttHEJTn5wCdGho8f_6S5pdyuTgKfEvVlxUGXsvH5ogriltBaoimy19hz55AEokPK1La2xt2v02zjS79OhK3OAg",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "replaySeed": [
+        "jti-conformance-0001:1749999990:Ku_ezT-x9aZEvkWyqcRVo407BxUz799mFffDjOVCZwA"
+      ],
+      "expect": {
+        "ok": false,
+        "reason": "kb_replay_detected"
+      }
+    },
+    {
+      "name": "deny_jwks_unknown_kid",
+      "description": "Issuer header names a kid that is absent from the workspace JWKS.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci11bmtub3duIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwib3JnIjoiOGYxYzJkM2UtNGE1Yi00YzZkLThlOWYtMGExYjJjM2Q0ZTVmIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.YL5IqyGKgumk1EaTqh2tzI7UV5xcCrjCybywT50F1rv_1PQZzyE2mv3bYBKpgKrjBGVG4z_4373Z-I2n-RwwBQ~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiR0l0dTNfdWdBWlNqVkpRTHZkYy1aYlR0WXZzZDAweFpvbFBpVzI5ZzRCNCJ9.5UpKJFum2jVVsI0EaB75zvJsitkJGswKp8limCdjDvtjxWyXQd6rkTvoMaE1Eqo2xi7ppu2Ead3lNTF-2_ZhAA",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "jwks_fetch_failed"
+      }
+    },
+    {
+      "name": "deny_missing_org",
+      "description": "Issuer payload has no org claim, so the token binds to no workspace.",
+      "sdJwt": "eyJhbGciOiJFZERTQSIsInR5cCI6InNkK2p3dCIsImtpZCI6ImNvbmZvcm1hbmNlLWlzc3Vlci0xIn0.eyJpc3MiOiJodHRwczovL2lzc3Vlci5leGFtcGxlIiwiYXVkIjoicGFjdC1nYXRld2F5IiwianRpIjoianRpLWNvbmZvcm1hbmNlLTAwMDEiLCJzdWIiOiJhZ2VudF8xZjJlM2Q0Yy01YjZhLTQ5NzgtODY5NS1hNGIzYzJkMWUwZjkiLCJpYXQiOjE3NDk5OTk5NDAsImV4cCI6MTc1MDAwMzYwMCwic2NvcGVfY2xhaW0iOnsidG9vbF9uYW1lIjoicGFjdC5icmFpbi5zZWFyY2gifSwiX3NkIjpbXSwiX3NkX2FsZyI6InNoYS0yNTYiLCJjbmYiOnsiandrIjp7Imt0eSI6Ik9LUCIsImNydiI6IkVkMjU1MTkiLCJ4Ijoib0pxbDlIcG5XWUF2LVZYNDNDMHFGS1hKblNPLWxfaGtFbl81T0RSVnBQQSJ9fX0.qX-IoiXi0RbwwuzhDSjWpFobIEvepYK2U4u_a4NUDDZ7R7mJJaO3a2EzN8UsfsEMhuhw4SQSNA4BtuMpWsNrCg~eyJhbGciOiJFZERTQSIsInR5cCI6ImtiK2p3dCJ9.eyJpYXQiOjE3NDk5OTk5OTAsImF1ZCI6InBhY3QtZ2F0ZXdheSIsIm5vbmNlIjoiY29uZm9ybWFuY2Utbm9uY2UiLCJzZF9oYXNoIjoiZ3dYeFpsM2pWeWpDV0d6NkdGRTVMVC1uQmJTYTJyb2FlWi1GVE56bmF4NCJ9.epdSqctjEcH2Yqd2UBYzE9CAFzFLQyjk69PrXVd6ZX8fxgyoI7sU0vjKU64GVKWqHjnwRIL7DYrxR1BXMzmPBA",
+      "options": {
+        "audience": "pact-gateway"
+      },
+      "expect": {
+        "ok": false,
+        "reason": "invalid_format"
+      }
+    }
+  ]
+}

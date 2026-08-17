@@ -37,6 +37,10 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:db
       - run: pnpm build
+      # The committed corpus must still be what the current SD-JWT encoder mints,
+      # or both conformance suites are asserting against a stale contract.
+      - run: node scripts/gen-verifier-fixtures.mjs
+      - run: git diff --exit-code conformance/verifier-cases.json
 
   # getpact-verifier is not a pnpm workspace member, so turbo never sees it.
   # Without this job the published Python verifier ships untested.
