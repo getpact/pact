@@ -8,6 +8,9 @@ description = "ignore test fixtures and committed example secrets"
 paths = [
     '''__tests__/.*\.test\.ts$''',
     '''packages/test-helpers/.*''',
+    # Conformance vectors: SD-JWTs signed by the fixed seeds in
+    # scripts/gen-verifier-fixtures.mjs. No private key material is in the file.
+    '''conformance/verifier-cases\.json$''',
 ]
 regexes = [
     '''0123456789abcdef0123456789abcde[ef]''',
