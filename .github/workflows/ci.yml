@@ -33,9 +33,26 @@ jobs:
           exit 1
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm check:openapi
       - run: pnpm typecheck
       - run: pnpm test:db
       - run: pnpm build
+
+  # getpact-verifier is not a pnpm workspace member, so turbo never sees it.
+  # Without this job the published Python verifier ships untested.
+  python-sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: install getpact-verifier with test extras
+        run: pip install "./packages/verifier-sdk-python[test]"
+      - run: python -m pytest packages/verifier-sdk-python/tests -q
 
   secret-scan:
     runs-on: ubuntu-latest
