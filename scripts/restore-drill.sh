@@ -12,6 +12,8 @@
 #   PACT_DRILL_WORKSPACE_ID    Workspace id used for the audit chain smoke check
 #
 # Optional env:
+#   R2_DUMP_KEY                Exact object key to restore, relative to the bucket.
+#                              Required until wrangler can list R2 objects; see below.
 #   DRILL_PG_IMAGE             Postgres image to run (default postgres:16)
 #   DRILL_PG_PORT              Host port to bind (default 55433)
 #   DRILL_KEEP_CONTAINER       1 to leave the container running after exit
@@ -100,20 +102,30 @@ fi
 
 export RESTORE_DATABASE_URL="postgres://pact:pact@127.0.0.1:${DRILL_PG_PORT}/pact"
 
-echo "[drill] locating most recent dump under r2://${R2_BUCKET}/${R2_DUMP_PREFIX}"
-listing="$(wrangler r2 object get "$R2_BUCKET" --prefix "$R2_DUMP_PREFIX" --list 2>/dev/null || true)"
-if [ -z "$listing" ]; then
-  structured_error 2 r2_list "no objects found under ${R2_DUMP_PREFIX}"
-  exit 2
-fi
-key="$(printf '%s\n' "$listing" | awk '{print $1}' | sort | tail -n 1)"
+# wrangler has no object listing command: `r2 object get` takes a single
+# {bucket}/{key} positional and neither --prefix nor --list exists
+# (cloudflare/workers-sdk#13008). Discovering the newest dump therefore needs an
+# S3-capable client and R2 access keys, which are separate credentials from
+# CLOUDFLARE_API_TOKEN. Until the operator wires those up, the key is supplied
+# explicitly so the rest of the drill is exercised for real.
+key="${R2_DUMP_KEY:-}"
 if [ -z "$key" ]; then
-  structured_error 2 r2_list "could not parse key from listing"
+  structured_error 2 r2_list "set R2_DUMP_KEY to the dump under ${R2_DUMP_PREFIX}; wrangler cannot list R2 objects"
   exit 2
 fi
+case "$key" in
+  "$R2_DUMP_PREFIX"*) ;;
+  *)
+    structured_error 2 r2_list "R2_DUMP_KEY ${key} is not under ${R2_DUMP_PREFIX}"
+    exit 2
+    ;;
+esac
 
 echo "[drill] fetching $key"
-if ! wrangler r2 object get "${R2_BUCKET}/${key}" --file "$DUMP_LOCAL" >/dev/null 2>&1; then
+# --remote is not optional: wrangler 4 defaults r2 object get to local .wrangler
+# persistence, so without it the drill would restore from an empty local store
+# and report success against nothing.
+if ! wrangler r2 object get "${R2_BUCKET}/${key}" --remote --file "$DUMP_LOCAL" >/dev/null 2>&1; then
   structured_error 2 r2_get "wrangler r2 get failed for $key"
   exit 2
 fi

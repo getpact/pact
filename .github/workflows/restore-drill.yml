@@ -18,6 +18,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_READ_TOKEN }}
       R2_BUCKET: pact-backups
       R2_DUMP_PREFIX: postgres/
+      # wrangler cannot list R2 objects, so the drill needs the exact key.
+      R2_DUMP_KEY: ${{ vars.R2_DUMP_KEY }}
       PACT_DRILL_WORKSPACE_ID: ${{ secrets.PACT_DRILL_WORKSPACE_ID }}
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +33,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client
       - name: install wrangler
-        run: npm install -g wrangler@3
+        # Track the major the workspace pins. r2 object get defaults differ
+        # across majors, so the drill is written against this one.
+        run: npm install -g wrangler@4
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter "@getpact/db..." build
       - run: pnpm --filter "@getpact/cli..." build
@@ -51,7 +55,7 @@ jobs:
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               "",
               "First two scheduled runs are notify only. Investigate the linked logs and update",
-              "docs/runbook/backup-restore.md if any assumption changed.",
+              "the assumptions documented in the scripts/restore-drill.sh header if any changed.",
             ].join("\n");
             await github.rest.issues.create({
               owner: context.repo.owner,
