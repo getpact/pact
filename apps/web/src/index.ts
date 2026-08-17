@@ -1334,7 +1334,11 @@ app.post("/v1/drive/files", async (c) => {
         .filter((file) => isSafeDriveFileId(file.id))
     : [];
 
-  return c.json({ files });
+  // The route accepts a pageToken, so it has to hand one back or the caller can
+  // never reach page two.
+  const nextPageToken = stringValue(parsed.value.nextPageToken, 500);
+
+  return c.json(nextPageToken ? { files, nextPageToken } : { files });
 });
 
 app.post("/v1/drive/index", async (c) => {

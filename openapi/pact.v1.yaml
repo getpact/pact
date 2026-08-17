@@ -552,6 +552,10 @@ paths:
                 type: object
                 required: [files]
                 properties:
+                  nextPageToken:
+                    type: string
+                    maxLength: 500
+                    description: Absent on the last page. Pass it back as pageToken for the next one.
                   files:
                     type: array
                     items:

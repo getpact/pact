@@ -946,6 +946,61 @@ describe("web dashboard auth", () => {
     });
   });
 
+  it("returns the Drive nextPageToken so a caller can request page two", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(await new Request(input, init).json()).toEqual({
+          jsonrpc: "2.0",
+          id: "drive-files",
+          method: "tools/call",
+          params: {
+            name: "pact.drive.files.list",
+            arguments: { pageSize: 10, pageToken: "page-1" },
+          },
+        });
+        return Response.json({
+          jsonrpc: "2.0",
+          id: "drive-files",
+          result: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  files: [{ id: "doc_2", name: "Second Page" }],
+                  nextPageToken: "page-2",
+                }),
+              },
+            ],
+          },
+        });
+      }),
+    );
+    const res = await app.request(
+      "/v1/drive/files",
+      {
+        method: "POST",
+        headers: {
+          origin: "https://app.test",
+          "content-type": "application/json",
+          "x-pact-csrf": "csrf-1",
+          cookie: [
+            "__Host-pact-mcp-access=mcp-token",
+            `__Host-pact-workspace=${workspaceId}`,
+            "__Host-pact-csrf=csrf-1",
+          ].join(";"),
+        },
+        body: JSON.stringify({ pageSize: 10, pageToken: "page-1" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      files: [{ id: "doc_2", name: "Second Page" }],
+      nextPageToken: "page-2",
+    });
+  });
+
   it("requires CSRF before Drive retrieval routes call MCP", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
