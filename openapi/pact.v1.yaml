@@ -513,6 +513,215 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  /v1/drive/files:
+    post:
+      tags: [dashboard]
+      summary: List Google Drive files
+      description: Same-origin BFF endpoint. Proxies `pact.drive.files.list` over the HttpOnly MCP token cookie and returns Drive metadata only.
+      security:
+        - dashboardSession: []
+          csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pageToken:
+                  type: string
+                  maxLength: 500
+                pageSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                  default: 10
+                  description: Values outside the range are clamped, not rejected.
+      responses:
+        "200":
+          description: Drive file metadata returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files]
+                properties:
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          pattern: "^[A-Za-z0-9_-]{1,256}$"
+                        name:
+                          type: string
+                        mimeType:
+                          type: string
+                        modifiedTime:
+                          type: string
+                        size:
+                          type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/drive/index:
+    post:
+      tags: [dashboard]
+      summary: Index a Google Drive file into the workspace brain
+      description: Same-origin BFF endpoint. Proxies `pact.drive.file.index`. Extracted text is stored as plaintext chunks; see the Drive retrieval note in SECURITY.md.
+      security:
+        - dashboardSession: []
+          csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileId]
+              properties:
+                fileId:
+                  type: string
+                  pattern: "^[A-Za-z0-9_-]{1,256}$"
+                fileName:
+                  type: string
+                  maxLength: 300
+                modifiedTime:
+                  type: string
+                  maxLength: 80
+      responses:
+        "200":
+          description: File indexed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fileId, chunks, indexedChars, truncated]
+                properties:
+                  fileId:
+                    type: string
+                  fileName:
+                    type: string
+                    nullable: true
+                  chunks:
+                    type: integer
+                  indexedChars:
+                    type: integer
+                  truncated:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/drive/search:
+    post:
+      tags: [dashboard]
+      summary: Search indexed Google Drive chunks
+      description: Same-origin BFF endpoint. Proxies `pact.drive.search`. Each hit is revalidated against Drive before snippets are returned.
+      security:
+        - dashboardSession: []
+          csrfHeader: []
+      parameters:
+        - in: header
+          name: x-pact-csrf
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  maxLength: 200
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                  default: 5
+                  description: Values outside the range are clamped, not rejected.
+      responses:
+        "200":
+          description: Search hits returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [query, results]
+                properties:
+                  query:
+                    type: string
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [snippet]
+                      properties:
+                        fileId:
+                          type: string
+                          pattern: "^[A-Za-z0-9_-]{1,256}$"
+                        fileName:
+                          type: string
+                        mimeType:
+                          type: string
+                        chunkIndex:
+                          type: integer
+                          nullable: true
+                        snippet:
+                          type: string
+                          maxLength: 700
+                        indexedAt:
+                          type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
   /v1/workspaces/{workspaceId}/connections/google-drive:
     get:
       tags: [admin]
@@ -684,6 +893,28 @@ paths:
               schema:
                 type: string
               description: Public cache directive for workspace audit signing keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Jwks"
+        default:
+          $ref: "#/components/responses/Error"
+  /v1/workspaces/{workspaceId}/.well-known/provenance-jwks.json:
+    get:
+      tags: [issuer]
+      summary: Workspace provenance JWKS
+      description: Verification keys for the provenance signatures returned on pact.brain.search hits.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/workspaceId"
+      responses:
+        "200":
+          description: JWKS document.
+          headers:
+            cache-control:
+              schema:
+                type: string
+              description: Public cache directive for workspace provenance signing keys.
           content:
             application/json:
               schema:
