@@ -297,7 +297,9 @@ run("agents capability mint", () => {
       }
     }
     expect(limitedStatus).toBe(429);
-  });
+    // 105 sequential mints, each an Ed25519 signature plus a database round
+    // trip, land within a few hundred ms of the 5s default and flake with it.
+  }, 30_000);
 
   it("returns 400 when cnf_jwk is missing", async () => {
     const { env, created, token } = await setup();
