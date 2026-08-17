@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { exit } from "node:process";
 
-const path = "docs/openapi/pact.v1.yaml";
+const path = "openapi/pact.v1.yaml";
 const spec = readFileSync(path, "utf8");
 const failures = [];
 const methods = new Set(["get", "post", "put", "delete", "patch"]);
