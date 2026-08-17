@@ -134,9 +134,14 @@ const add = (c) => cases.push(c);
 }
 
 // 2. Disclosed scope wins over the issuer scope_claim, wildcard resource match.
+// The issuer scope_claim names a document the request does not ask for, so this
+// case only passes if the disclosed scope is the one that gets enforced.
 {
   const sd = await mintSdJwt({
-    claims: baseClaims({ tool_name: TOOL_NAME, scope_claim: { tool_name: "ignored.tool" } }),
+    claims: baseClaims({
+      tool_name: TOOL_NAME,
+      scope_claim: { tool_name: TOOL_NAME, doc: "doc:not-this-one" },
+    }),
     disclosures: [
       { name: "scope", value: { tool_name: TOOL_NAME, doc: "doc:*" }, salt: "conformance-salt-01" },
     ],
