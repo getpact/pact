@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   issues: write
 
@@ -23,6 +24,8 @@ jobs:
       PACT_DRILL_WORKSPACE_ID: ${{ secrets.PACT_DRILL_WORKSPACE_ID }}
     steps:
       - uses: actions/checkout@v4
+      - name: test restore preflight without credentials
+        run: python3 scripts/test-restore-drill.py
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
