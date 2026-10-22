@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restore drill. Pulls the most recent Postgres dump from R2, replays it into an
+# Restore drill. Pulls an explicitly selected Postgres dump from R2 into an
 # ephemeral Docker Postgres, applies pending migrations, and runs smoke checks
 # against the restored instance. Intended for the weekly GitHub Actions cron and
 # for ad hoc verification from an operator workstation.
@@ -10,10 +10,9 @@
 #   CLOUDFLARE_ACCOUNT_ID      Cloudflare account that owns the bucket
 #   CLOUDFLARE_API_TOKEN       Token with R2 read access
 #   PACT_DRILL_WORKSPACE_ID    Workspace id used for the audit chain smoke check
+#   R2_DUMP_KEY                Exact object key, including postgres/ (no bucket name).
 #
 # Optional env:
-#   R2_DUMP_KEY                Exact object key to restore, relative to the bucket.
-#                              Required until wrangler can list R2 objects; see below.
 #   DRILL_PG_IMAGE             Postgres image to run (default postgres:16)
 #   DRILL_PG_PORT              Host port to bind (default 55433)
 #   DRILL_KEEP_CONTAINER       1 to leave the container running after exit
@@ -72,12 +71,27 @@ require_cmd gunzip
 require_cmd wrangler
 require_cmd pnpm
 
-for var in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN PACT_DRILL_WORKSPACE_ID; do
+for var in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN PACT_DRILL_WORKSPACE_ID R2_DUMP_KEY; do
   if [ -z "${!var:-}" ]; then
     structured_error 1 preflight "missing env: $var"
     exit 1
   fi
 done
+
+# wrangler has no object listing command: `r2 object get` takes a single
+# {bucket}/{key} positional and neither --prefix nor --list exists
+# (cloudflare/workers-sdk#13008). Discovering the newest dump therefore needs an
+# S3-capable client and R2 access keys, which are separate credentials from
+# CLOUDFLARE_API_TOKEN. Until the operator wires those up, the key is supplied
+# explicitly so the rest of the drill is exercised for real.
+key="${R2_DUMP_KEY:-}"
+case "$key" in
+  "$R2_DUMP_PREFIX"*) ;;
+  *)
+    structured_error 2 r2_list "R2_DUMP_KEY ${key} is not under ${R2_DUMP_PREFIX}"
+    exit 2
+    ;;
+esac
 
 echo "[drill] starting ephemeral postgres ($DRILL_PG_IMAGE on $DRILL_PG_PORT)"
 docker run -d --name "$CONTAINER" \
@@ -101,25 +115,6 @@ if [ "$ready" != "true" ]; then
 fi
 
 export RESTORE_DATABASE_URL="postgres://pact:pact@127.0.0.1:${DRILL_PG_PORT}/pact"
-
-# wrangler has no object listing command: `r2 object get` takes a single
-# {bucket}/{key} positional and neither --prefix nor --list exists
-# (cloudflare/workers-sdk#13008). Discovering the newest dump therefore needs an
-# S3-capable client and R2 access keys, which are separate credentials from
-# CLOUDFLARE_API_TOKEN. Until the operator wires those up, the key is supplied
-# explicitly so the rest of the drill is exercised for real.
-key="${R2_DUMP_KEY:-}"
-if [ -z "$key" ]; then
-  structured_error 2 r2_list "set R2_DUMP_KEY to the dump under ${R2_DUMP_PREFIX}; wrangler cannot list R2 objects"
-  exit 2
-fi
-case "$key" in
-  "$R2_DUMP_PREFIX"*) ;;
-  *)
-    structured_error 2 r2_list "R2_DUMP_KEY ${key} is not under ${R2_DUMP_PREFIX}"
-    exit 2
-    ;;
-esac
 
 echo "[drill] fetching $key"
 # --remote is not optional: wrangler 4 defaults r2 object get to local .wrangler
